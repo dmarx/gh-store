@@ -9,6 +9,9 @@ from omegaconf import DictConfig
 from ..core.types import StoredObject, ObjectMeta, Json
 from ..core.exceptions import ObjectNotFound
 
+from time import sleep
+from github.GithubException import RateLimitExceededException
+
 class IssueHandler:
     """Handles GitHub Issue operations for stored objects"""
     
@@ -42,12 +45,28 @@ class IssueHandler:
         
         return StoredObject(meta=meta, data=data)
 
+    def _with_retry(self, func, *args, **kwargs):
+        """Execute a function with retries on rate limit"""
+        max_attempts = self.config.store.retries.max_attempts
+        backoff = self.config.store.retries.backoff_factor
+        
+        for attempt in range(max_attempts):
+            try:
+                return func(*args, **kwargs)
+            except RateLimitExceededException:
+                if attempt == max_attempts - 1:
+                    raise
+                sleep(backoff ** attempt)
+        
+        raise RuntimeError("Should not reach here")
+
     def get_object(self, object_id: str) -> StoredObject:
         """Retrieve an object by its ID"""
         logger.info(f"Retrieving object: {object_id}")
         
         # Query for issue with matching labels
-        issues = list(self.repo.get_issues(
+        issues = list(self._with_retry(
+            self.repo.get_issues,
             labels=[self.base_label, object_id],
             state="closed"
         ))
