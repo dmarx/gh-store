@@ -1,0 +1,5 @@
+PyGithub>=2.1.1
+fire>=0.5.0
+loguru>=0.7.2
+omegaconf>=2.3.0
+pyyaml>=6.0.1
