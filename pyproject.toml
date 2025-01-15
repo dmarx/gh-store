@@ -1,5 +1,5 @@
 [project]
-name = "github-store"
+name = "gh-store"
 version = "0.1.0"
 description = "A lightweight data store using GitHub Issues as a backend"
 authors = [
