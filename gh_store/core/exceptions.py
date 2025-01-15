@@ -1,4 +1,4 @@
-# github_store/core/exceptions.py
+# gh_store/core/exceptions.py
 
 class GitHubStoreError(Exception):
     """Base exception for GitHub store errors"""
