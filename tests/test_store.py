@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from github import Github, Repository, Issue, IssueComment
+from github.GithubException import RateLimitExceededException
 from gh_store.core.store import GitHubStore
 from gh_store.core.types import StoredObject, ObjectMeta, Json, Update
 from gh_store.core.exceptions import ObjectNotFound, InvalidUpdate
@@ -38,6 +39,38 @@ def sample_data() -> Json:
     }
 
 class TestGitHubStore:
+    def test_deep_update(self, store, mock_repo):
+        # Setup mock
+        issue = Mock(spec=Issue.Issue)
+        issue.number = 1
+        issue.body = json.dumps({
+            "user": {
+                "profile": {
+                    "name": "Alice",
+                    "settings": {"theme": "dark"}
+                },
+                "score": 10
+            }
+        })
+        comment = Mock(spec=IssueComment.IssueComment)
+        mock_repo.get_issues.return_value = [issue]
+        issue.create_comment.return_value = comment
+
+        # Test deep update
+        update_data = {
+            "user": {
+                "profile": {
+                    "settings": {"theme": "light"}
+                },
+                "score": 15
+            }
+        }
+        obj = store.update("test-obj", update_data)
+
+        # Verify deep merge
+        assert obj.data["user"]["profile"]["name"] == "Alice"  # Preserved
+        assert obj.data["user"]["profile"]["settings"]["theme"] == "light"  # Updated
+        assert obj.data["user"]["score"] == 15  # Updated
     def test_create_object(self, store, mock_repo, sample_data):
         # Setup mock
         issue = Mock(spec=Issue.Issue)
@@ -147,3 +180,30 @@ class TestGitHubStore:
         # Test
         with pytest.raises(InvalidUpdate):
             store.process_updates(1)
+            
+    def test_rate_limit_handling(self, store, mock_repo):
+        # Setup mock to simulate rate limit
+        mock_repo.get_issues.side_effect = [
+            RateLimitExceededException(headers={}, data={"message": "API rate limit exceeded"}),
+            [Mock(spec=Issue.Issue)]  # Second attempt succeeds
+        ]
+
+        # Test
+        obj = store.get("test-obj")  # Should succeed after retry
+        
+        # Verify retry occurred
+        assert mock_repo.get_issues.call_count == 2
+
+    def test_concurrent_update_error(self, store, mock_repo):
+        # Setup mock
+        issue = Mock(spec=Issue.Issue)
+        issue.number = 1
+        issue.body = '{"name": "test"}'
+        
+        # Simulate issue already being processed
+        issue.state = "open"
+        mock_repo.get_issues.return_value = [issue]
+
+        # Test
+        with pytest.raises(ConcurrentUpdateError):
+            store.update("test-obj", {"value": 42})
