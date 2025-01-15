@@ -22,7 +22,7 @@ pip install gh-store
 Or install from source:
 
 ```bash
-git clone https://github.com/yourusername/gh-store.git
+git clone https://github.com/dmarx/gh-store.git
 cd gh-store
 pip install -e .
 ```
