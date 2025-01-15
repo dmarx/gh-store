@@ -34,6 +34,14 @@ class GitHubStore:
         return self.issue_handler.get_object(object_id)
 
     def update(self, object_id: str, changes: Json) -> StoredObject:
+        # Check if object is already being processed
+        issues = list(self.repo.get_issues(
+            labels=[self.config.store.base_label, object_id],
+            state="open"
+        ))
+        
+        if issues:
+            raise ConcurrentUpdateError(f"Object {object_id} is currently being processed")
         """Update an existing object"""
         return self.issue_handler.update_object(object_id, changes)
 
