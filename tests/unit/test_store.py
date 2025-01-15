@@ -17,9 +17,9 @@ def mock_repo():
     return repo
 
 @pytest.fixture
-def mock_github():
+def mock_github(mock_repo):
     with patch('github.Github') as mock:
-        mock.return_value.get_repo.return_value = mock_repo()
+        mock.return_value.get_repo.return_value = mock_repo
         yield mock
 
 @pytest.fixture
