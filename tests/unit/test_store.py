@@ -1,4 +1,4 @@
-# github_store/tests/test_store.py
+# github_store/tests/unit/test_store.py
 
 from datetime import datetime
 from pathlib import Path
