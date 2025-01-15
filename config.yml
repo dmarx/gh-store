@@ -1,0 +1,22 @@
+# config.yml
+
+store:
+  # Base label for all stored objects
+  base_label: "stored-object"
+  
+  # Reaction to mark processed comments
+  processed_reaction: "+1"
+  
+  # Retry settings for GitHub API calls
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+    
+  # Rate limiting
+  rate_limit:
+    max_requests_per_hour: 1000
+    
+  # Logging
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
