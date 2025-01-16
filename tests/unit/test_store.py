@@ -108,11 +108,14 @@ def test_list_updated_since(store):
     object_id = "test-123"
     uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
+    
     mock_issue = Mock()
-    mock_issue.labels = [
-        Mock(name="stored-object"),
-        Mock(name=uid_label)
-    ]
+    mock_issue.labels = [stored_label, uid_mock_label]
     mock_issue.number = 1
     mock_issue.created_at = timestamp - timedelta(minutes=30)
     mock_issue.updated_at = timestamp + timedelta(minutes=30)
@@ -133,7 +136,7 @@ def test_list_updated_since(store):
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
-    assert object_id in updated  # Check for bare object_id
+    assert object_id in updated
     assert len(updated) == 1
     assert updated[object_id] == mock_obj
 
@@ -144,11 +147,14 @@ def test_list_updated_since_no_updates(store):
     object_id = "test-123"
     uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
+    
     mock_issue = Mock()
-    mock_issue.labels = [
-        Mock(name="stored-object"),
-        Mock(name=uid_label)
-    ]
+    mock_issue.labels = [stored_label, uid_mock_label]
     mock_issue.number = 1
     mock_issue.created_at = timestamp - timedelta(minutes=30)
     mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
