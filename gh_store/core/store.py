@@ -12,6 +12,7 @@ from .types import StoredObject, Update, Json
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
 
+
 class GitHubStore:
     """Interface for storing and retrieving objects using GitHub Issues"""
     
@@ -118,15 +119,15 @@ class GitHubStore:
                 continue
                 
             try:
-                # Get object ID from labels
-                object_id = self.issue_handler._get_object_id(issue)
+                # Get object ID from labels - strip prefix to get bare ID
+                object_id = self.issue_handler.get_object_id_from_labels(issue)
                 
                 # Load object
                 obj = self.issue_handler.get_object_by_number(issue.number)
                 
                 # Double check the timestamp (since GitHub's since parameter includes issue comments)
                 if obj.meta.updated_at > timestamp:
-                    objects[object_id] = obj  # object_id is already stripped of prefix by _get_object_id
+                    objects[object_id] = obj
                 
             except ValueError as e:
                 logger.warning(f"Skipping issue #{issue.number}: {e}")
