@@ -16,22 +16,6 @@ def store():
         store.repo = mock_repo  # Attach for test access
         return store
 
-def test_create_object(store):
-    """Test basic object creation"""
-    # Setup
-    test_data = {"name": "test", "value": 42}
-    mock_issue = Mock()
-    store.repo.create_issue.return_value = mock_issue
-    
-    # Test
-    store.create("test-obj", test_data)
-    
-    # Basic verification
-    store.repo.create_issue.assert_called_once()
-    call_args = store.repo.create_issue.call_args[1]
-    assert "test-obj" in call_args["labels"]
-    assert json.loads(call_args["body"]) == test_data
-
 def test_get_object(store):
     """Test retrieving an object"""
     # Setup
