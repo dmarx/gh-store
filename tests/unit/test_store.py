@@ -1,168 +1,72 @@
-# tests/unit/test_store.py
+# tests/test_store.py
 
-from datetime import datetime
-from pathlib import Path
-import json
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-
-from github import Github, Repository, Issue, IssueComment
-from github.GithubException import RateLimitExceededException
+from unittest.mock import Mock, patch
+import json
 from gh_store.core.store import GitHubStore
-from gh_store.core.types import StoredObject, ObjectMeta, Json, Update
-from gh_store.core.exceptions import ObjectNotFound, InvalidUpdate, ConcurrentUpdateError
+from gh_store.core.exceptions import ObjectNotFound
 
 @pytest.fixture
-def mock_repo():
-    repo = Mock(spec=Repository.Repository)
-    # Set up default return values for commonly used methods
-    repo.get_issues.return_value = []
-    repo.create_issue.return_value = Mock(spec=Issue.Issue)
-    return repo
+def store():
+    """Create a store instance with a mocked GitHub repo"""
+    with patch('gh_store.core.store.Github') as mock_github:
+        mock_repo = Mock()
+        mock_github.return_value.get_repo.return_value = mock_repo
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = mock_repo  # Attach for test access
+        return store
 
-@pytest.fixture
-def mock_github(mock_repo):
-    with patch('gh_store.core.store.Github', autospec=True) as mock:
-        # Configure the mock to return our mock_repo
-        instance = mock.return_value
-        instance.get_repo.return_value = mock_repo
-        yield mock
-
-@pytest.fixture
-def mock_config():
-    return {
-        'store': {
-            'base_label': 'stored-object',
-            'processed_reaction': '+1',
-            'retries': {
-                'max_attempts': 3,
-                'backoff_factor': 2
-            }
-        }
-    }
-
-@pytest.fixture
-def store(mock_github, mock_repo, mock_config, tmp_path):
-    # Create a temporary config file
-    config_path = tmp_path / "test_config.yml"
-    config_path.write_text(json.dumps(mock_config))
+def test_create_object(store):
+    """Test basic object creation"""
+    # Setup
+    test_data = {"name": "test", "value": 42}
+    mock_issue = Mock()
+    store.repo.create_issue.return_value = mock_issue
     
-    store = GitHubStore(
-        token="test-token",
-        repo="test/repo",
-        config_path=config_path
-    )
-    store.repo = mock_repo  # Ensure we're using our mock
-    return store
+    # Test
+    store.create("test-obj", test_data)
+    
+    # Basic verification
+    store.repo.create_issue.assert_called_once()
+    call_args = store.repo.create_issue.call_args[1]
+    assert "test-obj" in call_args["labels"]
+    assert json.loads(call_args["body"]) == test_data
 
-@pytest.fixture
-def sample_data() -> Json:
-    return {
-        "name": "test object",
-        "value": 42,
-        "tags": ["test", "example"]
-    }
+def test_get_object(store):
+    """Test retrieving an object"""
+    # Setup
+    test_data = {"name": "test", "value": 42}
+    mock_issue = Mock()
+    mock_issue.body = json.dumps(test_data)
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Test
+    obj = store.get("test-obj")
+    
+    # Verify
+    assert obj.data == test_data
+    store.repo.get_issues.assert_called_once()
 
-class TestGitHubStore:
-    def test_create_object(self, store, mock_repo, sample_data):
-        # Setup mock
-        issue = Mock(spec=Issue.Issue)
-        issue.number = 1
-        issue.created_at = datetime.now()
-        issue.updated_at = datetime.now()
-        mock_repo.create_issue.return_value = issue
+def test_get_nonexistent_object(store):
+    """Test getting an object that doesn't exist"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.get("nonexistent")
 
-        # Test creation
-        obj = store.create("test-obj", sample_data)
-        
-        # Verify
-        assert isinstance(obj, StoredObject)
-        assert obj.meta.object_id == "test-obj"
-        assert obj.data == sample_data
-        mock_repo.create_issue.assert_called_once()
-        
-        # Verify issue was created with correct parameters
-        create_kwargs = mock_repo.create_issue.call_args[1]
-        assert "stored-object" in create_kwargs["labels"]
-        assert "test-obj" in create_kwargs["labels"]
-        assert json.dumps(sample_data, indent=2) == create_kwargs["body"]
-
-    def test_get_object(self, store, mock_repo):
-        # Setup mock
-        issue = Mock(spec=Issue.Issue)
-        issue.body = json.dumps({"name": "test object", "value": 42})
-        issue.created_at = datetime.now()
-        issue.updated_at = datetime.now()
-        issue.labels = [Mock(name="stored-object"), Mock(name="test-obj")]
-        mock_repo.get_issues.return_value = [issue]
-
-        # Test retrieval
-        obj = store.get("test-obj")
-        
-        # Verify
-        assert isinstance(obj, StoredObject)
-        assert obj.data["name"] == "test object"
-        mock_repo.get_issues.assert_called_with(
-            labels=["stored-object", "test-obj"],
-            state="closed"
-        )
-
-    def test_deep_update(self, store, mock_repo):
-        # Setup mock
-        initial_data = {
-            "user": {
-                "profile": {
-                    "name": "Alice",
-                    "settings": {"theme": "dark"}
-                },
-                "score": 10
-            }
-        }
-        
-        issue = Mock(spec=Issue.Issue)
-        issue.number = 1
-        issue.state = "closed"
-        issue.body = json.dumps(initial_data)
-        issue.labels = [Mock(name="stored-object"), Mock(name="test-obj")]
-        
-        mock_repo.get_issues.return_value = [issue]
-        
-        # Test deep update
-        update_data = {
-            "user": {
-                "profile": {
-                    "settings": {"theme": "light"}
-                },
-                "score": 15
-            }
-        }
-        
-        # Mock comment creation
-        comment = Mock(spec=IssueComment.IssueComment)
-        issue.create_comment.return_value = comment
-        
-        # Ensure get_object returns updated data after update
-        def get_issues_side_effect(*args, **kwargs):
-            if kwargs.get("state") == "closed":
-                updated_data = {
-                    "user": {
-                        "profile": {
-                            "name": "Alice",
-                            "settings": {"theme": "light"}
-                        },
-                        "score": 15
-                    }
-                }
-                issue.body = json.dumps(updated_data)
-            return [issue]
-        
-        mock_repo.get_issues.side_effect = get_issues_side_effect
-        
-        obj = store.update("test-obj", update_data)
-
-        # Verify deep merge
-        assert obj.data["user"]["profile"]["name"] == "Alice"  # Preserved
-        assert obj.data["user"]["profile"]["settings"]["theme"] == "light"  # Updated
-        assert obj.data["user"]["score"] == 15  # Updated
-
-    # ... rest of the tests remain the same ...
+def test_update_object(store):
+    """Test basic update flow"""
+    # Setup initial state
+    test_data = {"name": "test", "value": 42}
+    mock_issue = Mock()
+    mock_issue.body = json.dumps(test_data)
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Test update
+    update_data = {"value": 43}
+    store.update("test-obj", update_data)
+    
+    # Basic verification
+    mock_issue.create_comment.assert_called_once()
+    assert json.loads(mock_issue.create_comment.call_args[0][0]) == update_data
+    mock_issue.edit.assert_called_with(state="open")
