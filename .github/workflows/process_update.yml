@@ -26,7 +26,7 @@ jobs:
           
       - name: Process Updates
         run: |
-          python -m gh_store process-updates \
+          python -m gh_store \
             --issue ${{ github.event.issue.number }} \
             --token ${{ secrets.GITHUB_TOKEN }} \
             --repo ${{ github.repository }}
