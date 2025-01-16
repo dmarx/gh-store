@@ -17,7 +17,7 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [project.scripts]
-gh-store = "gh_store.__main__:process_updates"
+gh-store = "gh_store.__main__:main"
 
 [project.optional-dependencies]
 dev = [
