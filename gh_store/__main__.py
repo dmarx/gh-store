@@ -1,4 +1,4 @@
-# gh_store/cli.py
+# gh_store/__main__.py
 
 from pathlib import Path
 import fire
@@ -6,18 +6,6 @@ from loguru import logger
 
 from .core.store import GitHubStore
 from .core.exceptions import GitHubStoreError
-
-def setup_logging(config_path: Path):
-    """Configure logging based on config file"""
-    import yaml
-    
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-    
-    logger.configure(
-        handlers=[{"sink": "stderr", "format": config["store"]["log"]["format"]}]
-    )
-    logger.level(config["store"]["log"]["level"])
 
 def process_updates(
     issue: int,
@@ -36,12 +24,11 @@ def process_updates(
     """
     try:
         config_path = Path(config)
-        setup_logging(config_path)
-        
         logger.info(f"Processing updates for issue #{issue}")
-        store = GitHubStore(token=token, repo=repo, config_path=config_path)
         
+        store = GitHubStore(token=token, repo=repo, config_path=config_path)
         obj = store.process_updates(issue)
+        
         logger.info(f"Successfully processed updates for {obj.meta.object_id}")
         
     except GitHubStoreError as e:
@@ -52,6 +39,4 @@ def process_updates(
         raise SystemExit(1)
 
 if __name__ == "__main__":
-    fire.Fire({
-        "process-updates": process_updates
-    })
+    fire.Fire(process_updates)
