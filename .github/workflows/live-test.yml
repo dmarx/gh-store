@@ -27,7 +27,7 @@ jobs:
     - name: Generate and store random data
       run: |
         python - <<EOF
-        from gh_store.core import GitHubStore
+        from gh_store.core.store import GitHubStore
         import random
         from datetime import datetime, timezone
         import os
