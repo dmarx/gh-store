@@ -71,5 +71,5 @@ jobs:
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: ${{ steps.check_snapshot.outputs.exists == 'true' && 'chore: Update data store snapshot' || 'chore: Create initial data store snapshot' }}
+          commit_message: "${{ steps.check_snapshot.outputs.exists == 'true' && 'chore: Update data store snapshot' || 'chore: Create initial data store snapshot' }}"
           file_pattern: "${{ env.SNAPSHOT_PATH }}"
