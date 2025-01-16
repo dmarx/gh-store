@@ -5,6 +5,7 @@ from loguru import logger
 from github import Github
 from omegaconf import OmegaConf
 
+from .exceptions import ConcurrentUpdateError
 from .types import StoredObject, Update, Json
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
