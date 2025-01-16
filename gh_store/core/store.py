@@ -89,7 +89,7 @@ class GitHubStore:
                 
             try:
                 # Get object ID from labels
-                object_id = self.issue_handler._get_object_id(issue)
+                object_id = self.issue_handler.get_object_id_from_labels(issue)
                 
                 # Load object
                 obj = self.issue_handler.get_object_by_number(issue.number)
