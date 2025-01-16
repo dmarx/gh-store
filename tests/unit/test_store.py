@@ -72,8 +72,6 @@ def test_process_update(store):
     assert comment_data == update_data
     mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
 
-# tests/unit/test_store.py
-
 def test_create_object_ensures_labels_exist(store):
     """Test that create_object creates any missing labels"""
     # Setup
@@ -107,9 +105,14 @@ def test_list_updated_since(store):
     """Test fetching objects updated since timestamp"""
     # Setup
     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
     mock_issue = Mock()
-    mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
+    mock_issue.labels = [
+        Mock(name="stored-object"),
+        Mock(name=uid_label)
+    ]
     mock_issue.number = 1
     mock_issue.created_at = timestamp - timedelta(minutes=30)
     mock_issue.updated_at = timestamp + timedelta(minutes=30)
@@ -130,15 +133,22 @@ def test_list_updated_since(store):
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
-    assert "test-123" in updated
+    assert object_id in updated  # Check for bare object_id
+    assert len(updated) == 1
+    assert updated[object_id] == mock_obj
 
 def test_list_updated_since_no_updates(store):
     """Test when no updates since timestamp"""
     # Setup
     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
     mock_issue = Mock()
-    mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
+    mock_issue.labels = [
+        Mock(name="stored-object"),
+        Mock(name=uid_label)
+    ]
     mock_issue.number = 1
     mock_issue.created_at = timestamp - timedelta(minutes=30)
     mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
