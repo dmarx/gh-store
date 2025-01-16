@@ -74,6 +74,7 @@ def test_create_object_ensures_labels_exist(store):
     # Setup
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"  # Get expected label with prefix
     
     # Mock existing labels
     mock_label = Mock()
@@ -86,13 +87,13 @@ def test_create_object_ensures_labels_exist(store):
     # Test
     store.create(object_id, test_data)
     
-    # Verify label creation
+    # Verify label creation with UID prefix
     store.repo.create_label.assert_called_once_with(
-        name=object_id,
+        name=uid_label,  # Should include prefix
         color="0366d6"
     )
     
     # Verify issue creation with both labels
     store.repo.create_issue.assert_called_once()
     call_kwargs = store.repo.create_issue.call_args[1]
-    assert call_kwargs["labels"] == ["stored-object", object_id]
+    assert call_kwargs["labels"] == ["stored-object", uid_label]

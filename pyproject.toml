@@ -1,6 +1,6 @@
 [project]
 name = "gh-store"
-version = "0.2.0"
+version = "0.3.0"
 description = "A lightweight data store using GitHub Issues as a backend"
 authors = [
     {name = "David Marx", email = "david.marx84@gmail.com"},
@@ -17,7 +17,7 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [project.scripts]
-gh-store = "gh_store.__main__:process_updates"
+gh-store = "gh_store.__main__:main"
 
 [project.optional-dependencies]
 dev = [

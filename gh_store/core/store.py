@@ -67,3 +67,33 @@ class GitHubStore:
         self.comment_handler.mark_processed(issue_number, updates)
         
         return obj
+    
+    def list_all(self) -> dict[str, StoredObject]:
+        """List all objects in the store, indexed by object ID"""
+        logger.info("Fetching all stored objects")
+        
+        # Get all closed issues with base label
+        issues = list(self.repo.get_issues(
+            state="closed",
+            labels=[self.config.store.base_label]
+        ))
+        
+        objects = {}
+        for issue in issues:
+            # Skip archived objects
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+                
+            try:
+                # Get object ID from labels
+                object_id = self.issue_handler._get_object_id(issue)
+                
+                # Load object
+                obj = self.issue_handler.get_object_by_number(issue.number)
+                objects[object_id] = obj
+                
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {len(objects)} stored objects")
+        return objects
