@@ -19,25 +19,30 @@ class IssueHandler:
         self.repo = repo
         self.config = config
         self.base_label = config.store.base_label
+        self.uid_prefix = config.store.uid_prefix
     
+
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
+        # Create uid label with prefix
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
         # Ensure required labels exist
-        self._ensure_labels_exist([self.base_label, object_id])
+        self._ensure_labels_exist([self.base_label, uid_label])
         
         # Create issue with object data and both required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
-            labels=[self.base_label, object_id]
+            labels=[self.base_label, uid_label]
         )
         
         # Create metadata
         meta = ObjectMeta(
             object_id=object_id,
-            label=object_id,
+            label=uid_label,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=1
@@ -79,10 +84,12 @@ class IssueHandler:
         """Retrieve an object by its ID"""
         logger.info(f"Retrieving object: {object_id}")
         
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
         # Query for issue with matching labels
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, uid_label],
             state="closed"
         ))
         
@@ -94,7 +101,7 @@ class IssueHandler:
         
         meta = ObjectMeta(
             object_id=object_id,
-            label=object_id,
+            label=uid_label,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -102,6 +109,13 @@ class IssueHandler:
         
         return StoredObject(meta=meta, data=data)
 
+    def _get_object_id(self, issue) -> str:
+        """Extract object ID from issue labels"""
+        for label in issue.labels:
+            if label.name != self.base_label and label.name.startswith(self.uid_prefix):
+                return label.name[len(self.uid_prefix):]  # Remove prefix to get ID
+        raise ValueError("No UID label found")
+        
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
         logger.info(f"Retrieving object by issue #{issue_number}")
