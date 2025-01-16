@@ -109,11 +109,29 @@ class IssueHandler:
         
         return StoredObject(meta=meta, data=data)
 
+    
     def get_object_id_from_labels(self, issue) -> str:
-        """Extract bare object ID from issue labels, removing any prefix"""
+        """
+        Extract bare object ID from issue labels, removing any prefix.
+        
+        Args:
+            issue: GitHub issue object with labels attribute
+            
+        Returns:
+            str: Object ID without prefix
+            
+        Raises:
+            ValueError: If no matching label is found
+        """
         for label in issue.labels:
-            if label.name != self.base_label and label.name.startswith(self.uid_prefix):
-                return label.name[len(self.uid_prefix):]  # Remove prefix to get ID
+            # Get the actual label name, handling both string and Mock objects
+            label_name = getattr(label, 'name', label)
+            
+            if (label_name != self.base_label and 
+                isinstance(label_name, str) and 
+                label_name.startswith(self.uid_prefix)):
+                return label_name[len(self.uid_prefix):]
+                
         raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
