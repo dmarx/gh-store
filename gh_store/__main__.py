@@ -3,6 +3,7 @@
 from pathlib import Path
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import fire
 from loguru import logger
 
@@ -52,7 +53,7 @@ class CLI:
             
             # Create snapshot data
             snapshot_data = {
-                "snapshot_time": datetime.now(pytz.UTC).isoformat(),
+                "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
                 "repository": repo,
                 "objects": {
                     obj_id: {
@@ -110,7 +111,7 @@ class CLI:
                 return
             
             # Update snapshot data
-            snapshot_data["snapshot_time"] = datetime.now(pytz.UTC).isoformat()
+            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat() # should probably use latest object updated time here
             for obj_id, obj in updated_objects.items():
                 snapshot_data["objects"][obj_id] = {
                     "data": obj.data,
