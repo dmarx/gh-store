@@ -55,13 +55,14 @@ def test_get_nonexistent_object(store):
     with pytest.raises(ObjectNotFound):
         store.get("nonexistent")
 
-def test_update_object(store):
-    """Test basic update flow"""
+def test_process_update(store):
+    """Test processing an update"""
     # Setup initial state
     test_data = {"name": "test", "value": 42}
     mock_issue = Mock()
     mock_issue.body = json.dumps(test_data)
     mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.number = 123
     
     # Handle different query states
     def get_issues_side_effect(**kwargs):
@@ -70,12 +71,14 @@ def test_update_object(store):
         return [mock_issue]
     
     store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
     
-    # Test update
+    # Test update by adding a comment
     update_data = {"value": 43}
     store.update("test-obj", update_data)
     
     # Basic verification
-    mock_issue.create_comment.assert_called_once()
-    assert json.loads(mock_issue.create_comment.call_args[0][0]) == update_data
-    mock_issue.edit.assert_called_with(state="open")
+    mock_issue.create_comment.assert_called_once()  # Comment created with update data
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    assert comment_data == update_data
+    mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
