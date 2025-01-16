@@ -115,6 +115,30 @@ class IssueHandler:
             state="closed"
         )
 
+    def update_object(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an object by adding a comment and reopening the issue"""
+        logger.info(f"Updating object: {object_id}")
+        
+        # Get the object's issue
+        issues = list(self.repo.get_issues(
+            labels=[self.base_label, object_id],
+            state="closed"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        issue = issues[0]
+        
+        # Add update comment
+        issue.create_comment(json.dumps(changes, indent=2))
+        
+        # Reopen issue to trigger processing
+        issue.edit(state="open")
+        
+        # Return current state
+        return self.get_object(object_id)
+    
     def delete_object(self, object_id: str) -> None:
         """Delete an object by closing and archiving its issue"""
         logger.info(f"Deleting object: {object_id}")
