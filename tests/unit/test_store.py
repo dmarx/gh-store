@@ -82,3 +82,21 @@ def test_process_update(store):
     comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
     assert comment_data == update_data
     mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
+
+def test_create_object_with_labels(store):
+    """Test that create_object properly sets both the base label and object ID label"""
+    # Setup
+    object_id = "test-123"
+    test_data = {"name": "test", "value": 42}
+    mock_issue = Mock()
+    store.repo.create_issue.return_value = mock_issue
+    
+    # Test
+    store.create(object_id, test_data)
+    
+    # Verify the issue was created with correct title and labels
+    store.repo.create_issue.assert_called_once()
+    call_kwargs = store.repo.create_issue.call_args[1]
+    assert call_kwargs["title"] == f"Stored Object: {object_id}"
+    assert call_kwargs["labels"] == ["stored-object", object_id]  # Verify both labels are set
+    assert json.loads(call_kwargs["body"]) == test_data
