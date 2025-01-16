@@ -99,7 +99,7 @@ class GitHubStore:
         
         logger.info(f"Found {len(objects)} stored objects")
         return objects
-
+    
     def list_updated_since(self, timestamp: datetime) -> dict[str, StoredObject]:
         """List objects updated since given timestamp"""
         logger.info(f"Fetching objects updated since {timestamp}")
@@ -126,7 +126,7 @@ class GitHubStore:
                 
                 # Double check the timestamp (since GitHub's since parameter includes issue comments)
                 if obj.meta.updated_at > timestamp:
-                    objects[object_id] = obj
+                    objects[object_id] = obj  # object_id is already stripped of prefix by _get_object_id
                 
             except ValueError as e:
                 logger.warning(f"Skipping issue #{issue.number}: {e}")
