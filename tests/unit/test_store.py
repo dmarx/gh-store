@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta
-import pytz
+from zoneinfo import ZoneInfo
 
 import pytest
 from unittest.mock import Mock, patch
@@ -106,7 +106,7 @@ def test_create_object_ensures_labels_exist(store):
 def test_list_updated_since(store):
     """Test fetching objects updated since timestamp"""
     # Setup
-    timestamp = datetime.now(pytz.UTC) - timedelta(hours=1)
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
     
     mock_issue = Mock()
     mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
@@ -133,7 +133,7 @@ def test_list_updated_since(store):
 def test_list_updated_since_no_updates(store):
     """Test when no updates since timestamp"""
     # Setup
-    timestamp = datetime.now(pytz.UTC) - timedelta(hours=1)
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
     
     mock_issue = Mock()
     mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
