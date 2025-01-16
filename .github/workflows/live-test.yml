@@ -1,0 +1,68 @@
+name: Live Test
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  store-data:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Required for creating/updating issues
+      contents: read # Required for checkout
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install gh-store 
+
+    - name: Generate and store random data
+      run: |
+        python - <<EOF
+        from gh_store import GitHubStore
+        import random
+        from datetime import datetime, timezone
+        import os
+
+        # Initialize store with GitHub token
+        store = GitHubStore(
+            token=os.environ["GITHUB_TOKEN"],
+            repo=os.environ["GITHUB_REPOSITORY"]
+        )
+
+        # Generate random data
+        data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "temperature": round(random.uniform(15.0, 25.0), 2),
+                "humidity": round(random.uniform(40.0, 60.0), 2),
+                "pressure": round(random.uniform(980.0, 1020.0), 2),
+            },
+            "counters": {
+                "visitors": random.randint(100, 1000),
+                "actions": random.randint(500, 5000),
+                "errors": random.randint(0, 50)
+            },
+            "status": random.choice(["green", "yellow", "red"])
+        }
+
+        # Create or update the object
+        try:
+            # Try to update if exists
+            store.update("daily-metrics", data)
+        except:
+            # Create new if doesn't exist
+            store.create("daily-metrics", data)
+
+        print("Successfully stored random data")
+        EOF
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
