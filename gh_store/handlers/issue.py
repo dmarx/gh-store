@@ -109,19 +109,37 @@ class IssueHandler:
         
         return StoredObject(meta=meta, data=data)
 
-    def _get_object_id(self, issue) -> str:
-        """Extract object ID from issue labels"""
+    
+    def get_object_id_from_labels(self, issue) -> str:
+        """
+        Extract bare object ID from issue labels, removing any prefix.
+        
+        Args:
+            issue: GitHub issue object with labels attribute
+            
+        Returns:
+            str: Object ID without prefix
+            
+        Raises:
+            ValueError: If no matching label is found
+        """
         for label in issue.labels:
-            if label.name != self.base_label and label.name.startswith(self.uid_prefix):
-                return label.name[len(self.uid_prefix):]  # Remove prefix to get ID
-        raise ValueError("No UID label found")
+            # Get the actual label name, handling both string and Mock objects
+            label_name = getattr(label, 'name', label)
+            
+            if (label_name != self.base_label and 
+                isinstance(label_name, str) and 
+                label_name.startswith(self.uid_prefix)):
+                return label_name[len(self.uid_prefix):]
+                
+        raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
         logger.info(f"Retrieving object by issue #{issue_number}")
         
         issue = self.repo.get_issue(issue_number)
-        object_id = self._get_object_id(issue)
+        object_id = self.get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
         meta = ObjectMeta(
@@ -190,10 +208,3 @@ class IssueHandler:
         """Extract version number from issue"""
         comments = list(issue.get_comments())
         return len(comments) + 1
-
-    def _get_object_id(self, issue) -> str:
-        """Extract object ID from issue labels"""
-        for label in issue.labels:
-            if label.name != self.base_label:
-                return label.name
-        raise ValueError("No object ID label found")

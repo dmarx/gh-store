@@ -1,10 +1,15 @@
 # tests/test_store.py
 
+import json
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 from unittest.mock import Mock, patch
-import json
+
 from gh_store.core.store import GitHubStore
 from gh_store.core.exceptions import ObjectNotFound
+
 
 @pytest.fixture
 def store():
@@ -67,8 +72,6 @@ def test_process_update(store):
     assert comment_data == update_data
     mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
 
-# tests/unit/test_store.py
-
 def test_create_object_ensures_labels_exist(store):
     """Test that create_object creates any missing labels"""
     # Setup
@@ -97,3 +100,76 @@ def test_create_object_ensures_labels_exist(store):
     store.repo.create_issue.assert_called_once()
     call_kwargs = store.repo.create_issue.call_args[1]
     assert call_kwargs["labels"] == ["stored-object", uid_label]
+
+def test_list_updated_since(store):
+    """Test fetching objects updated since timestamp"""
+    # Setup
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
+    
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
+    
+    mock_issue = Mock()
+    mock_issue.labels = [stored_label, uid_mock_label]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp + timedelta(minutes=30)
+    
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify
+    store.repo.get_issues.assert_called_once()
+    call_kwargs = store.repo.get_issues.call_args[1]
+    assert call_kwargs["since"] == timestamp
+    assert object_id in updated
+    assert len(updated) == 1
+    assert updated[object_id] == mock_obj
+
+def test_list_updated_since_no_updates(store):
+    """Test when no updates since timestamp"""
+    # Setup
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
+    
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
+    
+    mock_issue = Mock()
+    mock_issue.labels = [stored_label, uid_mock_label]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
+    
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
+    
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify
+    assert len(updated) == 0
