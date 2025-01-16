@@ -4,6 +4,9 @@ store:
   # Base label for all stored objects
   base_label: "stored-object"
   
+  # Prefix for unique identifier labels
+  uid_prefix: "UID:"
+  
   # Reaction to mark processed comments
   processed_reaction: "+1"
   
