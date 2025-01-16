@@ -38,6 +38,7 @@ def test_get_object(store):
     test_data = {"name": "test", "value": 42}
     mock_issue = Mock()
     mock_issue.body = json.dumps(test_data)
+    mock_issue.get_comments = Mock(return_value=[])  # Return empty list of comments
     store.repo.get_issues.return_value = [mock_issue]
     
     # Test
@@ -60,7 +61,15 @@ def test_update_object(store):
     test_data = {"name": "test", "value": 42}
     mock_issue = Mock()
     mock_issue.body = json.dumps(test_data)
-    store.repo.get_issues.return_value = [mock_issue]
+    mock_issue.get_comments = Mock(return_value=[])
+    
+    # Handle different query states
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No issues being processed
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
     
     # Test update
     update_data = {"value": 43}
