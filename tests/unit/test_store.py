@@ -119,7 +119,9 @@ def test_list_updated_since(store):
     # Mock the object retrieval
     mock_obj = Mock()
     mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
-    store.issue_handler.get_object_by_number.return_value = mock_obj
+    
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test
     updated = store.list_updated_since(timestamp)
@@ -146,7 +148,9 @@ def test_list_updated_since_no_updates(store):
     # Mock the object retrieval
     mock_obj = Mock()
     mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
-    store.issue_handler.get_object_by_number.return_value = mock_obj
+    
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test
     updated = store.list_updated_since(timestamp)
