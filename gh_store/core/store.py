@@ -2,7 +2,6 @@
 
 from datetime import datetime
 from pathlib import Path
-import pytz
 
 from loguru import logger
 from github import Github
