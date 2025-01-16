@@ -19,12 +19,15 @@ class IssueHandler:
         self.repo = repo
         self.config = config
         self.base_label = config.store.base_label
-
+    
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
-        # Create issue with object data
+        # Ensure required labels exist
+        self._ensure_labels_exist([self.base_label, object_id])
+        
+        # Create issue with object data and both required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
@@ -44,6 +47,18 @@ class IssueHandler:
         issue.edit(state="closed")
         
         return StoredObject(meta=meta, data=data)
+    
+    def _ensure_labels_exist(self, labels: list[str]) -> None:
+        """Create labels if they don't exist"""
+        existing_labels = {label.name for label in self.repo.get_labels()}
+        
+        for label in labels:
+            if label not in existing_labels:
+                logger.info(f"Creating label: {label}")
+                self.repo.create_label(
+                    name=label,
+                    color="0366d6"  # GitHub's default blue
+                )
 
     def _with_retry(self, func, *args, **kwargs):
         """Execute a function with retries on rate limit"""
