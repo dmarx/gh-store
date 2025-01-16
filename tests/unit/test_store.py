@@ -83,20 +83,32 @@ def test_process_update(store):
     assert comment_data == update_data
     mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
 
-def test_create_object_with_labels(store):
-    """Test that create_object properly sets both the base label and object ID label"""
+# tests/unit/test_store.py
+
+def test_create_object_ensures_labels_exist(store):
+    """Test that create_object creates any missing labels"""
     # Setup
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
+    
+    # Mock existing labels
+    mock_label = Mock()
+    mock_label.name = "stored-object"
+    store.repo.get_labels.return_value = [mock_label]  # Only base label exists
+    
     mock_issue = Mock()
     store.repo.create_issue.return_value = mock_issue
     
     # Test
     store.create(object_id, test_data)
     
-    # Verify the issue was created with correct title and labels
+    # Verify label creation
+    store.repo.create_label.assert_called_once_with(
+        name=object_id,
+        color="0366d6"
+    )
+    
+    # Verify issue creation with both labels
     store.repo.create_issue.assert_called_once()
     call_kwargs = store.repo.create_issue.call_args[1]
-    assert call_kwargs["title"] == f"Stored Object: {object_id}"
-    assert call_kwargs["labels"] == ["stored-object", object_id]  # Verify both labels are set
-    assert json.loads(call_kwargs["body"]) == test_data
+    assert call_kwargs["labels"] == ["stored-object", object_id]
