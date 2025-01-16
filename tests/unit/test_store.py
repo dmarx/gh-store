@@ -1,10 +1,15 @@
 # tests/test_store.py
 
+import json
+from datetime import datetime, timedelta
+import pytz
+
 import pytest
 from unittest.mock import Mock, patch
-import json
+
 from gh_store.core.store import GitHubStore
 from gh_store.core.exceptions import ObjectNotFound
+
 
 @pytest.fixture
 def store():
@@ -97,3 +102,54 @@ def test_create_object_ensures_labels_exist(store):
     store.repo.create_issue.assert_called_once()
     call_kwargs = store.repo.create_issue.call_args[1]
     assert call_kwargs["labels"] == ["stored-object", uid_label]
+
+def test_list_updated_since(store):
+    """Test fetching objects updated since timestamp"""
+    # Setup
+    timestamp = datetime.now(pytz.UTC) - timedelta(hours=1)
+    
+    mock_issue = Mock()
+    mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp + timedelta(minutes=30)
+    
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    store.issue_handler.get_object_by_number.return_value = mock_obj
+    
+    # Test
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify
+    store.repo.get_issues.assert_called_once()
+    call_kwargs = store.repo.get_issues.call_args[1]
+    assert call_kwargs["since"] == timestamp
+    assert "test-123" in updated
+
+def test_list_updated_since_no_updates(store):
+    """Test when no updates since timestamp"""
+    # Setup
+    timestamp = datetime.now(pytz.UTC) - timedelta(hours=1)
+    
+    mock_issue = Mock()
+    mock_issue.labels = [Mock(name="stored-object"), Mock(name="UID:test-123")]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
+    
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
+    store.issue_handler.get_object_by_number.return_value = mock_obj
+    
+    # Test
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify
+    assert len(updated) == 0
