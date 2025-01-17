@@ -1,0 +1,9 @@
+// typescript/.npmignore
+src/__tests__/
+coverage/
+.eslintrc.json
+.prettierrc
+jest.config.js
+jest.setup.js
+tsconfig.json
+tsup.config.ts
