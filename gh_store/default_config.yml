@@ -1,4 +1,4 @@
-# config.yml
+# gh_store/default_config.yml
 
 store:
   # Base label for all stored objects
