@@ -4,25 +4,49 @@ from pathlib import Path
 import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import importlib.resources
+import shutil
 import fire
 from loguru import logger
 
 from .core.store import GitHubStore
-from .core.exceptions import GitHubStoreError
+from .core.exceptions import GitHubStoreError, ConfigurationError
+
+def ensure_config_exists(config_path: Path) -> None:
+    """Create default config file if it doesn't exist"""
+    if not config_path.exists():
+        logger.info(f"Creating default configuration at {config_path}")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Copy default config from package
+        with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as src:
+            with open(config_path, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+        
+        logger.info("Default configuration created. You can modify it at any time.")
 
 class CLI:
     """GitHub Issue Store CLI"""
+    
+    def __init__(self):
+        """Initialize CLI with default config path"""
+        self.default_config_path = Path.home() / ".config" / "gh-store" / "config.yml"
     
     def process_updates(
         self,
         issue: int,
         token: str,
         repo: str,
-        config: str = "config.yml"
+        config: str | None = None
     ) -> None:
         """Process pending updates for a stored object"""
         try:
-            config_path = Path(config)
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
             logger.info(f"Processing updates for issue #{issue}")
             
             store = GitHubStore(token=token, repo=repo, config_path=config_path)
@@ -42,11 +66,17 @@ class CLI:
         token: str,
         repo: str,
         output: str = "snapshot.json",
-        config: str = "config.yml"
+        config: str | None = None
     ) -> None:
         """Create a full snapshot of all objects in the store"""
         try:
-            store = GitHubStore(token=token, repo=repo, config_path=Path(config))
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
+            store = GitHubStore(token=token, repo=repo, config_path=config_path)
             
             # Get all stored objects
             objects = store.list_all()
@@ -86,10 +116,16 @@ class CLI:
         token: str,
         repo: str,
         snapshot_path: str,
-        config: str = "config.yml"
+        config: str | None = None
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
         try:
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
             # Read existing snapshot
             snapshot_path = Path(snapshot_path)
             if not snapshot_path.exists():
@@ -103,7 +139,7 @@ class CLI:
             logger.info(f"Updating snapshot from {last_snapshot}")
             
             # Get updated objects
-            store = GitHubStore(token=token, repo=repo, config_path=Path(config))
+            store = GitHubStore(token=token, repo=repo, config_path=config_path)
             updated_objects = store.list_updated_since(last_snapshot)
             
             if not updated_objects:
@@ -131,6 +167,22 @@ class CLI:
             raise SystemExit(1)
         except Exception as e:
             logger.exception("Unexpected error occurred")
+            raise SystemExit(1)
+
+    def init(self, config: str | None = None) -> None:
+        """Initialize a new configuration file"""
+        try:
+            config_path = Path(config) if config else self.default_config_path
+            
+            if config_path.exists():
+                logger.warning(f"Configuration file already exists at {config_path}")
+                return
+            
+            ensure_config_exists(config_path)
+            logger.info(f"Configuration initialized at {config_path}")
+            
+        except Exception as e:
+            logger.exception("Failed to initialize configuration")
             raise SystemExit(1)
 
 def main():
