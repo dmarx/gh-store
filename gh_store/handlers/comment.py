@@ -15,7 +15,8 @@ class CommentHandler:
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.processed_reaction = config.store.processed_reaction
+        self.processed_reaction = config.store.reactions.processed
+        self.initial_state_reaction = config.store.reactions.initial_state
 
     def get_unprocessed_updates(self, issue_number: int) -> list[Update]:
         """Get all unprocessed updates from issue comments"""
@@ -27,11 +28,17 @@ class CommentHandler:
         for comment in issue.get_comments():
             if not self._is_processed(comment):
                 try:
-                    changes = json.loads(comment.body)
+                    update_data = json.loads(comment.body)
+                    
+                    # Skip initial state comments - they shouldn't be processed as updates
+                    if isinstance(update_data, dict) and update_data.get("type") == "initial_state":
+                        logger.debug(f"Skipping initial state comment {comment.id}")
+                        continue
+                        
                     updates.append(Update(
                         comment_id=comment.id,
                         timestamp=comment.created_at,
-                        changes=changes
+                        changes=update_data if isinstance(update_data, dict) else {"data": update_data}
                     ))
                 except json.JSONDecodeError as e:
                     logger.error(f"Invalid JSON in comment {comment.id}: {e}")
