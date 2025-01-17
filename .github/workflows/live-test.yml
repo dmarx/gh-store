@@ -57,10 +57,10 @@ jobs:
         # Create or update the object
         try:
             # Try to update if exists
-            store.update("daily-metrics", data)
+            store.update("daily-metrics123", data)
         except:
             # Create new if doesn't exist
-            store.create("daily-metrics", data)
+            store.create("daily-metrics123", data)
 
         print("Successfully stored random data")
         EOF
