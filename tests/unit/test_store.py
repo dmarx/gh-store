@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, mock_open
 
 from gh_store.core.store import GitHubStore
 from gh_store.core.exceptions import ObjectNotFound, ConcurrentUpdateError
