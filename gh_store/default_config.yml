@@ -8,9 +8,10 @@ store:
   uid_prefix: "UID:"
   
   # Reaction settings
+  # Limited to: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"]
   reactions:
     processed: "+1"
-    initial_state: "🔰"  # Japanese "beginner" symbol for initial state
+    initial_state: "rocket"
   
   # Retry settings for GitHub API calls
   retries:
