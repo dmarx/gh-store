@@ -12,10 +12,14 @@ on:
       - 'typescript/**'
       - '.github/workflows/typescript.yml'
     branches: [ main ]
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
   build-and-test:
+    # Skip this job for non-TypeScript releases
+    if: ${{ !github.event.release || startsWith(github.ref_name, 'ts-') }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,7 +60,7 @@ jobs:
     
     # Only run publish step on releases with a tag starting with 'ts-v'
     - name: Publish to npm
-      if: startsWith(github.ref, 'refs/tags/ts-v')
+      if: ${{ github.event.release && startsWith(github.ref_name, 'ts-') }}
       run: npm publish
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
