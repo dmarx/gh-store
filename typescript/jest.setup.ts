@@ -1,3 +1,3 @@
 // typescript/jest.setup.ts
-import { enableFetchMocks } from 'jest-fetch-mock';
-enableFetchMocks();
+import fetchMock from 'jest-fetch-mock';
+fetchMock.enableMocks();
