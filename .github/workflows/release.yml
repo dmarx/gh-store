@@ -6,6 +6,7 @@ on:
 
 jobs:
   release:
+    if: ${{ !startsWith(github.ref_name, 'ts-') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
