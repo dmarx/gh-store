@@ -1,9 +1,10 @@
-// jest.config.js
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-module.exports = {
+// typescript/jest.config.ts
+import type { JestConfigWithTsJest } from 'ts-jest';
+
+const config: JestConfigWithTsJest = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
-  setupFiles: ['./jest.setup.js'],
+  setupFiles: ['./jest.setup.ts'],
   testMatch: ['<rootDir>/src/**/*.test.ts'],
   collectCoverage: true,
   coverageDirectory: 'coverage',
@@ -15,5 +16,13 @@ module.exports = {
       lines: 80,
       statements: 80
     }
-  }
+  },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', {
+      useESM: true,
+    }]
+  },
+  extensionsToTreatAsEsm: ['.ts']
 };
+
+export default config;
