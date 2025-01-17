@@ -49,11 +49,21 @@ def test_create_object_with_initial_state(store):
     test_data = {"name": "test", "value": 42}
     uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
+    # Mock existing labels
+    mock_base_label = Mock()
+    mock_base_label.name = "stored-object"
+    store.repo.get_labels.return_value = [mock_base_label]
+    
     # Mock issue and comment creation
     mock_issue = Mock()
     mock_comment = Mock()
     store.repo.create_issue.return_value = mock_issue
     mock_issue.create_comment.return_value = mock_comment
+    
+    # Set up other required mock attributes
+    mock_issue.created_at = datetime.now(ZoneInfo("UTC"))
+    mock_issue.updated_at = datetime.now(ZoneInfo("UTC"))
+    mock_issue.get_comments = Mock(return_value=[])
     
     # Create object
     obj = store.create(object_id, test_data)
@@ -67,14 +77,28 @@ def test_create_object_with_initial_state(store):
     # Verify comment was marked as processed and initial state
     mock_comment.create_reaction.assert_any_call(store.config.store.reactions.processed)
     mock_comment.create_reaction.assert_any_call(store.config.store.reactions.initial_state)
+    
+    # Verify label creation
+    store.repo.create_label.assert_called_once_with(
+        name=uid_label,
+        color="0366d6"
+    )
 
 def test_get_object(store):
     """Test retrieving an object"""
     # Setup
     test_data = {"name": "test", "value": 42}
+    
+    # Mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    store.repo.get_labels.return_value = [stored_label]
+    
     mock_issue = Mock()
     mock_issue.body = json.dumps(test_data)
     mock_issue.get_comments = Mock(return_value=[])  # Return empty list of comments
+    mock_issue.created_at = datetime.now(ZoneInfo("UTC"))
+    mock_issue.updated_at = datetime.now(ZoneInfo("UTC"))
     store.repo.get_issues.return_value = [mock_issue]
     
     # Test
@@ -297,6 +321,9 @@ def test_list_updated_since(store):
     uid_mock_label = Mock()
     uid_mock_label.name = uid_label
     
+    # Mock get_labels for label creation check
+    store.repo.get_labels.return_value = [stored_label]
+    
     mock_issue = Mock()
     mock_issue.labels = [stored_label, uid_mock_label]
     mock_issue.number = 1
@@ -336,6 +363,9 @@ def test_list_updated_since_no_updates(store):
     uid_mock_label = Mock()
     uid_mock_label.name = uid_label
     
+    # Mock get_labels for label creation check
+    store.repo.get_labels.return_value = [stored_label]
+    
     mock_issue = Mock()
     mock_issue.labels = [stored_label, uid_mock_label]
     mock_issue.number = 1
@@ -356,4 +386,3 @@ def test_list_updated_since_no_updates(store):
     
     # Verify
     assert len(updated) == 0
-    
