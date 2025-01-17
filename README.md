@@ -1,245 +1,217 @@
-# GitHub Issue Store
+# gh-store
 
-A lightweight data store using GitHub Issues as a backend. Store and update JSON objects using GitHub Issues as a persistent storage layer, with automatic update processing via GitHub Actions.
+A data store implementation using GitHub Issues as a backend. Provides versioned storage and update capabilities for applications running in GitHub's ecosystem.
 
-## Features
-
-- Store JSON objects in GitHub Issues
-- Update objects through issue comments
-- Automatic update processing via GitHub Actions
-- Sequential update handling with atomic operations
-- Full audit trail of all changes
-- Idempotent processing with reaction-based tracking
-- Configurable via YAML
-- Type-safe Python interface
+## Key Features
+- Store and version JSON objects using GitHub Issues
+- Atomic updates through a comment-based event system
+- Point-in-time snapshots for static site generation
+- Built-in GitHub Actions integration
 
 ## Installation
 
 ```bash
-pip install gh-store
+pip install gh-store  # Requires Python 3.12+
 ```
 
-Or install from source:
+## Prerequisites
+- GitHub repository with Issues enabled
+- GitHub token with `repo` scope
+- For GitHub Actions: `issues` write permission
 
-```bash
-git clone https://github.com/dmarx/gh-store.git
-cd gh-store
-pip install -e .
-```
-
-## Quick Start
-
-1. Add the GitHub Actions workflow to your repository:
-
-```bash
-mkdir -p .github/workflows
-cp gh_store/workflows/process_update.yml .github/workflows/
-```
-
-2. Configure your GitHub token with repo access:
+## Basic Usage
 
 ```python
-from gh_store import GitHubStore
+from gh_store.core.store import GitHubStore
 
 store = GitHubStore(
-    token="your-github-token",
-    repo="owner/repository"
+    token="github-token",
+    repo="username/repository"
 )
-```
 
-3. Start using the store:
-
-```python
-# Create an object
-data = {"name": "test", "value": 42}
-obj = store.create("my-object", data)
-
-# Retrieve an object
-obj = store.get("my-object")
-
-# Update an object
-store.update("my-object", {"value": 43})
-```
-
-## How It Works
-
-### Object Storage
-
-Each object is stored in a dedicated GitHub Issue:
-
-- The issue body contains the current object state as JSON
-- Each object has two labels:
-  - `stored-object`: Base label for all stored objects
-  - Custom label matching the object ID
-- Issue state indicates processing status:
-  - `closed`: Object is stable
-  - `open`: Updates are being processed
-
-### Update Flow
-
-1. Updates are submitted as JSON comments on the object's issue
-2. The issue is reopened to trigger processing
-3. GitHub Actions runs the update processor
-4. Each comment is processed in chronological order
-5. Processed comments receive a "👍" reaction
-6. The issue is closed when all updates are processed
-
-Example update flow:
-
-```python
-# Initial state
-obj = store.get("user-123")
-print(obj.data)
-# {"name": "Alice", "score": 10}
-
-# Submit an update
-store.update("user-123", {"score": 15})
-
-# After processing
-obj = store.get("user-123")
-print(obj.data)
-# {"name": "Alice", "score": 15}
-```
-
-### Deep Updates
-
-The store supports deep dictionary updates:
-
-```python
-# Initial state
-{
-    "user": {
-        "profile": {
-            "name": "Alice",
-            "settings": {"theme": "dark"}
-        },
-        "score": 10
-    }
-}
-
-# Update
-store.update("user-123", {
-    "user": {
-        "profile": {
-            "settings": {"theme": "light"}
-        },
-        "score": 15
-    }
+# Create object
+store.create("metrics", {
+    "count": 0,
+    "last_updated": "2025-01-16T00:00:00Z"
 })
 
-# Final state
-{
-    "user": {
-        "profile": {
-            "name": "Alice",
-            "settings": {"theme": "light"}
-        },
-        "score": 15
-    }
-}
+# Update object
+store.update("metrics", {"count": 1})
+
+# Get current state
+obj = store.get("metrics")
+print(f"Current count: {obj.data['count']}")
+```
+
+## System Architecture
+
+gh-store uses GitHub Issues as a versioned data store. Here's how the components work together:
+
+### 1. Object Storage Model
+
+Each stored object is represented by a GitHub Issue:
+```
+Issue #123
+├── Labels: ["stored-object", "UID:metrics"]
+├── Body: Current object state (JSON)
+└── Comments: Update history
+    ├── Comment 1: Update {"count": 1}
+    ├── Comment 2: Update {"field": "value"}
+    └── Each comment includes the 👍 reaction when processed
+```
+
+Key components:
+- **Base Label** ("stored-object"): Identifies issues managed by gh-store
+- **UID Label** ("UID:{object-id}"): Uniquely identifies each stored object
+- **Issue Body**: Contains the current state as JSON
+- **Comments**: Store update history
+- **Reactions**: Track processed updates (👍)
+
+### 2. Update Process
+
+When updating an object:
+1. New update is added as a comment with JSON changes
+2. Issue is reopened to trigger processing
+3. GitHub Actions workflow processes updates:
+   - Gets all unprocessed comments (no 👍 reaction)
+   - Applies updates in chronological order
+   - Adds 👍 reaction to mark comments as processed
+   - Updates issue body with new state
+   - Closes issue when complete
+
+### 3. Core Components
+
+- **GitHubStore**: Main interface for CRUD operations
+- **IssueHandler**: Manages GitHub Issue operations
+- **CommentHandler**: Processes update comments
+
+## GitHub Actions Integration
+
+### Process Updates
+
+```yaml
+# .github/workflows/process_update.yml
+name: Process Updates
+
+on:
+  issues:
+    types: [reopened]
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'stored-object')
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Process Updates
+        run: |
+          gh-store process-updates \
+            --issue ${{ github.event.issue.number }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }}
+```
+
+### Create Snapshots
+
+```yaml
+# .github/workflows/snapshot.yml
+name: Snapshot
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Snapshot
+        run: |
+          gh-store snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --output data/store-snapshot.json
+```
+
+## CLI Commands
+
+```bash
+# Process updates for an issue
+gh-store process-updates \
+  --issue <issue-number> \
+  --token <github-token> \
+  --repo <owner/repo>
+
+# Create snapshot
+gh-store snapshot \
+  --token <github-token> \
+  --repo <owner/repo> \
+  --output <path>
+
+# Update existing snapshot
+gh-store update-snapshot \
+  --token <github-token> \
+  --repo <owner/repo> \
+  --snapshot-path <path>
 ```
 
 ## Configuration
 
-Create a `config.yml` file:
+Create `config.yml`:
 
 ```yaml
 store:
+  # Label identifying store issues
   base_label: "stored-object"
+  
+  # Prefix for object ID labels
+  uid_prefix: "UID:"
+  
+  # Reaction marking processed comments
   processed_reaction: "+1"
+  
+  # API retry settings
   retries:
     max_attempts: 3
     backoff_factor: 2
+    
+  # Rate limiting
   rate_limit:
     max_requests_per_hour: 1000
+    
+  # Logging
   log:
     level: "INFO"
     format: "{time} | {level} | {message}"
 ```
 
-Pass the config file path when initializing:
-
-```python
-store = GitHubStore(
-    token="your-token",
-    repo="owner/repo",
-    config_path=Path("config.yml")
-)
-```
-
-## Error Handling
-
-The store provides specific exceptions for common error cases:
-
-```python
-from gh_store.core.exceptions import (
-    ObjectNotFound,
-    InvalidUpdate,
-    ConcurrentUpdateError
-)
-
-try:
-    obj = store.get("nonexistent")
-except ObjectNotFound:
-    print("Object doesn't exist")
-
-try:
-    store.update("user-123", "invalid json")
-except InvalidUpdate:
-    print("Invalid update format")
-```
-
-## Command Line Interface
-
-The package includes a CLI for use in GitHub Actions:
-
-```bash
-# Process updates for an issue
-python -m gh_store process-updates \
-    --issue 123 \
-    --token $GITHUB_TOKEN \
-    --repo "owner/repository"
-```
-
-## Use Cases
-
-The GitHub Issue Store is particularly useful for:
-
-- Lightweight data storage without additional infrastructure
-- Applications that need a full audit trail of changes
-- Collaborative data management with GitHub-based workflows
-- Prototypes and small projects
-- Data that changes infrequently but needs version history
-
 ## Limitations
 
-- Not suitable for high-frequency updates
-- GitHub API rate limits apply
-- Maximum issue size limits apply
-- Not recommended for sensitive data
-- No transactional guarantees across multiple objects
+- Not suitable for high-frequency updates (GitHub API limits)
+- Objects limited to Issue size (~65KB)
+- Updates processed asynchronously via GitHub Actions
+- Consider data visibility in public repositories
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new features
-4. Submit a pull request
-
-## Testing
-
-Run the test suite:
+## Development
 
 ```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
 pytest
-```
 
-Run with coverage:
-
-```bash
-pytest --cov=gh_store
+# Type checking & linting
+mypy .
+ruff check .
 ```
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE)
