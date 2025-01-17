@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
+import importlib.resources
 
 from loguru import logger
 from github import Github
@@ -12,6 +13,7 @@ from .types import StoredObject, Update, Json
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
 
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 
 class GitHubStore:
     """Interface for storing and retrieving objects using GitHub Issues"""
@@ -21,8 +23,16 @@ class GitHubStore:
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
         
-        config_path = config_path or Path("config.yml")
-        self.config = OmegaConf.load(config_path)
+        config_path = config_path or DEFAULT_CONFIG_PATH
+        if not config_path.exists():
+            # If default config doesn't exist, but we have a packaged default, use that
+            if config_path == DEFAULT_CONFIG_PATH:
+                with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as f:
+                    self.config = OmegaConf.load(f)
+            else:
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+        else:
+            self.config = OmegaConf.load(config_path)
         
         self.issue_handler = IssueHandler(self.repo, self.config)
         self.comment_handler = CommentHandler(self.repo, self.config)
