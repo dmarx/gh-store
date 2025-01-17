@@ -6,7 +6,7 @@ on:
     paths:
       - 'typescript/**'
       - '.github/workflows/typescript.yml'
-    branches: [ main ]
+    branches: [ main, ts ]
   pull_request:
     paths:
       - 'typescript/**'
