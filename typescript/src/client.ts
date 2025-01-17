@@ -1,4 +1,6 @@
 // typescript/src/client.ts
+import { StoredObject, ObjectMeta, GitHubStoreConfig, Json } from './types';
+
 export class GitHubStoreClient {
   private token: string;
   private repo: string;
@@ -21,8 +23,17 @@ export class GitHubStoreClient {
     };
   }
 
-  private async fetchFromGitHub(path: string, options: RequestInit = {}) {
-    const response = await fetch(`https://api.github.com/repos/${this.repo}${path}`, {
+  private async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+    const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
+    
+    if (options.params) {
+      Object.entries(options.params).forEach(([key, value]) => {
+        url.searchParams.append(key, value);
+      });
+      delete options.params;
+    }
+
+    const response = await fetch(url.toString(), {
       ...options,
       headers: {
         "Authorization": `token ${this.token}`,
@@ -35,16 +46,19 @@ export class GitHubStoreClient {
       throw new Error(`GitHub API error: ${response.status}`);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
   async getObject(objectId: string): Promise<StoredObject> {
     // Query for issue with matching labels
-    const issues = await this.fetchFromGitHub("/issues", {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
       method: "GET",
-      headers: {
-        "Accept": "application/vnd.github.v3+json",
-      },
       params: {
         labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
         state: "closed",
@@ -56,7 +70,7 @@ export class GitHubStoreClient {
     }
 
     const issue = issues[0];
-    const data = JSON.parse(issue.body);
+    const data = JSON.parse(issue.body) as Json;
 
     const meta: ObjectMeta = {
       objectId,
@@ -70,7 +84,13 @@ export class GitHubStoreClient {
   }
 
   async listAll(): Promise<Record<string, StoredObject>> {
-    const issues = await this.fetchFromGitHub("/issues", {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
       method: "GET",
       params: {
         labels: this.config.baseLabel,
@@ -82,7 +102,7 @@ export class GitHubStoreClient {
 
     for (const issue of issues) {
       // Skip archived objects
-      if (issue.labels.some((label: { name: string }) => label.name === "archived")) {
+      if (issue.labels.some((label) => label.name === "archived")) {
         continue;
       }
 
@@ -91,7 +111,8 @@ export class GitHubStoreClient {
         const obj = await this._getObjectByNumber(issue.number);
         objects[objectId] = obj;
       } catch (error) {
-        console.warn(`Skipping issue #${issue.number}:`, error);
+        // Skip issues that can't be processed
+        continue;
       }
     }
 
@@ -99,7 +120,13 @@ export class GitHubStoreClient {
   }
 
   async listUpdatedSince(timestamp: Date): Promise<Record<string, StoredObject>> {
-    const issues = await this.fetchFromGitHub("/issues", {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
       method: "GET",
       params: {
         labels: this.config.baseLabel,
@@ -111,7 +138,7 @@ export class GitHubStoreClient {
     const objects: Record<string, StoredObject> = {};
 
     for (const issue of issues) {
-      if (issue.labels.some((label: { name: string }) => label.name === "archived")) {
+      if (issue.labels.some((label) => label.name === "archived")) {
         continue;
       }
 
@@ -123,7 +150,8 @@ export class GitHubStoreClient {
           objects[objectId] = obj;
         }
       } catch (error) {
-        console.warn(`Skipping issue #${issue.number}:`, error);
+        // Skip issues that can't be processed
+        continue;
       }
     }
 
@@ -136,7 +164,10 @@ export class GitHubStoreClient {
     data: Json;
     commentId: number;
   }>> {
-    const issues = await this.fetchFromGitHub("/issues", {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
       method: "GET",
       params: {
         labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
@@ -149,12 +180,17 @@ export class GitHubStoreClient {
     }
 
     const issue = issues[0];
-    const comments = await this.fetchFromGitHub(`/issues/${issue.number}/comments`);
+    const comments = await this.fetchFromGitHub<Array<{
+      id: number;
+      created_at: string;
+      body: string;
+    }>>(`/issues/${issue.number}/comments`);
+    
     const history = [];
 
     for (const comment of comments) {
       try {
-        const update = JSON.parse(comment.body);
+        const update = JSON.parse(comment.body) as { type?: string; data?: Json };
         history.push({
           timestamp: comment.created_at,
           type: update.type || "update",
@@ -162,7 +198,8 @@ export class GitHubStoreClient {
           commentId: comment.id,
         });
       } catch (error) {
-        console.warn(`Skipping comment ${comment.id}: Invalid JSON`);
+        // Skip comments with invalid JSON
+        continue;
       }
     }
 
@@ -170,7 +207,7 @@ export class GitHubStoreClient {
   }
 
   private async _getVersion(issueNumber: number): Promise<number> {
-    const comments = await this.fetchFromGitHub(`/issues/${issueNumber}/comments`);
+    const comments = await this.fetchFromGitHub<Array<unknown>>(`/issues/${issueNumber}/comments`);
     return comments.length + 1;
   }
 
@@ -184,9 +221,15 @@ export class GitHubStoreClient {
   }
 
   private async _getObjectByNumber(issueNumber: number): Promise<StoredObject> {
-    const issue = await this.fetchFromGitHub(`/issues/${issueNumber}`);
+    const issue = await this.fetchFromGitHub<{
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>(`/issues/${issueNumber}`);
+    
     const objectId = this._getObjectIdFromLabels(issue);
-    const data = JSON.parse(issue.body);
+    const data = JSON.parse(issue.body) as Json;
 
     const meta: ObjectMeta = {
       objectId,
