@@ -28,13 +28,13 @@ describe('GitHubStoreClient', () => {
       const mockComments = [{ id: 1 }, { id: 2 }];
 
       fetchMock
-        .mockResponseOnce(JSON.stringify([mockIssue])) // Issues query
-        .mockResponseOnce(JSON.stringify(mockComments)); // Comments for version
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
 
       const obj = await client.getObject('test-object');
 
       expect(obj.meta.objectId).toBe('test-object');
-      expect(obj.meta.version).toBe(3); // 2 comments + 1
+      expect(obj.meta.version).toBe(3);
       expect(obj.data).toEqual({ key: 'value' });
     });
 
@@ -73,18 +73,16 @@ describe('GitHubStoreClient', () => {
         }
       ];
 
-      // Mock the sequence of API calls
       fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssues)) // Initial issues query
-        .mockResponseOnce(JSON.stringify([])) // Comments for version query
-        .mockResponseOnce(JSON.stringify(mockIssues[0])) // Get first issue details
-        .mockResponseOnce(JSON.stringify([])); // Comments for first issue version
+        .mockResponseOnce(JSON.stringify(mockIssues))
+        .mockResponseOnce(JSON.stringify([]))  // Comments for version of first issue
+        .mockResponseOnce(JSON.stringify([])); // Comments for version of second issue
 
       const objects = await client.listAll();
 
       expect(Object.keys(objects)).toHaveLength(1);
       expect(objects['test-1']).toBeDefined();
-      expect(objects['test-2']).toBeUndefined(); // Archived object
+      expect(objects['test-2']).toBeUndefined();
     });
   });
 
@@ -114,12 +112,10 @@ describe('GitHubStoreClient', () => {
         }
       ];
 
-      // Mock the sequence of API calls
       fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssues)) // Initial issues query
-        .mockResponseOnce(JSON.stringify([])) // Comments for version query
-        .mockResponseOnce(JSON.stringify(mockIssues[0])) // Get first issue details
-        .mockResponseOnce(JSON.stringify([])); // Comments for first issue version
+        .mockResponseOnce(JSON.stringify(mockIssues))
+        .mockResponseOnce(JSON.stringify([])) // Comments for version of first issue
+        .mockResponseOnce(JSON.stringify([])); // Comments for version of second issue
 
       const objects = await client.listUpdatedSince(timestamp);
 
