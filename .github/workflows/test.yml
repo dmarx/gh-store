@@ -29,7 +29,7 @@ jobs:
         
     - name: Run unit tests
       run: |
-        pytest tests/unit --cov=github_store --cov-report=xml
+        pytest tests/unit
         
     # - name: Run integration tests
     #   env:

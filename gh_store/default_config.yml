@@ -1,4 +1,4 @@
-# config.yml
+# gh_store/default_config.yml
 
 store:
   # Base label for all stored objects
@@ -7,8 +7,10 @@ store:
   # Prefix for unique identifier labels
   uid_prefix: "UID:"
   
-  # Reaction to mark processed comments
-  processed_reaction: "+1"
+  # Reaction settings
+  reactions:
+    processed: "+1"
+    initial_state: "🔰"  # Japanese "beginner" symbol for initial state
   
   # Retry settings for GitHub API calls
   retries:

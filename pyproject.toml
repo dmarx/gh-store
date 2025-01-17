@@ -1,6 +1,6 @@
 [project]
 name = "gh-store"
-version = "0.4.1"
+version = "0.4.2"
 description = "A lightweight data store using GitHub Issues as a backend"
 authors = [
     {name = "David Marx", email = "david.marx84@gmail.com"},
@@ -18,6 +18,11 @@ license = {text = "MIT"}
 
 [project.scripts]
 gh-store = "gh_store.__main__:main"
+
+# [tool.hatch.build]
+# include = [
+#     "gh_store/default_config.yml",
+# ]
 
 [project.optional-dependencies]
 dev = [
@@ -41,7 +46,7 @@ docs = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=github_store --cov-report=term-missing"
+addopts = "--cov=gh_store --cov-report=term-missing"
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
