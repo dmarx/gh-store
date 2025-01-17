@@ -169,3 +169,24 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+#################################
+
+# TypeScript
+typescript/node_modules/
+typescript/dist/
+typescript/coverage/
+typescript/.npm/
+typescript/*.log
+typescript/.eslintcache
+typescript/.env
+
+# Keep config files
+!typescript/package.json
+!typescript/package-lock.json
+!typescript/tsconfig.json
+!typescript/tsup.config.ts
+!typescript/jest.config.js
+!typescript/jest.setup.js
+!typescript/.eslintrc.json
+!typescript/.prettierrc
