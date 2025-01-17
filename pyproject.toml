@@ -19,6 +19,11 @@ license = {text = "MIT"}
 [project.scripts]
 gh-store = "gh_store.__main__:main"
 
+[tool.hatch.build]
+include = [
+    "gh_store/*.yml",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
