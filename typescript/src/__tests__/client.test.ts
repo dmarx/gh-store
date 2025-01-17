@@ -1,4 +1,4 @@
-// src/__tests__/client.test.ts
+// typescript/src/__tests__/client.test.ts
 import { GitHubStoreClient } from '../client';
 import fetchMock from 'jest-fetch-mock';
 
@@ -73,10 +73,12 @@ describe('GitHubStoreClient', () => {
         }
       ];
 
+      // Mock the sequence of API calls
       fetchMock
         .mockResponseOnce(JSON.stringify(mockIssues)) // Initial issues query
-        .mockResponseOnce(JSON.stringify([])) // Comments for first object
-        .mockResponseOnce(JSON.stringify(mockIssues[0])); // Get first object
+        .mockResponseOnce(JSON.stringify([])) // Comments for version query
+        .mockResponseOnce(JSON.stringify(mockIssues[0])) // Get first issue details
+        .mockResponseOnce(JSON.stringify([])); // Comments for first issue version
 
       const objects = await client.listAll();
 
@@ -112,10 +114,12 @@ describe('GitHubStoreClient', () => {
         }
       ];
 
+      // Mock the sequence of API calls
       fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssues))
-        .mockResponseOnce(JSON.stringify([]))
-        .mockResponseOnce(JSON.stringify(mockIssues[0]));
+        .mockResponseOnce(JSON.stringify(mockIssues)) // Initial issues query
+        .mockResponseOnce(JSON.stringify([])) // Comments for version query
+        .mockResponseOnce(JSON.stringify(mockIssues[0])) // Get first issue details
+        .mockResponseOnce(JSON.stringify([])); // Comments for first issue version
 
       const objects = await client.listUpdatedSince(timestamp);
 
