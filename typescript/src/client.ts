@@ -108,8 +108,17 @@ export class GitHubStoreClient {
 
       try {
         const objectId = this._getObjectIdFromLabels(issue);
-        const obj = await this._getObjectByNumber(issue.number);
-        objects[objectId] = obj;
+        const data = JSON.parse(issue.body) as Json;
+
+        const meta: ObjectMeta = {
+          objectId,
+          label: objectId,
+          createdAt: new Date(issue.created_at),
+          updatedAt: new Date(issue.updated_at),
+          version: await this._getVersion(issue.number),
+        };
+
+        objects[objectId] = { meta, data };
       } catch (error) {
         // Skip issues that can't be processed
         continue;
@@ -144,10 +153,19 @@ export class GitHubStoreClient {
 
       try {
         const objectId = this._getObjectIdFromLabels(issue);
-        const obj = await this._getObjectByNumber(issue.number);
+        const data = JSON.parse(issue.body) as Json;
+        const updatedAt = new Date(issue.updated_at);
 
-        if (obj.meta.updatedAt > timestamp) {
-          objects[objectId] = obj;
+        if (updatedAt > timestamp) {
+          const meta: ObjectMeta = {
+            objectId,
+            label: objectId,
+            createdAt: new Date(issue.created_at),
+            updatedAt,
+            version: await this._getVersion(issue.number),
+          };
+
+          objects[objectId] = { meta, data };
         }
       } catch (error) {
         // Skip issues that can't be processed
@@ -218,27 +236,5 @@ export class GitHubStoreClient {
       }
     }
     throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
-  }
-
-  private async _getObjectByNumber(issueNumber: number): Promise<StoredObject> {
-    const issue = await this.fetchFromGitHub<{
-      body: string;
-      created_at: string;
-      updated_at: string;
-      labels: Array<{ name: string }>;
-    }>(`/issues/${issueNumber}`);
-    
-    const objectId = this._getObjectIdFromLabels(issue);
-    const data = JSON.parse(issue.body) as Json;
-
-    const meta: ObjectMeta = {
-      objectId,
-      label: objectId,
-      createdAt: new Date(issue.created_at),
-      updatedAt: new Date(issue.updated_at),
-      version: await this._getVersion(issueNumber),
-    };
-
-    return { meta, data };
   }
 }
