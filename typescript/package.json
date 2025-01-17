@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "type": "module",
   "files": [
     "dist",
     "README.md"
@@ -18,12 +19,20 @@
     "test:watch": "jest --watch",
     "prepublishOnly": "npm run build"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "keywords": [
     "github",
     "storage",
     "typescript",
     "client"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmarx/gh-store.git",
+    "directory": "typescript"
+  },
   "author": "David Marx <david.marx84@gmail.com>",
   "license": "MIT",
   "devDependencies": {
@@ -45,6 +54,7 @@
     "@types/chrome": ">=0.0.246"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
