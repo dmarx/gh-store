@@ -1,6 +1,9 @@
-# gh-store
+# Github Issues as a Data Store
 
-A data store implementation using GitHub Issues as a backend. Provides versioned storage and update capabilities for applications running in GitHub's ecosystem.
+The `gh-store` provides data store implementation that uses GitHub Issues as a backend. Provides versioned storage and update capabilities for applications running in GitHub's ecosystem. The primary intended use case is for applications which are constrained to Github Actions as the
+only available runtime, and free-tier github resources.
+
+The data storage pattern presented here is inspired by https://github.com/utterance/utterances
 
 ## Key Features
 - Store and version JSON objects using GitHub Issues
@@ -161,22 +164,37 @@ gh-store update-snapshot \
   --snapshot-path <path>
 ```
 
-## Configuration
+# Configuration
 
-Create `config.yml`:
+A default configuration is automatically created at `~/.config/gh-store/config.yml` when first using the tool. You can customize this file or specify a different config location:
+
+```python
+store = GitHubStore(
+    token="github-token",
+    repo="username/repository",
+    config_path=Path("custom_config.yml")
+)
+```
+
+Default configuration:
 
 ```yaml
+# gh_store/default_config.yml
+
 store:
-  # Label identifying store issues
+  # Base label for all stored objects
   base_label: "stored-object"
   
-  # Prefix for object ID labels
+  # Prefix for unique identifier labels
   uid_prefix: "UID:"
   
-  # Reaction marking processed comments
-  processed_reaction: "+1"
+  # Reaction settings
+  # Limited to: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"]
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
   
-  # API retry settings
+  # Retry settings for GitHub API calls
   retries:
     max_attempts: 3
     backoff_factor: 2
@@ -191,12 +209,42 @@ store:
     format: "{time} | {level} | {message}"
 ```
 
+## Object History
+
+Each object maintains a complete history from its initial state through all updates:
+
+```python
+# Get object history
+history = store.issue_handler.get_object_history("metrics")
+
+# History includes initial state and all updates
+for entry in history:
+    print(f"[{entry['timestamp']}] {entry['type']}")
+    print(f"Data: {entry['data']}")
+```
+
+The history includes:
+- Initial state with timestamp and data
+- All updates in chronological order
+- Each entry's comment ID for reference
+
+History is tracked through:
+- Initial state comment marked with 🚀
+- Update comments marked with 👍 when processed
+- All changes preserved in chronological order
+
 ## Limitations
 
-- Not suitable for high-frequency updates (GitHub API limits)
+- Not suitable for high volume or high velocity (GitHub API limits)
+  - Unique objects per store is limited only by the number of unique issues and labels
+  - Per experimentation by SO users, github supports at least 10k+ unique labels within a single repo
+  - Even if this is theoretically unbounded, it is inadvisable to use this system if you plan to store more than 10k+ items
+  - As concrete examples of undocumented github api limitations:
+    - There is no limit to the number of repos a single user may star, but above 7k stars the native github frontend breaks
+    - There is no limit to the number of stars that can be added to a single star list, but above 3k stars the number of pages exceeds 100, and newly added stars after the 3000th member of the list will not be retrievable via the star list endpoint.
 - Objects limited to Issue size (~65KB)
 - Updates processed asynchronously via GitHub Actions
-- Consider data visibility in public repositories
+- Sensitive data that should not be publicly visible
 
 ## Development
 
