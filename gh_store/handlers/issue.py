@@ -1,7 +1,7 @@
 # gh_store/handlers/issue.py
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from loguru import logger
 from github import Repository
 from omegaconf import DictConfig
@@ -21,7 +21,6 @@ class IssueHandler:
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
     
-
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
@@ -38,6 +37,18 @@ class IssueHandler:
             body=json.dumps(data, indent=2),
             labels=[self.base_label, uid_label]
         )
+        
+        # Add initial state comment
+        initial_state_comment = {
+            "type": "initial_state",
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        comment = issue.create_comment(json.dumps(initial_state_comment, indent=2))
+        
+        # Mark as processed to prevent update processing
+        comment.create_reaction(self.config.store.reactions.processed)
+        comment.create_reaction(self.config.store.reactions.initial_state)
         
         # Create metadata
         meta = ObjectMeta(
@@ -109,6 +120,39 @@ class IssueHandler:
         
         return StoredObject(meta=meta, data=data)
 
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object, including initial state"""
+        logger.info(f"Retrieving history for object: {object_id}")
+        
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
+        # Query for issue with matching labels
+        issues = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[self.base_label, uid_label],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+            
+        issue = issues[0]
+        history = []
+        
+        # Process all comments chronologically
+        for comment in issue.get_comments():
+            try:
+                update = json.loads(comment.body)
+                history.append({
+                    "timestamp": comment.created_at.isoformat(),
+                    "type": update.get("type", "update"),
+                    "data": update.get("data", update),
+                    "comment_id": comment.id
+                })
+            except json.JSONDecodeError:
+                logger.warning(f"Skipping comment {comment.id}: Invalid JSON")
+                
+        return history
     
     def get_object_id_from_labels(self, issue) -> str:
         """
