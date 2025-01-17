@@ -1,5 +1,5 @@
 {
-  "name": "@gh-store/client",
+  "name": "gh-store-client",
   "version": "0.1.0",
   "description": "TypeScript client for GitHub Issue Store",
   "main": "dist/index.js",
