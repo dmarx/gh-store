@@ -79,3 +79,51 @@ target-version = "py312"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+##########
+
+# llamero stuff
+
+[tool.summary]
+max_file_size_kb = 500
+
+exclude_patterns = [
+    '.git',
+    '.gitignore',
+    '.pytest_cache',
+    '__pycache__',
+    'SUMMARY',
+    '.coverage',
+    '.env',
+    '.venv',
+    '.idea',
+    '.vscode',
+    '.bundle.js',
+    '.bundle.ts'
+]
+
+include_extensions = [
+    '.py',
+    '.md',
+    '.txt',
+    '.yml',
+    '.yaml',
+    '.toml',
+    '.json',
+    '.html',
+    '.css',
+    '.js',
+    '.ts',
+    '.tsx',
+    '.j2'
+]
+
+exclude_directories = [
+    '.git',
+    '__pycache__',
+    '.pytest_cache',
+    '.venv',
+    '.idea',
+    '.vscode',
+    'data'
+]
