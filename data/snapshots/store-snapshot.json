@@ -1,5 +1,5 @@
 {
-  "snapshot_time": "2025-01-16T08:44:02.044704+00:00",
+  "snapshot_time": "2025-01-18T00:37:15.812276+00:00",
   "repository": "dmarx/gh-store",
   "objects": {
     "daily-metrics": {
@@ -22,6 +22,33 @@
         "created_at": "2025-01-16T06:56:05+00:00",
         "updated_at": "2025-01-16T06:57:35+00:00",
         "version": 2
+      }
+    },
+    "daily-metrics123": {
+      "data": {
+        "timestamp": "2025-01-17T19:48:06.033520+00:00",
+        "metrics": {
+          "temperature": 24.4,
+          "humidity": 48.01,
+          "pressure": 983.38
+        },
+        "counters": {
+          "visitors": 313,
+          "actions": 4381,
+          "errors": 36
+        },
+        "status": "yellow",
+        "pdf": "https://github.com/user-attachments/files/18459894/Ravasio-GRB-2024.pdf",
+        "data": {
+          "metrics": {
+            "temperature": 0.0
+          }
+        }
+      },
+      "meta": {
+        "created_at": "2025-01-17T19:48:07+00:00",
+        "updated_at": "2025-01-17T21:28:22+00:00",
+        "version": 4
       }
     }
   }
