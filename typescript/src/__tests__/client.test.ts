@@ -121,8 +121,8 @@ describe('GitHubStoreClient', () => {
 
       // Verify update comment
       const commentBody = JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body;
-      expect(commentBody).toContain('"key":"updated"');
-
+      expect(JSON.parse(commentBody)).toEqual({ key: 'updated' });
+      
       // Verify issue reopened
       expect(fetchMock.mock.calls[2][1]?.body).toContain('"state":"open"');
     });
