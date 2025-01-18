@@ -83,6 +83,110 @@ export class GitHubStoreClient {
     return { meta, data };
   }
 
+  async createObject(objectId: string, data: Json): Promise<StoredObject> {
+    // Create uid label with prefix
+    const uidLabel = `${this.config.uidPrefix}${objectId}`;
+    
+    // Create issue with object data and labels
+    const issue = await this.fetchFromGitHub<{
+      number: number;
+      created_at: string;
+      updated_at: string;
+      html_url: string;
+    }>("/issues", {
+      method: "POST",
+      body: JSON.stringify({
+        title: `Stored Object: ${objectId}`,
+        body: JSON.stringify(data, null, 2),
+        labels: [this.config.baseLabel, uidLabel]
+      })
+    });
+
+    // Add initial state comment
+    const initialStateComment = {
+      type: "initial_state",
+      data: data,
+      timestamp: new Date().toISOString()
+    };
+
+    // Create comment and add reactions
+    const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(initialStateComment, null, 2)
+      })
+    });
+
+    // Add processed and initial state reactions
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.processed })
+    });
+
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.initialState })
+    });
+
+    // Close issue to indicate no processing needed
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "closed" })
+    });
+
+    const meta: ObjectMeta = {
+      objectId,
+      label: uidLabel,
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at),
+      version: 1
+    };
+
+    return { meta, data };
+  }
+
+  async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
+    // Get the object's issue first
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      state: string;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+        state: "all",
+      },
+    });
+
+    if (!issues || issues.length === 0) {
+      throw new Error(`No object found with ID: ${objectId}`);
+    }
+
+    const issue = issues[0];
+
+    // Check if issue is already being processed
+    if (issue.state === "open") {
+      throw new Error("Object is currently being processed");
+    }
+
+    // Add update comment
+    await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(changes, null, 2)
+      })
+    });
+
+    // Reopen issue to trigger processing
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "open" })
+    });
+
+    // Return current state (before update is processed)
+    return this.getObject(objectId);
+  }
+
   async listAll(): Promise<Record<string, StoredObject>> {
     const issues = await this.fetchFromGitHub<Array<{
       number: number;
