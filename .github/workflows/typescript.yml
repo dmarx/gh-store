@@ -31,6 +31,10 @@ jobs:
     # Initial clean npm install to generate package-lock.json
     - name: Initialize npm
       run: |
+        # Force rebuild of package-lock.json if it exists
+        if [ -f "package-lock.json" ]; then
+          rm -f package-lock.json
+        fi
         npm install --package-lock-only --no-audit
         git status
     
