@@ -1,29 +1,30 @@
 {
   "name": "gh-store-client",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "TypeScript client for GitHub Issue Store",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
     }
   },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup src/index.ts --format esm,cjs --dts",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-    "prepublishOnly": "npm run build"
+    "test:packaging": "node scripts/test-packaging.js",
+    "prepublishOnly": "npm run build && npm run test:packaging"
   },
   "engines": {
     "node": ">=20"
