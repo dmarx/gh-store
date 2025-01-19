@@ -165,9 +165,13 @@ export class GitHubStoreClient {
     const issue = issues[0];
 
     // Check if issue is already being processed
-    if (issue.state === "open") {
-      throw new Error("Object is currently being processed");
-    }
+    // if (issue.state === "open") {
+    //   throw new Error("Object is currently being processed");
+    // }
+    // ... actually, we don't care if issue appears to be in process. 
+    // there isn't really any opportunity for race conditions here because
+    // we're writing updates into comments, and the comments always get
+    // processed sequentially. we don't need a locking mechanism like this.
 
     // Add update comment
     await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
@@ -182,6 +186,8 @@ export class GitHubStoreClient {
       method: "PATCH",
       body: JSON.stringify({ state: "open" })
     });
+    // FYI: if this throws something like an "issue already open" error:
+    //   ignore it.
 
     // Return current state (before update is processed)
     return this.getObject(objectId);
