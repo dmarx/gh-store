@@ -57,6 +57,24 @@ jobs:
         
     - name: Build
       run: npm run build
+
+    # Add packaging test
+    - name: Test packaging
+      run: |
+        # First verify the test script exists
+        if [ ! -f "scripts/test-packaging.js" ]; then
+          echo "Error: packaging test script not found"
+          exit 1
+        fi
+        npm run test:packaging
+
+    # Show dist contents for debugging
+    - name: Show dist contents
+      run: |
+        echo "Dist directory contents:"
+        ls -la dist/
+        echo "Package exports:"
+        cat package.json | jq '.exports'
     
     # Only run publish step on releases with a tag starting with 'ts-v'
     - name: Publish to npm
