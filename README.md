@@ -1,4 +1,4 @@
-![](static/shitty-logo.png)
+![An octocat poorly disguised as a database](static/shitty-logo.png)
 
 # Github Issues as a Data Store
 
