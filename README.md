@@ -242,6 +242,7 @@ History is tracked through:
     - There is no limit to the number of repos a single user may star, but above 7k stars the native github frontend breaks
     - There is no limit to the number of stars that can be added to a single star list, but above 3k stars the number of pages exceeds 100, and newly added stars after the 3000th member of the list will not be retrievable via the star list endpoint.
 - Objects limited to Issue size (~65KB)
+  - Github supports 10MB attachments to issues/comments, so limited future blob support is feasible
 - Updates processed asynchronously via GitHub Actions
 - Sensitive data that should not be publicly visible
 
