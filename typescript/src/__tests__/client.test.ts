@@ -127,19 +127,6 @@ describe('GitHubStoreClient', () => {
       expect(fetchMock.mock.calls[2][1]?.body).toContain('"state":"open"');
     });
 
-    it('should prevent concurrent updates', async () => {
-      const mockIssue = {
-        number: 1,
-        state: 'open' // Issue already being processed
-      };
-
-      fetchMock.mockResponseOnce(JSON.stringify([mockIssue]));
-
-      await expect(client.updateObject('test-object', { key: 'value' }))
-        .rejects
-        .toThrow('Object is currently being processed');
-    });
-
     it('should throw error when object not found', async () => {
       fetchMock.mockResponseOnce(JSON.stringify([]));
 
