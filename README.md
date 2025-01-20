@@ -1,3 +1,5 @@
+![](static/shitty-logo.png)
+
 # Github Issues as a Data Store
 
 The `gh-store` package provides a data store implementation that uses GitHub Issues as a backend. The primary intended use case is for "github native"  applications which are constrained to Github Actions as the only available runtime, and free-tier github resources.
