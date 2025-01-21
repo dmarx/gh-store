@@ -9,10 +9,69 @@ describe('GitHubStoreClient', () => {
 
   beforeEach(() => {
     fetchMock.resetMocks();
-    client = new GitHubStoreClient(token, repo);
+    client = new GitHubStoreClient(token, repo, {
+      cache: {
+        maxSize: 100,
+        ttl: 3600000
+      }
+    });
   });
 
-  describe('getObject', () => {
+  describe('getObject with cache', () => {
+    const mockIssue = {
+      number: 123,
+      body: JSON.stringify({ key: 'value' }),
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-02T00:00:00Z',
+      labels: [
+        { name: 'stored-object' },
+        { name: 'UID:test-object' }
+      ]
+    };
+
+    it('should use cached issue number on subsequent requests', async () => {
+      // First request - should query by labels
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Initial labels query
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues?labels=');
+
+      // Reset mock to verify cache hit
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssue)) // Direct issue fetch
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      
+      // Should use direct issue number fetch instead of labels query
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+    });
+
+    it('should fall back to label query if cached issue is not found', async () => {
+      // First request succeeds
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify([]));
+
+      await client.getObject('test-object');
+
+      // Reset mock to simulate deleted issue
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce('', { status: 404 }) // Cached issue not found
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Fallback label query
+        .mockResponseOnce(JSON.stringify([])); // Comments query
+
+      await client.getObject('test-object');
+
+      // Should have attempted direct fetch, then fallen back to labels
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+      expect(fetchMock.mock.calls[1][0]).toContain('/issues?labels=');
+    });
+
     it('should fetch and parse object correctly', async () => {
       const mockIssue = {
         number: 1,
@@ -48,12 +107,12 @@ describe('GitHubStoreClient', () => {
   });
 
   describe('createObject', () => {
-    it('should create new object with initial state', async () => {
+    it('should create new object with initial state and cache issue number', async () => {
       const mockIssue = {
-        number: 1,
+        number: 456,
         created_at: '2025-01-01T00:00:00Z',
         updated_at: '2025-01-01T00:00:00Z',
-        html_url: 'https://github.com/owner/repo/issues/1'
+        html_url: 'https://github.com/owner/repo/issues/456'
       };
 
       const mockComment = { id: 123 };
@@ -80,6 +139,22 @@ describe('GitHubStoreClient', () => {
       const commentBody = JSON.parse(JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body);
       expect(commentBody.type).toBe('initial_state');
       expect(commentBody.data).toEqual(data);
+
+      // Verify cache by making a subsequent request
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce(JSON.stringify({
+          ...mockIssue,
+          body: JSON.stringify(data),
+          labels: [
+            { name: 'stored-object' },
+            { name: 'UID:test-object' }
+          ]
+        }))
+        .mockResponseOnce(JSON.stringify([]));
+
+      await client.getObject('test-object');
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/456');
     });
 
     it('should handle API errors during creation', async () => {
@@ -137,10 +212,10 @@ describe('GitHubStoreClient', () => {
   });
 
   describe('listAll', () => {
-    it('should list all non-archived objects', async () => {
+    it('should list all non-archived objects and update cache', async () => {
       const mockIssues = [
         {
-          number: 1,
+          number: 789,
           body: JSON.stringify({ id: 'obj1' }),
           created_at: '2025-01-01T00:00:00Z',
           updated_at: '2025-01-02T00:00:00Z',
@@ -150,7 +225,7 @@ describe('GitHubStoreClient', () => {
           ]
         },
         {
-          number: 2,
+          number: 790,
           body: JSON.stringify({ id: 'obj2' }),
           created_at: '2025-01-01T00:00:00Z',
           updated_at: '2025-01-02T00:00:00Z',
@@ -172,6 +247,15 @@ describe('GitHubStoreClient', () => {
       expect(Object.keys(objects)).toHaveLength(1);
       expect(objects['test-1']).toBeDefined();
       expect(objects['test-2']).toBeUndefined();
+
+      // Verify cache was populated by attempting a get
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssues[0]))
+        .mockResponseOnce(JSON.stringify([]));
+
+      await client.getObject('test-1');
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/789');
     });
   });
 
