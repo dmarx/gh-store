@@ -96,6 +96,3 @@ export class IssueCache {
     return oldestKey;
   }
 }
-
-// Export cache-related types
-export type { CacheConfig, CacheEntry };
