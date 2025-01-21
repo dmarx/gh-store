@@ -1,7 +1,7 @@
 // src/cache.ts
 export interface CacheEntry {
   issueNumber: number;
-  lastAccessed: Date;
+  lastAccessed: number; // Using timestamp instead of Date for easier comparison
   createdAt: Date;
   updatedAt: Date;
 }
@@ -15,11 +15,13 @@ export class IssueCache {
   private cache: Map<string, CacheEntry>;
   private maxSize: number;
   private ttl: number;
+  private accessOrder: string[]; // Track order of access
 
   constructor(config: CacheConfig = {}) {
     this.cache = new Map();
     this.maxSize = config.maxSize ?? 1000;
     this.ttl = config.ttl ?? 1000 * 60 * 60; // Default 1 hour TTL
+    this.accessOrder = [];
   }
 
   get(objectId: string): number | undefined {
@@ -30,42 +32,49 @@ export class IssueCache {
     }
 
     // Check if entry has expired
-    if (Date.now() - entry.lastAccessed.getTime() > this.ttl) {
+    if (Date.now() - entry.lastAccessed > this.ttl) {
       this.cache.delete(objectId);
+      this.removeFromAccessOrder(objectId);
       return undefined;
     }
 
-    // Update last accessed time
-    entry.lastAccessed = new Date();
+    // Update last accessed time and move to front of access order
+    entry.lastAccessed = Date.now();
+    this.updateAccessOrder(objectId);
     return entry.issueNumber;
   }
 
   set(objectId: string, issueNumber: number, metadata: { createdAt: Date; updatedAt: Date }): void {
-    // Evict oldest entries if cache is full
-    if (this.cache.size >= this.maxSize) {
-      const oldestKey = this.findOldestEntry();
-      if (oldestKey) {
-        this.cache.delete(oldestKey);
+    // Evict least recently used entry if cache is full
+    if (this.cache.size >= this.maxSize && !this.cache.has(objectId)) {
+      const lru = this.accessOrder[this.accessOrder.length - 1];
+      if (lru) {
+        this.cache.delete(lru);
+        this.removeFromAccessOrder(lru);
       }
     }
 
+    // Add/update entry
     this.cache.set(objectId, {
       issueNumber,
-      lastAccessed: new Date(),
+      lastAccessed: Date.now(),
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt
     });
+
+    this.updateAccessOrder(objectId);
   }
 
   remove(objectId: string): void {
     this.cache.delete(objectId);
+    this.removeFromAccessOrder(objectId);
   }
 
   clear(): void {
     this.cache.clear();
+    this.accessOrder = [];
   }
 
-  // Useful for debugging and monitoring
   getStats(): { size: number; maxSize: number; ttl: number } {
     return {
       size: this.cache.size,
@@ -74,7 +83,6 @@ export class IssueCache {
     };
   }
 
-  // Check if an entry might need updating based on the latest known update time
   shouldRefresh(objectId: string, latestUpdate: Date): boolean {
     const entry = this.cache.get(objectId);
     if (!entry) return true;
@@ -82,17 +90,15 @@ export class IssueCache {
     return latestUpdate > entry.updatedAt;
   }
 
-  private findOldestEntry(): string | undefined {
-    let oldestKey: string | undefined;
-    let oldestTime = Date.now();
+  private updateAccessOrder(objectId: string): void {
+    this.removeFromAccessOrder(objectId);
+    this.accessOrder.unshift(objectId); // Add to front
+  }
 
-    for (const [key, entry] of this.cache.entries()) {
-      if (entry.lastAccessed.getTime() < oldestTime) {
-        oldestTime = entry.lastAccessed.getTime();
-        oldestKey = key;
-      }
+  private removeFromAccessOrder(objectId: string): void {
+    const index = this.accessOrder.indexOf(objectId);
+    if (index > -1) {
+      this.accessOrder.splice(index, 1);
     }
-
-    return oldestKey;
   }
 }
