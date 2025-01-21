@@ -71,12 +71,11 @@ export class GitHubStoreClient {
         // Verify it's the correct issue
         if (!this._verifyIssueLabels(issue, objectId)) {
           this.cache.remove(objectId);
-          issue = null;
+          issue = undefined;
         }
       } catch (error) {
         // If issue not found, remove from cache
         this.cache.remove(objectId);
-        issue = null;
       }
     }
 
@@ -101,6 +100,10 @@ export class GitHubStoreClient {
       }
 
       issue = issues[0];
+    }
+
+    if (!issue || !issue.body) {
+      throw new Error(`Invalid issue data received for ID: ${objectId}`);
     }
 
     const data = JSON.parse(issue.body) as Json;
