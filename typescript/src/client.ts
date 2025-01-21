@@ -1,15 +1,17 @@
 // typescript/src/client.ts
 import { StoredObject, ObjectMeta, GitHubStoreConfig, Json } from './types';
+import { IssueCache, CacheConfig } from './cache';
 
 export class GitHubStoreClient {
   private token: string;
   private repo: string;
   private config: Required<GitHubStoreConfig>;
+  private cache: IssueCache;
 
   constructor(
     token: string,
     repo: string,
-    config: GitHubStoreConfig = {}
+    config: GitHubStoreConfig & { cache?: CacheConfig } = {}
   ) {
     this.token = token;
     this.repo = repo;
@@ -21,6 +23,7 @@ export class GitHubStoreClient {
         initialState: config.reactions?.initialState ?? "rocket",
       },
     };
+    this.cache = new IssueCache(config.cache);
   }
 
   private async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
@@ -50,33 +53,68 @@ export class GitHubStoreClient {
   }
 
   async getObject(objectId: string): Promise<StoredObject> {
-    // Query for issue with matching labels
-    const issues = await this.fetchFromGitHub<Array<{
-      number: number;
-      body: string;
-      created_at: string;
-      updated_at: string;
-      labels: Array<{ name: string }>;
-    }>>("/issues", {
-      method: "GET",
-      params: {
-        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
-        state: "closed",
-      },
-    });
+    // Try to get issue number from cache
+    const cachedIssueNumber = this.cache.get(objectId);
+    let issue;
 
-    if (!issues || issues.length === 0) {
-      throw new Error(`No object found with ID: ${objectId}`);
+    if (cachedIssueNumber) {
+      // Try to fetch directly using cached issue number
+      try {
+        issue = await this.fetchFromGitHub<{
+          number: number;
+          body: string;
+          created_at: string;
+          updated_at: string;
+          labels: Array<{ name: string }>;
+        }>(`/issues/${cachedIssueNumber}`);
+
+        // Verify it's the correct issue
+        if (!this._verifyIssueLabels(issue, objectId)) {
+          this.cache.remove(objectId);
+          issue = null;
+        }
+      } catch (error) {
+        // If issue not found, remove from cache
+        this.cache.remove(objectId);
+        issue = null;
+      }
     }
 
-    const issue = issues[0];
+    if (!issue) {
+      // Fall back to searching by labels
+      const issues = await this.fetchFromGitHub<Array<{
+        number: number;
+        body: string;
+        created_at: string;
+        updated_at: string;
+        labels: Array<{ name: string }>;
+      }>>("/issues", {
+        method: "GET",
+        params: {
+          labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+          state: "closed",
+        },
+      });
+
+      if (!issues || issues.length === 0) {
+        throw new Error(`No object found with ID: ${objectId}`);
+      }
+
+      issue = issues[0];
+    }
+
     const data = JSON.parse(issue.body) as Json;
+    const createdAt = new Date(issue.created_at);
+    const updatedAt = new Date(issue.updated_at);
+
+    // Update cache
+    this.cache.set(objectId, issue.number, { createdAt, updatedAt });
 
     const meta: ObjectMeta = {
       objectId,
       label: `${this.config.uidPrefix}${objectId}`,
-      createdAt: new Date(issue.created_at),
-      updatedAt: new Date(issue.updated_at),
+      createdAt,
+      updatedAt,
       version: await this._getVersion(issue.number),
     };
 
@@ -84,10 +122,8 @@ export class GitHubStoreClient {
   }
 
   async createObject(objectId: string, data: Json): Promise<StoredObject> {
-    // Create uid label with prefix
     const uidLabel = `${this.config.uidPrefix}${objectId}`;
     
-    // Create issue with object data and labels
     const issue = await this.fetchFromGitHub<{
       number: number;
       created_at: string;
@@ -102,14 +138,19 @@ export class GitHubStoreClient {
       })
     });
 
-    // Add initial state comment
+    // Add to cache immediately
+    this.cache.set(objectId, issue.number, {
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at)
+    });
+
+    // Rest of creation process...
     const initialStateComment = {
       type: "initial_state",
       data: data,
       timestamp: new Date().toISOString()
     };
 
-    // Create comment and add reactions
     const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
       method: "POST",
       body: JSON.stringify({
@@ -117,7 +158,6 @@ export class GitHubStoreClient {
       })
     });
 
-    // Add processed and initial state reactions
     await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
       method: "POST",
       body: JSON.stringify({ content: this.config.reactions.processed })
@@ -128,7 +168,6 @@ export class GitHubStoreClient {
       body: JSON.stringify({ content: this.config.reactions.initialState })
     });
 
-    // Close issue to indicate no processing needed
     await this.fetchFromGitHub(`/issues/${issue.number}`, {
       method: "PATCH",
       body: JSON.stringify({ state: "closed" })
@@ -144,7 +183,16 @@ export class GitHubStoreClient {
 
     return { meta, data };
   }
+  
+  private _verifyIssueLabels(issue: { labels: Array<{ name: string }> }, objectId: string): boolean {
+    const expectedLabels = new Set([
+      this.config.baseLabel,
+      `${this.config.uidPrefix}${objectId}`
+    ]);
 
+    return issue.labels.some(label => expectedLabels.has(label.name));
+  }
+  
   async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
     // Get the object's issue first
     const issues = await this.fetchFromGitHub<Array<{
