@@ -1,4 +1,5 @@
 // src/__tests__/cache.test.ts
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { IssueCache } from '../cache';
 
 describe('IssueCache', () => {
