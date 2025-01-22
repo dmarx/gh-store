@@ -224,7 +224,7 @@ describe('GitHubStoreClient', () => {
       ];
 
       // Add spy on fetch to track calls
-      fetchMock.mockImplementation(async (url, options) => {
+      fetchMock.mockImplementation(async (url, _options) => {
         console.error('Fetch called with URL:', url);
         if (url.toString().includes('/issues?labels=')) {
           // Initial listAll query
