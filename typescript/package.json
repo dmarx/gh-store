@@ -1,6 +1,6 @@
 {
   "name": "gh-store-client",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "TypeScript client for GitHub Issue Store",
   "type": "module",
   "exports": {
