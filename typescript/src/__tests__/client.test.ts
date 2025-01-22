@@ -224,28 +224,31 @@ describe('GitHubStoreClient', () => {
       ];
 
       // Add spy on fetch to track calls
-      fetchMock.mockImplementation(async (url, _options) => {
+      fetchMock.mockImplementation(async (inputUrl: string | URL | Request, _options) => {
+        const url = inputUrl.toString();
         console.error('Fetch called with URL:', url);
-        if (url.toString().includes('/issues?labels=')) {
+        
+        if (url.includes('/issues?labels=')) {
           // Initial listAll query
           return {
             ok: true,
             json: async () => mockIssues
           } as Response;
-        } else if (url.toString().includes('/issues/789')) {
+        } else if (url.includes('/issues/789')) {
           // Direct issue fetch via cache
           console.error('Returning cached issue:', mockIssues[0]);
           return {
             ok: true,
             json: async () => mockIssues[0]
           } as Response;
-        } else if (url.toString().includes('/comments')) {
+        } else if (url.includes('/comments')) {
           // Comments query
           return {
             ok: true,
             json: async () => []
           } as Response;
         }
+        
         console.error('Unhandled URL in mock:', url);
         return {
           ok: false,
