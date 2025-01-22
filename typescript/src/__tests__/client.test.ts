@@ -223,11 +223,10 @@ describe('GitHubStoreClient', () => {
         }
       ];
 
-      // First request to list all objects
+      // Initial request to list all objects
       fetchMock
         .mockResponseOnce(JSON.stringify(mockIssues))
-        .mockResponseOnce(JSON.stringify([])) // Comments for first issue
-        .mockResponseOnce(JSON.stringify([])); // Comments for second issue
+        .mockResponseOnce(JSON.stringify([])); // Comments for version
 
       const objects = await client.listAll();
 
@@ -235,24 +234,26 @@ describe('GitHubStoreClient', () => {
       expect(objects['test-1']).toBeDefined();
       expect(objects['test-2']).toBeUndefined();
 
-      // Reset mock for cache verification
+      // Reset mock and verify cache via getObject
       fetchMock.resetMocks();
-      const cachedIssue = {  // Create complete issue structure for cached response
-        number: 789,
-        body: JSON.stringify({ id: 'obj1' }),
-        created_at: '2025-01-01T00:00:00Z',
-        updated_at: '2025-01-02T00:00:00Z',
-        labels: [
-          { name: 'stored-object' },
-          { name: 'UID:test-1' }
-        ]
-      };
       
+      // Mock the direct issue fetch using cached number
       fetchMock
-        .mockResponseOnce(JSON.stringify(cachedIssue)) // Direct issue fetch using cached number
-        .mockResponseOnce(JSON.stringify([])); // Comments query
+        .mockResponseOnce(JSON.stringify({
+          number: 789,
+          body: JSON.stringify({ id: 'obj1' }),
+          created_at: '2025-01-01T00:00:00Z',
+          updated_at: '2025-01-02T00:00:00Z',
+          labels: [
+            { name: 'stored-object' },
+            { name: 'UID:test-1' }
+          ]
+        }))
+        .mockResponseOnce(JSON.stringify([])); // Comments for version
 
       await client.getObject('test-1');
+
+      // Verify that the cached issue number was used
       expect(fetchMock.mock.calls[0][0]).toContain('/issues/789');
     });
   });
