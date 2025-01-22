@@ -2,6 +2,15 @@
 import { StoredObject, ObjectMeta, GitHubStoreConfig, Json } from './types';
 import { IssueCache, CacheConfig } from './cache';
 
+interface GitHubIssue {
+  number: number;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  labels: Array<{ name: string }>;
+  state?: string;
+}
+
 export class GitHubStoreClient {
   private token: string;
   private repo: string;
@@ -55,18 +64,12 @@ export class GitHubStoreClient {
   async getObject(objectId: string): Promise<StoredObject> {
     // Try to get issue number from cache
     const cachedIssueNumber = this.cache.get(objectId);
-    let issue;
+    let issue: GitHubIssue | undefined;
 
     if (cachedIssueNumber) {
       // Try to fetch directly using cached issue number
       try {
-        issue = await this.fetchFromGitHub<{
-          number: number;
-          body: string;
-          created_at: string;
-          updated_at: string;
-          labels: Array<{ name: string }>;
-        }>(`/issues/${cachedIssueNumber}`);
+        issue = await this.fetchFromGitHub<GitHubIssue>(`/issues/${cachedIssueNumber}`);
 
         // Verify it's the correct issue
         if (!this._verifyIssueLabels(issue, objectId)) {
@@ -81,13 +84,7 @@ export class GitHubStoreClient {
 
     if (!issue) {
       // Fall back to searching by labels
-      const issues = await this.fetchFromGitHub<Array<{
-        number: number;
-        body: string;
-        created_at: string;
-        updated_at: string;
-        labels: Array<{ name: string }>;
-      }>>("/issues", {
+      const issues = await this.fetchFromGitHub<GitHubIssue[]>("/issues", {
         method: "GET",
         params: {
           labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
@@ -102,7 +99,7 @@ export class GitHubStoreClient {
       issue = issues[0];
     }
 
-    if (!issue || !issue.body) {
+    if (!issue?.body) {
       throw new Error(`Invalid issue data received for ID: ${objectId}`);
     }
 
