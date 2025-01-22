@@ -235,10 +235,21 @@ describe('GitHubStoreClient', () => {
       expect(objects['test-1']).toBeDefined();
       expect(objects['test-2']).toBeUndefined();
 
-      // Verify cache was populated by attempting a get
+      // Reset mock for cache verification
       fetchMock.resetMocks();
+      const cachedIssue = {  // Create complete issue structure for cached response
+        number: 789,
+        body: JSON.stringify({ id: 'obj1' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ]
+      };
+      
       fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssues[0])) // Direct issue fetch using cached number
+        .mockResponseOnce(JSON.stringify(cachedIssue)) // Direct issue fetch using cached number
         .mockResponseOnce(JSON.stringify([])); // Comments query
 
       await client.getObject('test-1');
