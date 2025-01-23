@@ -19,3 +19,7 @@ class ConcurrentUpdateError(GitHubStoreError):
 class ConfigurationError(GitHubStoreError):
     """Raised when there's an error in the store configuration"""
     pass
+
+class DuplicateUIDError(GitHubStoreError):
+    """Raised when multiple issues have the same UID label"""
+    pass
