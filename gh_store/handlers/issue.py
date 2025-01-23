@@ -7,7 +7,7 @@ from github import Repository
 from omegaconf import DictConfig
 
 from ..core.types import StoredObject, ObjectMeta, Json
-from ..core.exceptions import ObjectNotFound
+from ..core.exceptions import ObjectNotFound, DuplicateUIDError
 
 from time import sleep
 from github.GithubException import RateLimitExceededException
@@ -106,6 +106,11 @@ class IssueHandler:
         
         if not issues:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
+        elif len(issues) > 1:
+            issue_numbers = [i.number for i in issues]
+            raise DuplicateUIDError(
+                f"Found multiple issues ({issue_numbers}) with label: {uid_label}"
+            )
         
         issue = issues[0]
         data = json.loads(issue.body)
