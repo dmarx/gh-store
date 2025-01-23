@@ -1,7 +1,6 @@
 # tests/unit/test_store.py
 
 import json
-from copy import deepcopy
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
