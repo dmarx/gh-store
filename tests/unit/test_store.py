@@ -115,6 +115,7 @@ def test_get_nonexistent_object(store):
     with pytest.raises(ObjectNotFound):
         store.get("nonexistent")
 
+# Duplicate test?
 def test_process_update(store):
     """Test processing an update"""
     # Setup initial state
@@ -142,6 +143,65 @@ def test_process_update(store):
     comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
     assert comment_data == update_data
     mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
+
+def test_process_updates_with_duplicate_uid(store):
+    """Test that processing updates fails when UID is not unique"""
+    issue_number = 123
+    object_id = "test-123"
+    
+    # Mock the issue
+    mock_issue = Mock()
+    store.repo.get_issue.return_value = mock_issue
+    
+    # Mock getting object ID from labels
+    store.issue_handler.get_object_id_from_labels.return_value = object_id
+    
+    # Mock finding multiple issues with same UID
+    mock_issues = [Mock(number=123), Mock(number=456)]
+    store.repo.get_issues.return_value = mock_issues
+    
+    # Test that it raises error and closes issue
+    with pytest.raises(DuplicateUIDError) as exc:
+        store.process_updates(issue_number)
+    
+    assert f"UID {object_id} is not unique" in str(exc.value)
+    mock_issue.edit.assert_called_once_with(state="closed")
+    
+    # Verify no updates were processed
+    store.comment_handler.get_unprocessed_updates.assert_not_called()
+    store.comment_handler.mark_processed.assert_not_called()
+
+# Duplicate test?
+def test_process_updates_with_unique_uid(store):
+    """Test that processing continues normally for unique UID"""
+    issue_number = 123
+    object_id = "test-123"
+    
+    # Mock the issue
+    mock_issue = Mock()
+    store.repo.get_issue.return_value = mock_issue
+    
+    # Mock getting object ID from labels
+    store.issue_handler.get_object_id_from_labels.return_value = object_id
+    
+    # Mock finding single issue with UID
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    # Mock the update processing
+    mock_updates = [Mock()]
+    mock_obj = Mock()
+    store.comment_handler.get_unprocessed_updates.return_value = mock_updates
+    store.issue_handler.get_object_by_number.return_value = mock_obj
+    store.comment_handler.apply_update.return_value = mock_obj
+    
+    # Test normal processing
+    result = store.process_updates(issue_number)
+    
+    assert result == mock_obj
+    store.comment_handler.mark_processed.assert_called_once_with(
+        issue_number, mock_updates
+    )
+
 
 def test_create_object_ensures_labels_exist(store):
     """Test that create_object creates any missing labels"""
