@@ -10,37 +10,37 @@ from unittest.mock import Mock, patch, mock_open
 from gh_store.core.store import GitHubStore
 from gh_store.core.exceptions import ObjectNotFound, ConcurrentUpdateError
 
-@pytest.fixture
-def store():
-    """Create a store instance with a mocked GitHub repo"""
-    with patch('gh_store.core.store.Github') as mock_github:
-        mock_repo = Mock()
-        mock_github.return_value.get_repo.return_value = mock_repo
+# @pytest.fixture
+# def store():
+#     """Create a store instance with a mocked GitHub repo"""
+#     with patch('gh_store.core.store.Github') as mock_github:
+#         mock_repo = Mock()
+#         mock_github.return_value.get_repo.return_value = mock_repo
         
-        # Mock the default config
-        mock_config = """
-store:
-  base_label: "stored-object"
-  uid_prefix: "UID:"
-  reactions:
-    processed: "+1"
-    initial_state: "🔰"
-  retries:
-    max_attempts: 3
-    backoff_factor: 2
-  rate_limit:
-    max_requests_per_hour: 1000
-  log:
-    level: "INFO"
-    format: "{time} | {level} | {message}"
-"""
-        with patch('pathlib.Path.exists', return_value=False), \
-             patch('importlib.resources.files') as mock_files:
-            mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
+#         # Mock the default config
+#         mock_config = """
+# store:
+#   base_label: "stored-object"
+#   uid_prefix: "UID:"
+#   reactions:
+#     processed: "+1"
+#     initial_state: "🔰"
+#   retries:
+#     max_attempts: 3
+#     backoff_factor: 2
+#   rate_limit:
+#     max_requests_per_hour: 1000
+#   log:
+#     level: "INFO"
+#     format: "{time} | {level} | {message}"
+# """
+#         with patch('pathlib.Path.exists', return_value=False), \
+#              patch('importlib.resources.files') as mock_files:
+#             mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
             
-            store = GitHubStore(token="fake-token", repo="owner/repo")
-            store.repo = mock_repo  # Attach for test access
-            return store
+#             store = GitHubStore(token="fake-token", repo="owner/repo")
+#             store.repo = mock_repo  # Attach for test access
+#             return store
 
 def test_create_object_with_initial_state(store):
     """Test that creating an object stores the initial state in a comment"""
@@ -308,81 +308,81 @@ def test_concurrent_update_prevention(store):
     with pytest.raises(ConcurrentUpdateError):
         store.update("test-obj", {"value": 43})
 
-# def test_list_updated_since(store):
-#     """Test fetching objects updated since timestamp"""
-#     # Setup
-#     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
-#     object_id = "test-123"
-#     uid_label = f"{store.config.store.uid_prefix}{object_id}"
+def test_list_updated_since(store):
+    """Test fetching objects updated since timestamp"""
+    # Setup
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
-#     # Create properly configured mock labels
-#     stored_label = Mock()
-#     stored_label.name = "stored-object"
-#     uid_mock_label = Mock()
-#     uid_mock_label.name = uid_label
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
     
-#     # Mock get_labels for label creation check
-#     store.repo.get_labels.return_value = [stored_label]
+    # Mock get_labels for label creation check
+    store.repo.get_labels.return_value = [stored_label]
     
-#     mock_issue = Mock()
-#     mock_issue.labels = [stored_label, uid_mock_label]
-#     mock_issue.number = 1
-#     mock_issue.created_at = timestamp - timedelta(minutes=30)
-#     mock_issue.updated_at = timestamp + timedelta(minutes=30)
+    mock_issue = Mock()
+    mock_issue.labels = [stored_label, uid_mock_label]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp + timedelta(minutes=30)
     
-#     store.repo.get_issues.return_value = [mock_issue]
+    store.repo.get_issues.return_value = [mock_issue]
     
-#     # Mock the object retrieval
-#     mock_obj = Mock()
-#     mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
     
-#     # Mock the get_object_by_number method
-#     store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
-#     # Test
-#     updated = store.list_updated_since(timestamp)
+    # Test
+    updated = store.list_updated_since(timestamp)
     
-#     # Verify
-#     store.repo.get_issues.assert_called_once()
-#     call_kwargs = store.repo.get_issues.call_args[1]
-#     assert call_kwargs["since"] == timestamp
-#     assert object_id in updated
-#     assert len(updated) == 1
-#     assert updated[object_id] == mock_obj
+    # Verify
+    store.repo.get_issues.assert_called_once()
+    call_kwargs = store.repo.get_issues.call_args[1]
+    assert call_kwargs["since"] == timestamp
+    assert object_id in updated
+    assert len(updated) == 1
+    assert updated[object_id] == mock_obj
 
-# def test_list_updated_since_no_updates(store):
-#     """Test when no updates since timestamp"""
-#     # Setup
-#     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
-#     object_id = "test-123"
-#     uid_label = f"{store.config.store.uid_prefix}{object_id}"
+def test_list_updated_since_no_updates(store):
+    """Test when no updates since timestamp"""
+    # Setup
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
     
-#     # Create properly configured mock labels
-#     stored_label = Mock()
-#     stored_label.name = "stored-object"
-#     uid_mock_label = Mock()
-#     uid_mock_label.name = uid_label
+    # Create properly configured mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    uid_mock_label = Mock()
+    uid_mock_label.name = uid_label
     
-#     # Mock get_labels for label creation check
-#     store.repo.get_labels.return_value = [stored_label]
+    # Mock get_labels for label creation check
+    store.repo.get_labels.return_value = [stored_label]
     
-#     mock_issue = Mock()
-#     mock_issue.labels = [stored_label, uid_mock_label]
-#     mock_issue.number = 1
-#     mock_issue.created_at = timestamp - timedelta(minutes=30)
-#     mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
+    mock_issue = Mock()
+    mock_issue.labels = [stored_label, uid_mock_label]
+    mock_issue.number = 1
+    mock_issue.created_at = timestamp - timedelta(minutes=30)
+    mock_issue.updated_at = timestamp - timedelta(minutes=30)  # Updated before timestamp
     
-#     store.repo.get_issues.return_value = [mock_issue]
+    store.repo.get_issues.return_value = [mock_issue]
     
-#     # Mock the object retrieval
-#     mock_obj = Mock()
-#     mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
+    # Mock the object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
     
-#     # Mock the get_object_by_number method
-#     store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    # Mock the get_object_by_number method
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
-#     # Test
-#     updated = store.list_updated_since(timestamp)
+    # Test
+    updated = store.list_updated_since(timestamp)
     
-#     # Verify
-#     assert len(updated) == 0
+    # Verify
+    assert len(updated) == 0
