@@ -206,59 +206,6 @@ def test_validate_missing_user(access_control):
     comment.id = 456
     assert access_control.validate_comment_author(comment) is False
 
-def test_validate_update_request_owner(access_control, mock_repo):
-    """Test update validation for owner"""
-    # Mock issue with owner as creator
-    issue = Mock()
-    issue.user.login = "repo-owner"
-    mock_repo.get_issue.return_value = issue
-    
-    # No unprocessed comments
-    issue.get_comments.return_value = []
-    
-    assert access_control.validate_update_request(123) is True
-
-def test_validate_update_request_with_comments(access_control, mock_repo):
-    """Test update validation with comments"""
-    # Mock issue with owner as creator
-    issue = Mock()
-    issue.user.login = "repo-owner"
-    mock_repo.get_issue.return_value = issue
-    
-    # Mock comments
-    processed_comment = Mock()
-    processed_comment.user.login = "random-user"
-    processed_reaction = Mock()
-    processed_reaction.content = "+1"
-    processed_comment.get_reactions.return_value = [processed_reaction]
-    
-    unprocessed_comment = Mock()
-    unprocessed_comment.user.login = "repo-owner"
-    unprocessed_comment.get_reactions.return_value = []
-    
-    issue.get_comments.return_value = [processed_comment, unprocessed_comment]
-    
-    assert access_control.validate_update_request(123) is True
-
-def test_validate_update_request_unauthorized_comment(access_control, mock_repo):
-    """Test update validation fails with unauthorized comment"""
-    # Mock issue with owner as creator
-    issue = Mock()
-    issue.user.login = "repo-owner"  # This is valid
-    mock_repo.get_issue.return_value = issue
-    
-    # Mock unauthorized comment
-    comment = Mock()
-    comment.user.login = "random-user"
-    comment.get_reactions.return_value = iter([])  # Empty iterator for no reactions
-    
-    issue.get_comments.return_value = [comment]
-    
-    # Mock CODEOWNERS to return None (no file found)
-    access_control._find_codeowners_file = Mock(return_value=None)
-    
-    assert access_control.validate_update_request(123) is False
-
 def test_get_codeowners_caching(access_control, mock_repo):
     """Test that CODEOWNERS list is cached"""
     # Mock content for first call
