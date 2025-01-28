@@ -48,6 +48,7 @@ def store(mock_repo):
             store.repo = mock_repo
             return store
 
+# tests/unit/test_store_infiltrator.py
 def test_process_updates_with_infiltrator_comments(store):
     """Test that unauthorized/infiltrating comments don't block valid updates"""
     # Mock the issue setup
@@ -61,7 +62,7 @@ def test_process_updates_with_infiltrator_comments(store):
     store.repo = mock_repo
     store.access_control.repo = mock_repo
     
-    # Mock the repository owner info - ADD THIS
+    # Mock the repository owner info
     store.access_control._owner_info = {
         'login': 'repo-owner',
         'type': 'User'
@@ -75,7 +76,7 @@ def test_process_updates_with_infiltrator_comments(store):
             body='{"malicious": "update"}',
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
             user=Mock(login="infiltrator"),
-            get_reactions=Mock(return_value=[])  # No reactions yet
+            get_reactions=Mock(return_value=[])
         ),
         # Infiltrator comment - not even JSON
         Mock(
@@ -95,7 +96,8 @@ def test_process_updates_with_infiltrator_comments(store):
         )
     ]
     
-    issue.get_comments.return_value = comments
+    # Return an iterator for get_comments()
+    issue.get_comments = Mock(return_value=iter(comments))
     
     # Mock current state
     current_data = {"status": "original"}
@@ -111,8 +113,8 @@ def test_process_updates_with_infiltrator_comments(store):
     assert updated_obj.data["status"] == "updated"
     
     # Verify infiltrator comments were not marked as processed
-    comments[0].create_reaction.assert_not_called()  # First infiltrator comment
-    comments[1].create_reaction.assert_not_called()  # Second infiltrator comment
+    comments[0].create_reaction.assert_not_called()
+    comments[1].create_reaction.assert_not_called()
     
     # But valid update was marked as processed
     assert any(call.args[0] == '+1' for call in comments[2].create_reaction.call_args_list)
