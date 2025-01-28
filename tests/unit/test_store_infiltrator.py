@@ -58,21 +58,30 @@ def test_unauthorized_updates_are_ignored(store):
     authorized_update = {"status": "updated"}
     unauthorized_update = {"status": "hacked"}
     
+    # Create mock comments with reaction support
+    unauthorized_comment = Mock(
+        id=1,
+        body=json.dumps(unauthorized_update),
+        user=Mock(login="infiltrator"),
+        get_reactions=Mock(return_value=[]),
+        create_reaction=Mock()
+    )
+    authorized_comment = Mock(
+        id=2,
+        body=json.dumps(authorized_update),
+        user=Mock(login="repo-owner"),
+        get_reactions=Mock(return_value=[]),
+        create_reaction=Mock()
+    )
+    comments = [unauthorized_comment, authorized_comment]
+    
     # Create a basic issue with owner permissions
     issue = Mock(
         number=123,
         user=Mock(login="repo-owner"),
         body=json.dumps(initial_data),
-        get_comments=Mock(return_value=[
-            Mock(
-                body=json.dumps(unauthorized_update),
-                user=Mock(login="infiltrator")
-            ),
-            Mock(
-                body=json.dumps(authorized_update),
-                user=Mock(login="repo-owner")
-            )
-        ])
+        get_comments=Mock(return_value=comments),
+        edit=Mock()  # For closing the issue
     )
     
     # Setup minimal repository mocking
@@ -84,6 +93,10 @@ def test_unauthorized_updates_are_ignored(store):
     # Verify only authorized changes were applied
     assert obj.data["status"] == "updated"
     assert obj.data.get("malicious") is None
+    
+    # Verify reactions
+    unauthorized_comment.create_reaction.assert_not_called()
+    authorized_comment.create_reaction.assert_called_with("+1")
 
 def test_unauthorized_issue_creator_denied(mock_repo):
     """Test that updates can't be processed for issues created by unauthorized users"""
