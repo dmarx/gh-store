@@ -64,27 +64,27 @@ class GitHubStore:
 
     def delete(self, object_id: str) -> None:
         """Delete an object from the store"""
-        self.issue_handler.delete_object(object_id)
-
+            self.issue_handler.delete_object(object_id)
+        
     def process_updates(self, issue_number: int) -> StoredObject:
         """Process any unhandled updates on an issue"""
         logger.info(f"Processing updates for issue #{issue_number}")
         
-        # Validate update request first
-        if not self.access_control.validate_update_request(issue_number):
+        issue = self.repo.get_issue(issue_number)
+        if not self.access_control.validate_issue_creator(issue):
             raise AccessDeniedError(
-                "Updates can only be processed for issues and comments created by "
+                "Updates can only be processed for issues created by "  # Updated message
                 "repository owner or authorized CODEOWNERS"
             )
         
-        # Get all unprocessed comments
+        # Get all unprocessed comments - this handles comment-level auth
         updates = self.comment_handler.get_unprocessed_updates(issue_number)
         
         # Apply updates in sequence
         obj = self.issue_handler.get_object_by_number(issue_number)
         for update in updates:
             obj = self.comment_handler.apply_update(obj, update)
-            
+        
         # Persist final state and mark comments as processed
         self.issue_handler.update_issue_body(issue_number, obj)
         self.comment_handler.mark_processed(issue_number, updates)
