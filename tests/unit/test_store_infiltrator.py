@@ -2,9 +2,8 @@
 
 import pytest
 from gh_store.core.exceptions import AccessDeniedError
-from unittest.mock import Mock,
+from unittest.mock import Mock
 
-# tests/unit/test_store_infiltrator.py
 
 def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
     """Test that unauthorized updates are ignored during processing"""
