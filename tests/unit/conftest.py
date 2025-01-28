@@ -88,23 +88,43 @@ def mock_issue(mock_comment):
     # Cleanup
     for issue in issues:
         issue.reset_mock()
+        @pytest.fixture
         
-@pytest.fixture
-def store(mock_repo, mock_config):
-    """Create a GitHubStore instance with mocked components"""
+def store():
+    """Create a store instance with a mocked GitHub repo"""
     with patch('gh_store.core.store.Github') as mock_github:
-        # Setup Github mock to return our mock_repo
+        mock_repo = Mock()
+        
+        # Mock the owner info
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.get_owner.return_value = owner
+        
         mock_github.return_value.get_repo.return_value = mock_repo
         
+        # Mock the default config
+        mock_config = """
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "🔰"
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+  rate_limit:
+    max_requests_per_hour: 1000
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+"""
         with patch('pathlib.Path.exists', return_value=False), \
-             patch('importlib.resources.files'):
+             patch('importlib.resources.files') as mock_files:
+            mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
             
-            from gh_store.core.store import GitHubStore
             store = GitHubStore(token="fake-token", repo="owner/repo")
-            
-            # Ensure store's repo and access_control use our mock_repo
-            store.repo = mock_repo
-            store.access_control.repo = mock_repo
-            store.config = mock_config
-            
+            store.repo = mock_repo  # Attach for test access
+            store.access_control.repo = mock_repo  # Ensure access control uses same mock
             return store
