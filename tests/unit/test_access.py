@@ -1,51 +1,9 @@
 # tests/unit/test_access.py
 
-from unittest.mock import Mock, patch
 import pytest
+from unittest.mock import Mock, patch
+from github import GithubException
 from gh_store.core.access import AccessControl
-
-
-# tests/unit/test_store.py
-
-import pytest
-from unittest.mock import Mock, patch
-from gh_store.core.exceptions import AccessDeniedError
-from gh_store.core.store import GitHubStore
-
-@pytest.fixture
-def mock_github():
-    with patch('gh_store.core.store.Github') as mock:
-        mock_repo = mock.return_value.get_repo.return_value
-        yield mock, mock_repo
-
-@pytest.fixture
-def store(mock_github):
-    _, mock_repo = mock_github
-    
-    # Mock the default config
-    mock_config = """
-    store:
-        base_label: "stored-object"
-        uid_prefix: "UID:"
-        reactions:
-            processed: "+1"
-            initial_state: "rocket"
-        retries:
-            max_attempts: 3
-            backoff_factor: 2
-        rate_limit:
-            max_requests_per_hour: 1000
-        log:
-            level: "INFO"
-            format: "{time} | {level} | {message}"
-    """
-    with patch('pathlib.Path.exists', return_value=False), \
-         patch('importlib.resources.files') as mock_files:
-        mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
-        store = GitHubStore(token="fake-token", repo="owner/repo")
-        store.repo = mock_repo
-        return store
-
 
 @pytest.fixture
 def mock_repo():
@@ -88,26 +46,110 @@ def test_clear_cache(access_control):
     assert access_control._owner_info is None
     assert access_control._codeowners is None
 
-def test_parse_basic_codeowners(mock_repo):
-    """Test parsing basic CODEOWNERS content"""
-    codeowners_content = """
+def test_should_skip_line():
+    """Test line skipping logic"""
+    ac = AccessControl(Mock())
+    
+    assert ac._should_skip_line("")  # Empty line
+    assert ac._should_skip_line("  ")  # Whitespace only
+    assert ac._should_skip_line("# Comment")  # Comment
+    assert ac._should_skip_line("  # Indented comment")  # Indented comment
+    assert not ac._should_skip_line("* @user")  # Valid line
+    assert not ac._should_skip_line("/path @user")  # Valid line with path
+
+def test_extract_users_from_line():
+    """Test extracting users from CODEOWNERS lines"""
+    ac = AccessControl(Mock())
+    
+    # Basic user
+    assert ac._extract_users_from_line("* @user1") == {"user1"}
+    
+    # Multiple users
+    assert ac._extract_users_from_line("/path @user1 @user2") == {"user1", "user2"}
+    
+    # Mix of users and teams (teams handled separately)
+    line = "/path @user1 @org/team1 @user2"
+    users = ac._extract_users_from_line(line)
+    assert "user1" in users
+    assert "user2" in users
+    
+    # Ignore non-@ mentions
+    assert ac._extract_users_from_line("/path user1 @user2") == {"user2"}
+    
+    # Path with spaces
+    assert ac._extract_users_from_line("/path with spaces @user1") == {"user1"}
+
+def test_get_team_members(mock_repo):
+    """Test team membership resolution"""
+    ac = AccessControl(mock_repo)
+    
+    # Mock team members
+    team_members = [Mock(login="team-member-1"), Mock(login="team-member-2")]
+    team = Mock()
+    team.get_members.return_value = team_members
+    
+    # Mock organization and team lookup
+    org = Mock()
+    org.get_team_by_slug.return_value = team
+    mock_repo.organization = org
+    
+    # Test successful team lookup
+    members = ac._get_team_members("org/team")
+    assert members == {"team-member-1", "team-member-2"}
+    
+    # Test failed team lookup
+    org.get_team_by_slug.side_effect = GithubException(404, "Not found")
+    members = ac._get_team_members("org/nonexistent")
+    assert members == set()
+
+def test_find_codeowners_file(mock_repo):
+    """Test CODEOWNERS file location logic"""
+    ac = AccessControl(mock_repo)
+    
+    # Test successful find
+    content = Mock()
+    content.decoded_content = b"* @user1"
+    mock_repo.get_contents.return_value = content
+    
+    found = ac._find_codeowners_file()
+    assert found == "* @user1"
+    
+    # Test no file found
+    mock_repo.get_contents.side_effect = GithubException(404, "Not found")
+    found = ac._find_codeowners_file()
+    assert found is None
+
+def test_parse_codeowners_content():
+    """Test parsing complete CODEOWNERS file"""
+    ac = AccessControl(Mock())
+    
+    content = """
     # Comment line
     * @global-owner
     
+    # Docs team
     /docs/ @doc-owner
+    
+    # Multiple owners
     /src/ @dev1 @dev2
-    """.encode('utf-8')
     
-    # Mock the get_contents response
-    content = Mock()
-    content.decoded_content = codeowners_content
-    mock_repo.get_contents.return_value = content
+    # Team ownership
+    /apps/ @org/team1
     
-    ac = AccessControl(mock_repo)
-    codeowners = ac._get_codeowners()
+    # Mixed ownership
+    /api/ @api-owner @org/api-team
+    """
     
-    expected = {"global-owner", "doc-owner", "dev1", "dev2"}
-    assert codeowners == expected
+    # Mock team resolution
+    ac._get_team_members = Mock(return_value={"team-member-1", "team-member-2"})
+    
+    users = ac._parse_codeowners_content(content)
+    expected = {
+        "global-owner", "doc-owner", "dev1", "dev2",
+        "api-owner", "team-member-1", "team-member-2"
+    }
+    
+    assert users == expected
 
 def test_validate_issue_creator_owner(access_control):
     """Test that repo owner can create issues"""
@@ -158,59 +200,69 @@ def test_validate_missing_user(access_control):
     comment.id = 456
     assert access_control.validate_comment_author(comment) is False
 
-def test_parse_empty_codeowners(mock_repo):
-    """Test parsing empty CODEOWNERS file"""
-    # Mock empty CODEOWNERS file
+def test_validate_update_request_owner(access_control, mock_repo):
+    """Test update validation for owner"""
+    # Mock issue with owner as creator
+    issue = Mock()
+    issue.user.login = "repo-owner"
+    mock_repo.get_issue.return_value = issue
+    
+    # No unprocessed comments
+    issue.get_comments.return_value = []
+    
+    assert access_control.validate_update_request(123) is True
+
+def test_validate_update_request_with_comments(access_control, mock_repo):
+    """Test update validation with comments"""
+    # Mock issue with owner as creator
+    issue = Mock()
+    issue.user.login = "repo-owner"
+    mock_repo.get_issue.return_value = issue
+    
+    # Mock comments
+    processed_comment = Mock()
+    processed_comment.user.login = "random-user"
+    processed_reaction = Mock()
+    processed_reaction.content = "+1"
+    processed_comment.get_reactions.return_value = [processed_reaction]
+    
+    unprocessed_comment = Mock()
+    unprocessed_comment.user.login = "repo-owner"
+    unprocessed_comment.get_reactions.return_value = []
+    
+    issue.get_comments.return_value = [processed_comment, unprocessed_comment]
+    
+    assert access_control.validate_update_request(123) is True
+
+def test_validate_update_request_unauthorized_comment(access_control, mock_repo):
+    """Test update validation fails with unauthorized comment"""
+    # Mock issue with owner as creator
+    issue = Mock()
+    issue.user.login = "repo-owner"
+    mock_repo.get_issue.return_value = issue
+    
+    # Mock unauthorized comment
+    comment = Mock()
+    comment.user.login = "random-user"
+    comment.get_reactions.return_value = []
+    
+    issue.get_comments.return_value = [comment]
+    
+    assert access_control.validate_update_request(123) is False
+
+def test_get_codeowners_caching(access_control, mock_repo):
+    """Test that CODEOWNERS list is cached"""
+    # Mock content for first call
     content = Mock()
-    content.decoded_content = "".encode('utf-8')
+    content.decoded_content = b"* @user1"
     mock_repo.get_contents.return_value = content
     
-    ac = AccessControl(mock_repo)
-    codeowners = ac._get_codeowners()
+    # First call
+    users1 = access_control._get_codeowners()
+    assert users1 == {"user1"}
+    assert mock_repo.get_contents.call_count == 1
     
-    assert codeowners == set()  # Should be empty set
-
-def test_parse_comments_only_codeowners(mock_repo):
-    """Test parsing CODEOWNERS file with only comments"""
-    codeowners_content = """
-    # This is a comment
-    # Another comment
-    
-    # Final comment
-    """.encode('utf-8')
-    
-    content = Mock()
-    content.decoded_content = codeowners_content
-    mock_repo.get_contents.return_value = content
-    
-    ac = AccessControl(mock_repo)
-    codeowners = ac._get_codeowners()
-    
-    assert codeowners == set()  # Should be empty set
-
-
-async def test_process_updates_access_denied(store):
-    """Test that process_updates enforces access control"""
-    # Mock access control to deny access
-    store.access_control.validate_update_request = Mock(return_value=False)
-    
-    with pytest.raises(AccessDeniedError) as exc:
-        await store.process_updates(123)
-    
-    assert "Updates can only be processed" in str(exc.value)
-    assert store.access_control.validate_update_request.called
-
-async def test_process_updates_access_granted(store):
-    """Test that process_updates allows access for authorized users"""
-    # Mock access control to allow access
-    store.access_control.validate_update_request = Mock(return_value=True)
-    
-    # Mock the update processing
-    mock_obj = Mock()
-    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
-    store.comment_handler.get_unprocessed_updates = Mock(return_value=[])
-    
-    result = await store.process_updates(123)
-    
-    assert result == mock_obj
-    assert store.access_control.validate_update_request.called
+    # Second call should use cache
+    users2 = access_control._get_codeowners()
+    assert users2 == {"user1"}
+    assert mock_repo.get_contents.call_count == 1  # No additional API calls
