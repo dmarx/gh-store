@@ -112,11 +112,9 @@ def store(mock_config):
         
         mock_github.return_value.get_repo.return_value = mock_repo
         
-        with patch('pathlib.Path.exists', return_value=False), \
-             patch('importlib.resources.files') as mock_files:
-            mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
-            
+        with patch('pathlib.Path.exists', return_value=False):
             store = GitHubStore(token="fake-token", repo="owner/repo")
             store.repo = mock_repo  # Attach for test access
             store.access_control.repo = mock_repo  # Ensure access control uses same mock
+            store.config = mock_config  # Use the fixture's mock config
             return store
