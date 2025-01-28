@@ -139,25 +139,6 @@ class AccessControl:
             
         return True
 
-    def validate_update_request(self, issue_number: int) -> bool:
-        """Validate update request by checking issue and comment authors"""
-        issue = self.repo.get_issue(issue_number)
-        
-        # First check issue creator
-        if not self.validate_issue_creator(issue):
-            return False
-            
-        # Then check all unprocessed comments
-        for comment in issue.get_comments():
-            # Skip comments that are already processed
-            if any(reaction.content == '+1' for reaction in comment.get_reactions()):
-                continue
-                
-            if not self.validate_comment_author(comment):
-                return False
-                
-        return True
-
     def clear_cache(self) -> None:
         """Clear cached owner and CODEOWNERS information"""
         self._owner_info = None
