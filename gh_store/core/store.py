@@ -64,7 +64,7 @@ class GitHubStore:
 
     def delete(self, object_id: str) -> None:
         """Delete an object from the store"""
-            self.issue_handler.delete_object(object_id)
+        self.issue_handler.delete_object(object_id)
         
     def process_updates(self, issue_number: int) -> StoredObject:
         """Process any unhandled updates on an issue"""
