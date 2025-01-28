@@ -71,7 +71,8 @@ class AccessControl:
     
     def _should_skip_line(self, line: str) -> bool:
         """Check if line should be skipped (empty or comment)"""
-        return not line or line.strip().startswith('#')
+        line = line.strip()
+        return not line or line.startswith('#')
     
     def _extract_users_from_line(self, line: str) -> Set[str]:
         """Extract user and team names from a CODEOWNERS line"""
