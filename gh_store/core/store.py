@@ -8,10 +8,12 @@ from loguru import logger
 from github import Github
 from omegaconf import OmegaConf
 
-from .exceptions import ConcurrentUpdateError
+from ..core.access import AccessControl
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
 from .types import StoredObject, Update, Json
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
+
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 
@@ -22,6 +24,7 @@ class GitHubStore:
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
+        self.access_control = AccessControl(self.repo)
         
         config_path = config_path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
@@ -62,19 +65,26 @@ class GitHubStore:
     def delete(self, object_id: str) -> None:
         """Delete an object from the store"""
         self.issue_handler.delete_object(object_id)
-
+        
     def process_updates(self, issue_number: int) -> StoredObject:
         """Process any unhandled updates on an issue"""
         logger.info(f"Processing updates for issue #{issue_number}")
         
-        # Get all unprocessed comments
+        issue = self.repo.get_issue(issue_number)
+        if not self.access_control.validate_issue_creator(issue):
+            raise AccessDeniedError(
+                "Updates can only be processed for issues created by "  # Updated message
+                "repository owner or authorized CODEOWNERS"
+            )
+        
+        # Get all unprocessed comments - this handles comment-level auth
         updates = self.comment_handler.get_unprocessed_updates(issue_number)
         
         # Apply updates in sequence
         obj = self.issue_handler.get_object_by_number(issue_number)
         for update in updates:
             obj = self.comment_handler.apply_update(obj, update)
-            
+        
         # Persist final state and mark comments as processed
         self.issue_handler.update_issue_body(issue_number, obj)
         self.comment_handler.mark_processed(issue_number, updates)
