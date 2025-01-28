@@ -88,68 +88,23 @@ def mock_issue(mock_comment):
     # Cleanup
     for issue in issues:
         issue.reset_mock()
-
-# @pytest.fixture
-# def store(mock_repo, mock_config):
-#     """Create a GitHubStore instance with mocked components"""
-#     patches = []
-#     try:
-#         # Create all patches
-#         github_patch = patch('gh_store.core.store.Github')
-#         path_patch = patch('pathlib.Path.exists', return_value=False)
-#         resources_patch = patch('importlib.resources.files')
         
-#         # Start all patches
-#         mock_github = github_patch.start()
-#         path_patch.start()
-#         resources_patch.start()
-        
-#         # Track patches for cleanup
-#         patches.extend([github_patch, path_patch, resources_patch])
-        
-#         # Set up store
-#         mock_github.return_value.get_repo.return_value = mock_repo
-        
-#         from gh_store.core.store import GitHubStore
-#         store = GitHubStore(token="fake-token", repo="owner/repo")
-#         store.repo = mock_repo
-#         store.config = mock_config
-        
-#         yield store
-        
-#     finally:
-#         # Clean up all patches
-#         for p in patches:
-#             p.stop()
-
 @pytest.fixture
-def store():
-    """Create a store instance with a mocked GitHub repo"""
+def store(mock_repo, mock_config):
+    """Create a GitHubStore instance with mocked components"""
     with patch('gh_store.core.store.Github') as mock_github:
-        mock_repo = Mock()
+        # Setup Github mock to return our mock_repo
         mock_github.return_value.get_repo.return_value = mock_repo
         
-        # Mock the default config
-        mock_config = """
-store:
-  base_label: "stored-object"
-  uid_prefix: "UID:"
-  reactions:
-    processed: "+1"
-    initial_state: "🔰"
-  retries:
-    max_attempts: 3
-    backoff_factor: 2
-  rate_limit:
-    max_requests_per_hour: 1000
-  log:
-    level: "INFO"
-    format: "{time} | {level} | {message}"
-"""
         with patch('pathlib.Path.exists', return_value=False), \
-             patch('importlib.resources.files') as mock_files:
-            mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
+             patch('importlib.resources.files'):
             
+            from gh_store.core.store import GitHubStore
             store = GitHubStore(token="fake-token", repo="owner/repo")
-            store.repo = mock_repo  # Attach for test access
+            
+            # Ensure store's repo and access_control use our mock_repo
+            store.repo = mock_repo
+            store.access_control.repo = mock_repo
+            store.config = mock_config
+            
             return store
