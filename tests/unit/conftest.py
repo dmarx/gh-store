@@ -4,6 +4,8 @@ import pytest
 from unittest.mock import Mock, mock_open, patch
 import json
 
+from gh_store.core.store import GitHubStore
+
 @pytest.fixture
 def mock_owner():
     """Create a mock repository owner"""
