@@ -10,19 +10,19 @@ def mock_owner():
     owner = Mock()
     owner.login = "repo-owner"
     owner.type = "User"
-    return owner
+    yield owner
 
 @pytest.fixture
 def mock_repo(mock_owner):
     """Create a mock repository with basic functionality"""
     repo = Mock()
     repo.get_owner.return_value = mock_owner
-    return repo
+    yield repo
 
 @pytest.fixture
 def mock_config():
     """Create a mock store configuration"""
-    return Mock(
+    config = Mock(
         store=Mock(
             base_label="stored-object",
             uid_prefix="UID:",
@@ -43,10 +43,13 @@ def mock_config():
             )
         )
     )
+    yield config
 
 @pytest.fixture
-def mock_comment(request):
+def mock_comment():
     """Create a mock comment with configurable attributes"""
+    comments = []  # Keep track of created comments for cleanup
+    
     def _make_comment(user_login="repo-owner", body=None, comment_id=1, reactions=None):
         comment = Mock()
         comment.user = Mock(login=user_login)
@@ -54,35 +57,65 @@ def mock_comment(request):
         comment.body = json.dumps(body) if body else "{}"
         comment.get_reactions.return_value = reactions or []
         comment.create_reaction = Mock()
+        comments.append(comment)  # Track the comment
         return comment
-    return _make_comment
+    
+    yield _make_comment
+    
+    # Cleanup
+    for comment in comments:
+        comment.reset_mock()
 
 @pytest.fixture
-def mock_issue(request, mock_comment):
+def mock_issue(mock_comment):
     """Create a mock issue with configurable attributes"""
+    issues = []  # Keep track of created issues for cleanup
+    
     def _make_issue(number=1, user_login="repo-owner", body=None, comments=None):
         issue = Mock()
         issue.number = number
         issue.user = Mock(login=user_login)
         issue.body = json.dumps(body) if body else "{}"
-        if comments is not None:
-            issue.get_comments.return_value = comments
-        else:
-            issue.get_comments.return_value = []
+        issue.get_comments = Mock(return_value=comments if comments is not None else [])
+        issue.edit = Mock()  # For closing the issue
+        issues.append(issue)  # Track the issue
         return issue
-    return _make_issue
+    
+    yield _make_issue
+    
+    # Cleanup
+    for issue in issues:
+        issue.reset_mock()
 
 @pytest.fixture
 def store(mock_repo, mock_config):
     """Create a GitHubStore instance with mocked components"""
-    with patch('gh_store.core.store.Github') as mock_github:
+    patches = []
+    try:
+        # Create all patches
+        github_patch = patch('gh_store.core.store.Github')
+        path_patch = patch('pathlib.Path.exists', return_value=False)
+        resources_patch = patch('importlib.resources.files')
+        
+        # Start all patches
+        mock_github = github_patch.start()
+        path_patch.start()
+        resources_patch.start()
+        
+        # Track patches for cleanup
+        patches.extend([github_patch, path_patch, resources_patch])
+        
+        # Set up store
         mock_github.return_value.get_repo.return_value = mock_repo
         
-        with patch('pathlib.Path.exists', return_value=False), \
-             patch('importlib.resources.files'):
-            
-            from gh_store.core.store import GitHubStore
-            store = GitHubStore(token="fake-token", repo="owner/repo")
-            store.repo = mock_repo
-            store.config = mock_config
-            return store
+        from gh_store.core.store import GitHubStore
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = mock_repo
+        store.config = mock_config
+        
+        yield store
+        
+    finally:
+        # Clean up all patches
+        for p in patches:
+            p.stop()
