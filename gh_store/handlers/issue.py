@@ -1,16 +1,18 @@
 # gh_store/handlers/issue.py
 
-import json
 from datetime import datetime, timezone
-from loguru import logger
+import json
+from time import sleep
+
 from github import Repository
+from github.GithubException import RateLimitExceededException
+from loguru import logger
 from omegaconf import DictConfig
 
-from ..core.types import StoredObject, ObjectMeta, Json
-from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.access import AccessControl
+from ..core.exceptions import AccessDeniedError, DuplicateUIDError, ObjectNotFound
+from ..core.types import Json, ObjectMeta, StoredObject
 
-from time import sleep
-from github.GithubException import RateLimitExceededException
 
 class IssueHandler:
     """Handles GitHub Issue operations for stored objects"""
@@ -20,8 +22,9 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
+        self.access_control = AccessControl(repo)
     
-    def create_object(self, object_id: str, data: Json) -> StoredObject:
+    async def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
@@ -37,6 +40,11 @@ class IssueHandler:
             body=json.dumps(data, indent=2),
             labels=[self.base_label, uid_label]
         )
+        
+        # Verify creator
+        if not await self.access_control.validate_issue_creator(issue):
+            issue.edit(state="closed", labels=["invalid"])
+            raise AccessDeniedError("Object creation must be performed by repository owner or authorized CODEOWNERS")
         
         # Add initial state comment
         initial_state_comment = {
