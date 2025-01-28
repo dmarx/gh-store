@@ -54,7 +54,12 @@ def test_process_updates_with_infiltrator_comments(store):
     issue = Mock()
     issue.number = 123
     issue.user.login = "repo-owner"  # Issue created by owner
-    store.repo.get_issue.return_value = issue
+    
+    # Ensure both store and access_control use the same mock repo
+    mock_repo = Mock()
+    mock_repo.get_issue.return_value = issue
+    store.repo = mock_repo
+    store.access_control.repo = mock_repo
     
     # Create a mix of valid and infiltrator comments
     comments = [
