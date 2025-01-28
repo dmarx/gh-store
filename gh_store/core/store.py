@@ -8,10 +8,12 @@ from loguru import logger
 from github import Github
 from omegaconf import OmegaConf
 
-from .exceptions import ConcurrentUpdateError
+from ..core.access import AccessControl
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
 from .types import StoredObject, Update, Json
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
+
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 
@@ -22,6 +24,7 @@ class GitHubStore:
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
+        self.access_control = AccessControl(repo)
         
         config_path = config_path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
@@ -66,6 +69,13 @@ class GitHubStore:
     def process_updates(self, issue_number: int) -> StoredObject:
         """Process any unhandled updates on an issue"""
         logger.info(f"Processing updates for issue #{issue_number}")
+        
+        # Validate update request first
+        if not self.access_control.validate_update_request(issue_number):
+            raise AccessDeniedError(
+                "Updates can only be processed for issues and comments created by "
+                "repository owner or authorized CODEOWNERS"
+            )
         
         # Get all unprocessed comments
         updates = self.comment_handler.get_unprocessed_updates(issue_number)
