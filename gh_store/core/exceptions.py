@@ -23,3 +23,6 @@ class ConfigurationError(GitHubStoreError):
 class DuplicateUIDError(GitHubStoreError):
     """Raised when multiple issues have the same UID label"""
     pass
+
+class AccessDeniedError(GitHubStoreError):
+    pass
