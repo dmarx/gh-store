@@ -24,7 +24,7 @@ class GitHubStore:
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
-        self.access_control = AccessControl(repo)
+        self.access_control = AccessControl(self.repo)
         
         config_path = config_path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
