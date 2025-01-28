@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, mock_open
 
 import pytest
 from gh_store.core.store import GitHubStore
