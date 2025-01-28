@@ -103,7 +103,7 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
     # Should only get one valid update
     assert len(updates) == 1
     assert updates[0].comment_id == 1
-    assert json.loads(updates[0].changes) == {"update": "valid"}
+    assert updates[0].changes == {"update": "valid"}
 
 def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
     """Test that valid JSON updates from unauthorized users are skipped"""
@@ -172,7 +172,7 @@ def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
     # Should only get update from team member
     assert len(updates) == 1
     assert updates[0].comment_id == 1
-    assert json.loads(updates[0].changes) == {"update": "from-team"}
+    assert updates[0].changes == {"update": "from-team"}
 
 def test_get_unprocessed_updates_empty(comment_handler, mock_repo):
     """Test behavior with no comments"""
