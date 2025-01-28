@@ -88,8 +88,8 @@ def mock_issue(mock_comment):
     # Cleanup
     for issue in issues:
         issue.reset_mock()
-        @pytest.fixture
         
+@pytest.fixture
 def store():
     """Create a store instance with a mocked GitHub repo"""
     with patch('gh_store.core.store.Github') as mock_github:
