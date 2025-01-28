@@ -61,6 +61,12 @@ def test_process_updates_with_infiltrator_comments(store):
     store.repo = mock_repo
     store.access_control.repo = mock_repo
     
+    # Mock the repository owner info - ADD THIS
+    store.access_control._owner_info = {
+        'login': 'repo-owner',
+        'type': 'User'
+    }
+    
     # Create a mix of valid and infiltrator comments
     comments = [
         # Infiltrator comment - valid JSON but unauthorized
