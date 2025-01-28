@@ -3,7 +3,7 @@
 from typing import TypedDict, Set
 from pathlib import Path
 import re
-from github import Repository, Issue, IssueComment
+from github import Repository, Issue, IssueComment, GithubException
 from loguru import logger
 
 class UserInfo(TypedDict):
@@ -13,91 +13,112 @@ class UserInfo(TypedDict):
 class AccessControl:
     """Handles access control validation for GitHub store operations"""
     
+    CODEOWNERS_PATHS = [
+        '.github/CODEOWNERS',
+        'docs/CODEOWNERS',
+        'CODEOWNERS'
+    ]
+    
     def __init__(self, repo: Repository.Repository):
         self.repo = repo
         self._owner_info: UserInfo | None = None
         self._codeowners: Set[str] | None = None
 
-    async def _get_owner_info(self) -> UserInfo:
+    def _get_owner_info(self) -> UserInfo:
         """Get repository owner information, caching the result"""
         if not self._owner_info:
-            owner = await self.repo.get_owner()
+            owner = self.repo.get_owner()
             self._owner_info = {
                 'login': owner.login,
                 'type': owner.type
             }
         return self._owner_info
 
-    async def _get_codeowners(self) -> Set[str]:
-        """Parse CODEOWNERS file and extract authorized users/teams"""
+    def _get_codeowners(self) -> Set[str]:
+        """Parse CODEOWNERS file and extract authorized users"""
         if self._codeowners is not None:
             return self._codeowners
 
-        codeowners = set()
-        codeowners_paths = [
-            '.github/CODEOWNERS',
-            'docs/CODEOWNERS',
-            'CODEOWNERS'
-        ]
+        content = self._find_codeowners_file()
+        if not content:
+            return set()
 
-        # Try to find CODEOWNERS file
-        for path in codeowners_paths:
+        self._codeowners = self._parse_codeowners_content(content)
+        return self._codeowners
+    
+    def _find_codeowners_file(self) -> str | None:
+        """Find and read the CODEOWNERS file content"""
+        for path in self.CODEOWNERS_PATHS:
             try:
                 content = self.repo.get_contents(path)
                 if content:
-                    # Decode content and process each line
-                    for line in content.decoded_content.decode('utf-8').splitlines():
-                        # Skip comments and empty lines
-                        if not line or line.startswith('#'):
-                            continue
-                            
-                        # Extract users/teams from the line
-                        # Format: path @user1 @org/team1 @user2
-                        parts = line.split()
-                        if len(parts) > 1:  # Must have path and at least one owner
-                            for part in parts[1:]:
-                                if part.startswith('@'):
-                                    # Remove @ prefix and add to set
-                                    owner = part[1:]
-                                    # Handle team syntax (@org/team)
-                                    if '/' in owner:
-                                        org, team = owner.split('/')
-                                        # Get team members from GitHub API
-                                        try:
-                                            team_obj = self.repo.organization.get_team_by_slug(team)
-                                            for member in team_obj.get_members():
-                                                codeowners.add(member.login)
-                                        except Exception as e:
-                                            logger.warning(f"Failed to fetch team members for {owner}: {e}")
-                                    else:
-                                        codeowners.add(owner)
-                    break  # Stop after finding first valid CODEOWNERS file
-            except Exception as e:
-                logger.debug(f"No CODEOWNERS found at {path}: {e}")
+                    return content.decoded_content.decode('utf-8')
+            except GithubException:
+                logger.debug(f"No CODEOWNERS found at {path}")
+        return None
+    
+    def _parse_codeowners_content(self, content: str) -> Set[str]:
+        """Parse CODEOWNERS content and extract authorized users"""
+        codeowners = set()
+        
+        for line in content.splitlines():
+            if self._should_skip_line(line):
                 continue
-
-        self._codeowners = codeowners
+                
+            codeowners.update(self._extract_users_from_line(line))
+                
         return codeowners
+    
+    def _should_skip_line(self, line: str) -> bool:
+        """Check if line should be skipped (empty or comment)"""
+        return not line or line.strip().startswith('#')
+    
+    def _extract_users_from_line(self, line: str) -> Set[str]:
+        """Extract user and team names from a CODEOWNERS line"""
+        users = set()
+        parts = line.split()
+        
+        # Skip the path (first element)
+        for part in parts[1:]:
+            if part.startswith('@'):
+                owner = part[1:]  # Remove @ prefix
+                if '/' in owner:
+                    # Handle team syntax (@org/team)
+                    users.update(self._get_team_members(owner))
+                else:
+                    users.add(owner)
+                    
+        return users
+    
+    def _get_team_members(self, team_spec: str) -> Set[str]:
+        """Get members of a team from GitHub API"""
+        try:
+            org, team = team_spec.split('/')
+            team_obj = self.repo.organization.get_team_by_slug(team)
+            return {member.login for member in team_obj.get_members()}
+        except Exception as e:
+            logger.warning(f"Failed to fetch team members for {team_spec}: {e}")
+            return set()
 
-    async def _is_authorized(self, username: str | None) -> bool:
+    def _is_authorized(self, username: str | None) -> bool:
         """Check if a user is authorized (owner or in CODEOWNERS)"""
         if not username:
             return False
             
         # Repository owner is always authorized
-        owner = await self._get_owner_info()
+        owner = self._get_owner_info()
         if username == owner['login']:
             return True
             
         # Check CODEOWNERS
-        codeowners = await self._get_codeowners()
+        codeowners = self._get_codeowners()
         return username in codeowners
 
-    async def validate_issue_creator(self, issue: Issue.Issue) -> bool:
+    def validate_issue_creator(self, issue: Issue.Issue) -> bool:
         """Check if issue was created by authorized user"""
         creator = issue.user.login if issue.user else None
         
-        if not await self._is_authorized(creator):
+        if not self._is_authorized(creator):
             logger.warning(
                 f"Unauthorized creator for issue #{issue.number}: {creator}"
             )
@@ -105,11 +126,11 @@ class AccessControl:
             
         return True
 
-    async def validate_comment_author(self, comment: IssueComment.IssueComment) -> bool:
+    def validate_comment_author(self, comment: IssueComment.IssueComment) -> bool:
         """Check if comment was created by authorized user"""
         author = comment.user.login if comment.user else None
         
-        if not await self._is_authorized(author):
+        if not self._is_authorized(author):
             logger.warning(
                 f"Unauthorized author for comment {comment.id}: {author}"
             )
@@ -117,12 +138,12 @@ class AccessControl:
             
         return True
 
-    async def validate_update_request(self, issue_number: int) -> bool:
+    def validate_update_request(self, issue_number: int) -> bool:
         """Validate update request by checking issue and comment authors"""
         issue = self.repo.get_issue(issue_number)
         
         # First check issue creator
-        if not await self.validate_issue_creator(issue):
+        if not self.validate_issue_creator(issue):
             return False
             
         # Then check all unprocessed comments
@@ -131,7 +152,7 @@ class AccessControl:
             if any(reaction.content == '+1' for reaction in comment.get_reactions()):
                 continue
                 
-            if not await self.validate_comment_author(comment):
+            if not self.validate_comment_author(comment):
                 return False
                 
         return True
