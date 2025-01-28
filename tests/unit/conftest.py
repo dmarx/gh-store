@@ -90,7 +90,7 @@ def mock_issue(mock_comment):
         issue.reset_mock()
         
 @pytest.fixture
-def store():
+def store(mock_config):
     """Create a store instance with a mocked GitHub repo"""
     with patch('gh_store.core.store.Github') as mock_github:
         mock_repo = Mock()
@@ -101,25 +101,17 @@ def store():
         owner.type = "User"
         mock_repo.get_owner.return_value = owner
         
+        # Mock CODEOWNERS file
+        mock_content = Mock()
+        mock_content.decoded_content = b"* @repo-owner"
+        def get_contents_side_effect(path):
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                return mock_content
+            raise GithubException(404, "Not found")
+        mock_repo.get_contents.side_effect = get_contents_side_effect
+        
         mock_github.return_value.get_repo.return_value = mock_repo
         
-        # Mock the default config
-        mock_config = """
-store:
-  base_label: "stored-object"
-  uid_prefix: "UID:"
-  reactions:
-    processed: "+1"
-    initial_state: "🔰"
-  retries:
-    max_attempts: 3
-    backoff_factor: 2
-  rate_limit:
-    max_requests_per_hour: 1000
-  log:
-    level: "INFO"
-    format: "{time} | {level} | {message}"
-"""
         with patch('pathlib.Path.exists', return_value=False), \
              patch('importlib.resources.files') as mock_files:
             mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
