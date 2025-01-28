@@ -165,8 +165,8 @@ def test_validate_issue_creator_unauthorized(access_control):
     issue.user.login = "random-user"
     issue.number = 123
     
-    # Mock reactions as an empty iterator
-    issue.get_reactions = Mock(return_value=iter([]))
+    # Mock CODEOWNERS to return None (no file found)
+    access_control._find_codeowners_file = Mock(return_value=None)
     
     result = access_control.validate_issue_creator(issue)
     assert result is False
@@ -186,8 +186,8 @@ def test_validate_comment_author_unauthorized(access_control):
     comment.user.login = "random-user"
     comment.id = 456
     
-    # Mock reactions as an empty iterator
-    comment.get_reactions = Mock(return_value=iter([]))
+    # Mock CODEOWNERS to return None (no file found)
+    access_control._find_codeowners_file = Mock(return_value=None)
     
     result = access_control.validate_comment_author(comment)
     assert result is False
@@ -244,15 +244,18 @@ def test_validate_update_request_unauthorized_comment(access_control, mock_repo)
     """Test update validation fails with unauthorized comment"""
     # Mock issue with owner as creator
     issue = Mock()
-    issue.user.login = "repo-owner"
+    issue.user.login = "repo-owner"  # This is valid
     mock_repo.get_issue.return_value = issue
     
     # Mock unauthorized comment
     comment = Mock()
     comment.user.login = "random-user"
-    comment.get_reactions.return_value = iter([])  # Mock an empty iterator
+    comment.get_reactions.return_value = iter([])  # Empty iterator for no reactions
     
     issue.get_comments.return_value = [comment]
+    
+    # Mock CODEOWNERS to return None (no file found)
+    access_control._find_codeowners_file = Mock(return_value=None)
     
     assert access_control.validate_update_request(123) is False
 
