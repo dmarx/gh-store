@@ -44,10 +44,14 @@ class CommentHandler:
                     logger.debug(f"Skipping unauthorized comment {comment.id}")
                     continue
                     
+                # Parse and normalize JSON data
+                if not isinstance(update_data, dict):
+                    update_data = {"data": update_data}
+                    
                 updates.append(Update(
                     comment_id=comment.id,
                     timestamp=comment.created_at,
-                    changes=update_data if isinstance(update_data, dict) else {"data": update_data}
+                    changes=update_data
                 ))
             except json.JSONDecodeError:
                 # Not JSON, skip it
