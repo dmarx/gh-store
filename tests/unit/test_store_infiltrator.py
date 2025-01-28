@@ -3,40 +3,40 @@
 import pytest
 from gh_store.core.exceptions import AccessDeniedError
 
-# def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
-#     """Test that unauthorized updates are ignored during processing"""
-#     # Create test comments
-#     unauthorized_comment = mock_comment(
-#         user_login="infiltrator",
-#         body={"status": "hacked"},
-#         comment_id=1
-#     )
-#     authorized_comment = mock_comment(
-#         user_login="repo-owner",
-#         body={"status": "updated"},
-#         comment_id=2
-#     )
+def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
+    """Test that unauthorized updates are ignored during processing"""
+    # Create test comments
+    unauthorized_comment = mock_comment(
+        user_login="infiltrator",
+        body={"status": "hacked"},
+        comment_id=1
+    )
+    authorized_comment = mock_comment(
+        user_login="repo-owner",
+        body={"status": "updated"},
+        comment_id=2
+    )
     
-#     # Create issue with both comments
-#     issue = mock_issue(
-#         number=123,
-#         body={"status": "original"},
-#         comments=[unauthorized_comment, authorized_comment]
-#     )
+    # Create issue with both comments
+    issue = mock_issue(
+        number=123,
+        body={"status": "original"},
+        comments=[unauthorized_comment, authorized_comment]
+    )
     
-#     # Setup issue retrieval
-#     store.repo.get_issue.return_value = issue
+    # Setup issue retrieval
+    store.repo.get_issue.return_value = issue
     
-#     # Process updates
-#     obj = store.process_updates(123)
+    # Process updates
+    obj = store.process_updates(123)
     
-#     # Verify only authorized changes were applied
-#     assert obj.data["status"] == "updated"
-#     assert obj.data.get("hacked") is None
+    # Verify only authorized changes were applied
+    assert obj.data["status"] == "updated"
+    assert obj.data.get("hacked") is None
     
-#     # Verify reaction handling
-#     unauthorized_comment.create_reaction.assert_not_called()
-#     authorized_comment.create_reaction.assert_called_with("+1")
+    # Verify reaction handling
+    unauthorized_comment.create_reaction.assert_not_called()
+    authorized_comment.create_reaction.assert_called_with("+1")
 
 def test_unauthorized_issue_creator_denied(store, mock_issue):
     """Test that updates can't be processed for issues created by unauthorized users"""
