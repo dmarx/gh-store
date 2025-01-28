@@ -165,6 +165,9 @@ def test_validate_issue_creator_unauthorized(access_control):
     issue.user.login = "random-user"
     issue.number = 123
     
+    # Mock reactions as an empty iterator
+    issue.get_reactions = Mock(return_value=iter([]))
+    
     result = access_control.validate_issue_creator(issue)
     assert result is False
 
@@ -182,6 +185,9 @@ def test_validate_comment_author_unauthorized(access_control):
     comment = Mock()
     comment.user.login = "random-user"
     comment.id = 456
+    
+    # Mock reactions as an empty iterator
+    comment.get_reactions = Mock(return_value=iter([]))
     
     result = access_control.validate_comment_author(comment)
     assert result is False
@@ -244,7 +250,7 @@ def test_validate_update_request_unauthorized_comment(access_control, mock_repo)
     # Mock unauthorized comment
     comment = Mock()
     comment.user.login = "random-user"
-    comment.get_reactions.return_value = []
+    comment.get_reactions.return_value = iter([])  # Mock an empty iterator
     
     issue.get_comments.return_value = [comment]
     
