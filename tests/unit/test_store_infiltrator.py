@@ -2,6 +2,7 @@
 
 import pytest
 from gh_store.core.exceptions import AccessDeniedError
+from unittest.mock import Mock,
 
 # tests/unit/test_store_infiltrator.py
 
