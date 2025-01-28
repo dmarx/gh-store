@@ -46,7 +46,7 @@ docs = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=gh_store --cov-report=term-missing"
+addopts = "--cov=gh_store --cov-report=term-missing -vvv"
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests as integration tests",
