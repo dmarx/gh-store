@@ -68,18 +68,30 @@ def mock_comment():
     for comment in comments:
         comment.reset_mock()
 
+# In conftest.py
+
 @pytest.fixture
 def mock_issue(mock_comment):
     """Create a mock issue with configurable attributes"""
     issues = []  # Keep track of created issues for cleanup
     
-    def _make_issue(number=1, user_login="repo-owner", body=None, comments=None):
+    def _make_issue(number=1, user_login="repo-owner", body=None, comments=None, labels=None):
         issue = Mock()
         issue.number = number
         issue.user = Mock(login=user_login)
         issue.body = json.dumps(body) if body else "{}"
         issue.get_comments = Mock(return_value=comments if comments is not None else [])
         issue.edit = Mock()  # For closing the issue
+        
+        # Set up default labels if none provided
+        if labels is None:
+            mock_label1 = Mock()
+            mock_label1.name = "stored-object"
+            mock_label2 = Mock()
+            mock_label2.name = "UID:test-123"
+            labels = [mock_label1, mock_label2]
+        issue.labels = labels
+            
         issues.append(issue)  # Track the issue
         return issue
     
