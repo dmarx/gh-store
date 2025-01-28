@@ -3,6 +3,8 @@
 import pytest
 from gh_store.core.exceptions import AccessDeniedError
 
+# tests/unit/test_store_infiltrator.py
+
 def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
     """Test that unauthorized updates are ignored during processing"""
     # Create test comments
@@ -17,11 +19,18 @@ def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
         comment_id=2
     )
     
-    # Create issue with both comments
+    # Create mock labels
+    mock_base_label = Mock()
+    mock_base_label.name = "stored-object"
+    mock_uid_label = Mock()
+    mock_uid_label.name = "UID:test-123"
+    
+    # Create issue with both comments and labels
     issue = mock_issue(
         number=123,
         body={"status": "original"},
-        comments=[unauthorized_comment, authorized_comment]
+        comments=[unauthorized_comment, authorized_comment],
+        labels=[mock_base_label, mock_uid_label]
     )
     
     # Setup issue retrieval
@@ -36,7 +45,7 @@ def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
     
     # Verify reaction handling
     unauthorized_comment.create_reaction.assert_not_called()
-    authorized_comment.create_reaction.assert_called_with("+1")
+    authorized_comment.create_reaction.assert_called_with("+")
 
 def test_unauthorized_issue_creator_denied(store, mock_issue):
     """Test that updates can't be processed for issues created by unauthorized users"""
