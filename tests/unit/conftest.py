@@ -1,7 +1,7 @@
 # tests/unit/conftest.py
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, mock_open, patch
 import json
 
 @pytest.fixture
