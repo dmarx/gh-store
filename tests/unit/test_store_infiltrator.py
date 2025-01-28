@@ -45,7 +45,7 @@ def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
     
     # Verify reaction handling
     unauthorized_comment.create_reaction.assert_not_called()
-    authorized_comment.create_reaction.assert_called_with("+")
+    authorized_comment.create_reaction.assert_called_with("+1")
 
 def test_unauthorized_issue_creator_denied(store, mock_issue):
     """Test that updates can't be processed for issues created by unauthorized users"""
