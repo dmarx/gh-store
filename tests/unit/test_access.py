@@ -4,6 +4,49 @@ from unittest.mock import Mock, patch
 import pytest
 from gh_store.core.access import AccessControl
 
+
+# tests/unit/test_store.py
+
+import pytest
+from unittest.mock import Mock, patch
+from gh_store.core.exceptions import AccessDeniedError
+from gh_store.core.store import GitHubStore
+
+@pytest.fixture
+def mock_github():
+    with patch('gh_store.core.store.Github') as mock:
+        mock_repo = mock.return_value.get_repo.return_value
+        yield mock, mock_repo
+
+@pytest.fixture
+def store(mock_github):
+    _, mock_repo = mock_github
+    
+    # Mock the default config
+    mock_config = """
+    store:
+        base_label: "stored-object"
+        uid_prefix: "UID:"
+        reactions:
+            processed: "+1"
+            initial_state: "rocket"
+        retries:
+            max_attempts: 3
+            backoff_factor: 2
+        rate_limit:
+            max_requests_per_hour: 1000
+        log:
+            level: "INFO"
+            format: "{time} | {level} | {message}"
+    """
+    with patch('pathlib.Path.exists', return_value=False), \
+         patch('importlib.resources.files') as mock_files:
+        mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = mock_repo
+        return store
+
+
 @pytest.fixture
 def mock_repo():
     """Create a mock repository"""
@@ -144,3 +187,30 @@ def test_parse_comments_only_codeowners(mock_repo):
     codeowners = ac._get_codeowners()
     
     assert codeowners == set()  # Should be empty set
+
+
+async def test_process_updates_access_denied(store):
+    """Test that process_updates enforces access control"""
+    # Mock access control to deny access
+    store.access_control.validate_update_request = Mock(return_value=False)
+    
+    with pytest.raises(AccessDeniedError) as exc:
+        await store.process_updates(123)
+    
+    assert "Updates can only be processed" in str(exc.value)
+    assert store.access_control.validate_update_request.called
+
+async def test_process_updates_access_granted(store):
+    """Test that process_updates allows access for authorized users"""
+    # Mock access control to allow access
+    store.access_control.validate_update_request = Mock(return_value=True)
+    
+    # Mock the update processing
+    mock_obj = Mock()
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    store.comment_handler.get_unprocessed_updates = Mock(return_value=[])
+    
+    result = await store.process_updates(123)
+    
+    assert result == mock_obj
+    assert store.access_control.validate_update_request.called
