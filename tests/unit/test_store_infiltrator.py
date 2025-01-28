@@ -49,6 +49,7 @@ def store(mock_repo):
             return store
 
 # tests/unit/test_store_infiltrator.py
+
 def test_process_updates_with_infiltrator_comments(store):
     """Test that unauthorized/infiltrating comments don't block valid updates"""
     # Mock the issue setup
@@ -96,8 +97,8 @@ def test_process_updates_with_infiltrator_comments(store):
         )
     ]
     
-    # Return an iterator for get_comments()
-    issue.get_comments = Mock(return_value=iter(comments))
+    # Return comments list directly instead of iterator
+    issue.get_comments = Mock(return_value=comments)
     
     # Mock current state
     current_data = {"status": "original"}
