@@ -31,15 +31,3 @@ jobs:
     - name: Run unit tests
       run: |
         pytest tests/unit
-        
-    # - name: Run integration tests
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    #   run: |
-    #     docker-compose up --build --exit-code-from tests
-        
-    # - name: Upload coverage
-    #   run: |
-    #     curl -Os https://uploader.codecov.io/latest/linux/codecov
-    #     chmod +x codecov
-    #     ./codecov
