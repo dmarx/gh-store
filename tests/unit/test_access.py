@@ -5,6 +5,11 @@ from unittest.mock import Mock, patch
 from github import GithubException, Repository, NamedUser
 from gh_store.core.access import AccessControl
 
+class MockRepositoryContent:
+    """Mock for Repository Content object"""
+    def __init__(self, decoded_content: bytes):
+        self.decoded_content = decoded_content
+
 class MockRepositoryOwner:
     """Mock that accurately represents PyGithub's NamedUser structure"""
     def __init__(self, login: str, type_: str = "User"):
@@ -13,8 +18,15 @@ class MockRepositoryOwner:
 
 class MockRepository:
     """Mock that accurately represents PyGithub's Repository structure"""
-    def __init__(self, owner_login: str, owner_type: str = "User"):
+    def __init__(self, owner_login: str, owner_type: str = "User", codeowners_content: bytes | None = None):
         self._owner = MockRepositoryOwner(owner_login, owner_type)
+        self._codeowners_content = codeowners_content or b"* @repo-owner"
+        
+    def get_contents(self, path: str):
+        """Mock get_contents to handle CODEOWNERS file"""
+        if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+            return MockRepositoryContent(self._codeowners_content)
+        raise GithubException(404, "Not found")
 
 @pytest.fixture
 def mock_repo():
@@ -31,7 +43,7 @@ def test_get_owner_info_structure(access_control):
     owner_info = access_control._get_owner_info()
     assert owner_info["login"] == "repo-owner"
     assert owner_info["type"] == "User"
-    assert access_control.repo._owner.login == "repo-owner"  # Verify correct attribute access
+    assert access_control.repo._owner.login == "repo-owner"
 
 def test_get_owner_info_compatibility():
     """Test compatibility with different PyGithub Repository structures"""
@@ -70,15 +82,23 @@ def test_clear_cache_with_owner(access_control):
     assert new_info != initial_info
 
 @pytest.mark.integration
+@pytest.mark.skipif(not pytest.config.getoption("--runintegration", default=False),
+                   reason="Only run integration tests when explicitly requested")
 def test_with_real_github_repo():
     """
-    Integration test with actual PyGithub Repository
-    Only runs when integration tests are explicitly requested
+    Integration test with actual PyGithub Repository.
+    Requires:
+    - pytest --runintegration flag
+    - GITHUB_TOKEN environment variable
     """
+    import os
     from github import Github
     
-    # Create real Github instance with test token
-    g = Github("test-token")
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        pytest.skip("GITHUB_TOKEN environment variable not set")
+    
+    g = Github(token)
     repo = g.get_repo("octocat/Hello-World")
     ac = AccessControl(repo)
     
@@ -113,3 +133,30 @@ def test_validate_comment_author_with_real_structure(access_control):
     # Test with different user
     comment.user = MockRepositoryOwner("other-user")
     assert access_control.validate_comment_author(comment) is False
+
+def test_codeowners_file_handling(access_control):
+    """Test CODEOWNERS file handling"""
+    # Test with default CODEOWNERS content
+    assert access_control._is_authorized("repo-owner") is True
+    assert access_control._is_authorized("other-user") is False
+
+    # Test with custom CODEOWNERS content
+    custom_content = b"* @maintainer @contributor"
+    repo = MockRepository("owner", codeowners_content=custom_content)
+    ac = AccessControl(repo)
+    
+    assert ac._is_authorized("maintainer") is True
+    assert ac._is_authorized("contributor") is True
+    assert ac._is_authorized("random-user") is False
+
+def test_missing_codeowners_file():
+    """Test behavior when no CODEOWNERS file exists"""
+    # Mock repo that raises 404 for all get_contents calls
+    repo = MockRepository("owner")
+    repo.get_contents = Mock(side_effect=GithubException(404, "Not found"))
+    
+    ac = AccessControl(repo)
+    assert ac._find_codeowners_file() is None
+    # Only owner should be authorized when no CODEOWNERS exists
+    assert ac._is_authorized("owner") is True
+    assert ac._is_authorized("other-user") is False
