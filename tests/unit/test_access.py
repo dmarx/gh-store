@@ -81,9 +81,7 @@ def test_clear_cache_with_owner(access_control):
     assert new_info["login"] == "new-owner"
     assert new_info != initial_info
 
-@pytest.mark.integration
-@pytest.mark.skipif(not pytest.config.getoption("--runintegration", default=False),
-                   reason="Only run integration tests when explicitly requested")
+# @pytest.mark.integration
 def test_with_real_github_repo():
     """
     Integration test with actual PyGithub Repository.
