@@ -85,18 +85,17 @@ def test_clear_cache_with_owner(access_control):
 def test_with_real_github_repo():
     """
     Integration test with actual PyGithub Repository.
-    Requires:
-    - pytest --runintegration flag
-    - GITHUB_TOKEN environment variable
+    Requires GITHUB_TOKEN environment variable
     """
     import os
-    from github import Github
+    from github import Github, Auth
     
     token = os.getenv("GITHUB_TOKEN")
     if not token:
         pytest.skip("GITHUB_TOKEN environment variable not set")
     
-    g = Github(token)
+    auth = Auth.Token(token)
+    g = Github(auth=auth)
     repo = g.get_repo("octocat/Hello-World")
     ac = AccessControl(repo)
     
