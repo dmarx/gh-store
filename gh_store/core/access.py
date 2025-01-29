@@ -27,7 +27,7 @@ class AccessControl:
     def _get_owner_info(self) -> UserInfo:
         """Get repository owner information, caching the result"""
         if not self._owner_info:
-            owner = self.repo.get_owner()
+            owner = self.repo._owner
             self._owner_info = {
                 'login': owner.login,
                 'type': owner.type
