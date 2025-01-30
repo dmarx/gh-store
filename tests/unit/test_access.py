@@ -43,7 +43,7 @@ def test_get_owner_info_structure(access_control):
     owner_info = access_control._get_owner_info()
     assert owner_info["login"] == "repo-owner"
     assert owner_info["type"] == "User"
-    assert access_control.repo._owner.login == "repo-owner"
+    assert access_control.repo.owner.login == "repo-owner"
 
 def test_get_owner_info_compatibility():
     """Test compatibility with different PyGithub Repository structures"""
