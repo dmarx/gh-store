@@ -19,7 +19,7 @@ class MockRepositoryOwner:
 class MockRepository:
     """Mock that accurately represents PyGithub's Repository structure"""
     def __init__(self, owner_login: str, owner_type: str = "User", codeowners_content: bytes | None = None):
-        self._owner = MockRepositoryOwner(owner_login, owner_type)
+        self.owner = MockRepositoryOwner(owner_login, owner_type)
         self._codeowners_content = codeowners_content or b"* @repo-owner"
         
     def get_contents(self, path: str):
@@ -60,7 +60,7 @@ def test_owner_info_caching(access_control):
     info1 = access_control._get_owner_info()
     
     # Change underlying repo owner (shouldn't affect cached result)
-    access_control.repo._owner = MockRepositoryOwner("new-owner")
+    access_control.repo.owner = MockRepositoryOwner("new-owner")
     
     # Second call should use cached value
     info2 = access_control._get_owner_info()
@@ -73,7 +73,7 @@ def test_clear_cache_with_owner(access_control):
     initial_info = access_control._get_owner_info()
     
     # Change underlying owner and clear cache
-    access_control.repo._owner = MockRepositoryOwner("new-owner")
+    access_control.repo.owner = MockRepositoryOwner("new-owner")
     access_control.clear_cache()
     
     # Get new owner info
