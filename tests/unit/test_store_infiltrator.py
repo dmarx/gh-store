@@ -10,7 +10,7 @@ def test_unauthorized_updates_are_ignored(store, mock_issue, mock_comment):
     # Create test comments
     unauthorized_comment = mock_comment(
         user_login="infiltrator",
-        body={"status": "hacked"},
+        body={"status": "compromised", "hacked":"true"},
         comment_id=1
     )
     authorized_comment = mock_comment(
