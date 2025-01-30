@@ -27,10 +27,12 @@ class AccessControl:
     def _get_owner_info(self) -> UserInfo:
         """Get repository owner information, caching the result"""
         if not self._owner_info:
-            owner = self.repo.get_owner()
+            #owner = self.repo._owner
+            owner = self.repo.owner
+            # PyGithub returns ValuedAttribute objects, so we need to get their values
             self._owner_info = {
-                'login': owner.login,
-                'type': owner.type
+                'login': str(owner.login),  # Convert to string to ensure we have a plain value
+                'type': str(owner.type)
             }
         return self._owner_info
 
