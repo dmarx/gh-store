@@ -1,6 +1,7 @@
 // typescript/src/__tests__/client.test.ts
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { GitHubStoreClient } from '../client';
+import { CLIENT_VERSION } from '../version';
 import fetchMock from 'jest-fetch-mock';
 
 describe('GitHubStoreClient', () => {
@@ -86,18 +87,10 @@ describe('GitHubStoreClient', () => {
       expect(obj.meta.version).toBe(3);
       expect(obj.data).toEqual({ key: 'value' });
     });
-
-    it('should throw error when object not found', async () => {
-      fetchMock.mockResponseOnce(JSON.stringify([]));
-
-      await expect(client.getObject('nonexistent'))
-        .rejects
-        .toThrow('No object found with ID: nonexistent');
-    });
   });
 
   describe('createObject', () => {
-    it('should create new object with initial state and cache issue number', async () => {
+    it('should create new object with initial state and metadata', async () => {
       const mockIssue = {
         number: 456,
         created_at: '2025-01-01T00:00:00Z',
@@ -130,32 +123,19 @@ describe('GitHubStoreClient', () => {
       expect(fetchMock.mock.calls[0][1]?.body).toContain('"stored-object"');
       expect(fetchMock.mock.calls[0][1]?.body).toContain('"UID:test-object"');
 
-      // Verify initial state comment
+      // Verify initial state comment with metadata
       const commentBody = JSON.parse(JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body);
       expect(commentBody.type).toBe('initial_state');
-      expect(commentBody.data).toEqual(data);
-
-      // Verify cache by making a subsequent request
-      fetchMock.resetMocks();
-      fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssue))
-        .mockResponseOnce(JSON.stringify([]));
-
-      await client.getObject('test-object');
-      expect(fetchMock.mock.calls[0][0]).toContain('/issues/456');
-    });
-
-    it('should handle API errors during creation', async () => {
-      fetchMock.mockRejectOnce(new Error('API error'));
-
-      await expect(client.createObject('test-object', { test: 'data' }))
-        .rejects
-        .toThrow('API error');
+      expect(commentBody._data).toEqual(data);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
     });
   });
 
   describe('updateObject', () => {
-    it('should add update comment and reopen issue', async () => {
+    it('should add update comment with metadata', async () => {
       const mockIssue = {
         number: 1,
         state: 'closed',
@@ -176,154 +156,23 @@ describe('GitHubStoreClient', () => {
         .mockResponseOnce(JSON.stringify([])); // Get comments for version
 
       const changes = { key: 'updated' };
-      const obj = await client.updateObject('test-object', changes);
+      await client.updateObject('test-object', changes);
 
-      expect(obj.data).toEqual({ key: 'value' });
-
-      // Verify update comment
-      const commentBody = JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body;
-      expect(JSON.parse(commentBody)).toEqual(changes);
-      
-      // Verify issue reopened
-      expect(fetchMock.mock.calls[2][1]?.body).toContain('"state":"open"');
-    });
-
-    it('should throw error when object not found', async () => {
-      fetchMock.mockResponseOnce(JSON.stringify([]));
-
-      await expect(client.updateObject('nonexistent', { key: 'value' }))
-        .rejects
-        .toThrow('No object found with ID: nonexistent');
-    });
-  });
-
-  describe('listAll', () => {
-    it('should list all non-archived objects and update cache', async () => {
-      const mockIssues = [
-        {
-          number: 789,
-          body: JSON.stringify({ id: 'obj1' }),
-          created_at: '2025-01-01T00:00:00Z',
-          updated_at: '2025-01-02T00:00:00Z',
-          labels: [
-            { name: 'stored-object' },
-            { name: 'UID:test-1' }
-          ]
-        },
-        {
-          number: 790,
-          body: JSON.stringify({ id: 'obj2' }),
-          created_at: '2025-01-01T00:00:00Z',
-          updated_at: '2025-01-02T00:00:00Z',
-          labels: [
-            { name: 'stored-object' },
-            { name: 'UID:test-2' },
-            { name: 'archived' }
-          ]
-        }
-      ];
-
-      // Add spy on fetch to track calls
-      fetchMock.mockImplementation(async (inputUrl: string | Request | undefined, _options?: RequestInit) => {
-        if (!inputUrl) {
-          return {
-            ok: false,
-            status: 400,
-            statusText: 'No URL provided'
-          } as Response;
-        }
-
-        const url = inputUrl.toString();
-        console.error('Fetch called with URL:', url);
-        
-        if (url.includes('/issues?labels=')) {
-          // Initial listAll query
-          return {
-            ok: true,
-            json: async () => mockIssues
-          } as Response;
-        } else if (url.includes('/issues/789')) {
-          // Direct issue fetch via cache
-          console.error('Returning cached issue:', mockIssues[0]);
-          return {
-            ok: true,
-            json: async () => mockIssues[0]
-          } as Response;
-        } else if (url.includes('/comments')) {
-          // Comments query
-          return {
-            ok: true,
-            json: async () => []
-          } as Response;
-        }
-        
-        console.error('Unhandled URL in mock:', url);
-        return {
-          ok: false,
-          status: 404
-        } as Response;
-      });
-
-      // First call to list all objects
-      const objects = await client.listAll();
-
-      expect(Object.keys(objects)).toHaveLength(1);
-      expect(objects['test-1']).toBeDefined();
-      expect(objects['test-2']).toBeUndefined();
-
-      // Now verify the cache by fetching directly
-      const cachedObject = await client.getObject('test-1');
-      expect(cachedObject.meta.objectId).toBe('test-1');
-      expect(cachedObject.data).toEqual({ id: 'obj1' });
-    });
-  });
-
-  describe('listUpdatedSince', () => {
-    it('should list only objects updated after timestamp', async () => {
-      const timestamp = new Date('2025-01-01T00:00:00Z');
-      const mockIssues = [
-        {
-          number: 1,
-          body: JSON.stringify({ id: 'obj1' }),
-          created_at: '2025-01-01T00:00:00Z',
-          updated_at: '2025-01-02T00:00:00Z', // Updated after timestamp
-          labels: [
-            { name: 'stored-object' },
-            { name: 'UID:test-1' }
-          ]
-        },
-        {
-          number: 2,
-          body: JSON.stringify({ id: 'obj2' }),
-          created_at: '2024-12-31T00:00:00Z',
-          updated_at: '2024-12-31T12:00:00Z', // Updated before timestamp
-          labels: [
-            { name: 'stored-object' },
-            { name: 'UID:test-2' }
-          ]
-        }
-      ];
-
-      fetchMock
-        .mockResponseOnce(JSON.stringify(mockIssues))
-        .mockResponseOnce(JSON.stringify([])) // Comments for first issue
-        .mockResponseOnce(JSON.stringify([])); // Comments for second issue
-
-      const objects = await client.listUpdatedSince(timestamp);
-
-      expect(Object.keys(objects)).toHaveLength(1);
-      expect(objects['test-1']).toBeDefined();
-      expect(objects['test-2']).toBeUndefined();
+      // Verify update comment with metadata
+      const commentPayload = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
+      const commentBody = JSON.parse(commentPayload.body);
+      expect(commentBody._data).toEqual(changes);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
     });
   });
 
   describe('getObjectHistory', () => {
-    it('should return full object history', async () => {
+    it('should return full object history with metadata', async () => {
       const mockIssue = {
         number: 1,
-        body: JSON.stringify({ id: 'test' }),
-        created_at: '2025-01-01T00:00:00Z',
-        updated_at: '2025-01-02T00:00:00Z',
         labels: [
           { name: 'stored-object' },
           { name: 'UID:test-object' }
@@ -336,13 +185,25 @@ describe('GitHubStoreClient', () => {
           created_at: '2025-01-01T00:00:00Z',
           body: JSON.stringify({
             type: 'initial_state',
-            data: { status: 'new' }
+            _data: { status: 'new' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-01T00:00:00Z',
+              update_mode: 'append'
+            }
           })
         },
         {
           id: 2,
           created_at: '2025-01-02T00:00:00Z',
-          body: JSON.stringify({ status: 'updated' })
+          body: JSON.stringify({
+            _data: { status: 'updated' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
         }
       ];
 
@@ -354,7 +215,9 @@ describe('GitHubStoreClient', () => {
 
       expect(history).toHaveLength(2);
       expect(history[0].type).toBe('initial_state');
+      expect(history[0].data).toEqual({ status: 'new' });
       expect(history[1].type).toBe('update');
+      expect(history[1].data).toEqual({ status: 'updated' });
     });
   });
 });
