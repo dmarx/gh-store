@@ -1,6 +1,10 @@
 // typescript/scripts/update-version.ts
 import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Read package.json
 const pkgPath = resolve(__dirname, '../package.json');
@@ -18,3 +22,5 @@ const updatedContent = versionContent.replace(
 
 // Write back
 writeFileSync(versionPath, updatedContent);
+
+console.log(`Updated CLIENT_VERSION to ${pkg.version}`);
