@@ -1,5 +1,4 @@
 # tests/unit/test_store.py
-
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -10,37 +9,6 @@ from unittest.mock import Mock, patch, mock_open
 from gh_store.core.store import GitHubStore
 from gh_store.core.exceptions import ObjectNotFound, ConcurrentUpdateError
 
-# @pytest.fixture
-# def store():
-#     """Create a store instance with a mocked GitHub repo"""
-#     with patch('gh_store.core.store.Github') as mock_github:
-#         mock_repo = Mock()
-#         mock_github.return_value.get_repo.return_value = mock_repo
-        
-#         # Mock the default config
-#         mock_config = """
-# store:
-#   base_label: "stored-object"
-#   uid_prefix: "UID:"
-#   reactions:
-#     processed: "+1"
-#     initial_state: "🔰"
-#   retries:
-#     max_attempts: 3
-#     backoff_factor: 2
-#   rate_limit:
-#     max_requests_per_hour: 1000
-#   log:
-#     level: "INFO"
-#     format: "{time} | {level} | {message}"
-# """
-#         with patch('pathlib.Path.exists', return_value=False), \
-#              patch('importlib.resources.files') as mock_files:
-#             mock_files.return_value.joinpath.return_value.open.return_value = mock_open(read_data=mock_config)()
-            
-#             store = GitHubStore(token="fake-token", repo="owner/repo")
-#             store.repo = mock_repo  # Attach for test access
-#             return store
 def test_create_object_with_initial_state(store):
     """Test that creating an object stores the initial state in a comment"""
     # Setup
