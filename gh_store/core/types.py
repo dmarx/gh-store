@@ -27,3 +27,17 @@ class Update:
     comment_id: int
     timestamp: datetime
     changes: Json
+
+@dataclass
+class CommentMeta:
+    """Metadata included with each comment"""
+    client_version: str
+    timestamp: str
+    update_mode: str
+
+@dataclass
+class CommentPayload:
+    """Full comment payload structure"""
+    _data: Json
+    _meta: CommentMeta
+    type: str | None = None
