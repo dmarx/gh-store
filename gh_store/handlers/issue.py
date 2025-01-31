@@ -130,8 +130,7 @@ class IssueHandler:
         )
         
         return StoredObject(meta=meta, data=data)
-
-    def get_object_history(self, object_id: str) -> list[dict]:
+def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
         logger.info(f"Retrieving history for object: {object_id}")
         
@@ -153,33 +152,38 @@ class IssueHandler:
         # Process all comments chronologically
         for comment in issue.get_comments():
             try:
-                payload = json.loads(comment.body)
+                comment_data = json.loads(comment.body)
                 
                 # Handle old format comments (backwards compatibility)
-                if not isinstance(payload, dict) or ('_data' not in payload):
-                    payload = {
-                        '_data': payload,
-                        '_meta': {
-                            'client_version': 'legacy',
-                            'timestamp': comment.created_at.isoformat(),
-                            'update_mode': 'append'
-                        }
-                    }
-                    
-                    # Check for explicit type in old format
-                    if isinstance(payload['_data'], dict) and 'type' in payload['_data']:
-                        payload['type'] = payload['_data'].pop('type')
-                
-                history.append({
-                    "timestamp": comment.created_at.isoformat(),
-                    "type": payload.get('type', 'update'),
-                    "data": payload['_data'],
-                    "comment_id": comment.id,
-                    "metadata": payload.get('_meta', {
+                if isinstance(comment_data, dict) and 'type' in comment_data and comment_data['type'] == 'initial_state':
+                    # Old initial state format
+                    comment_type = 'initial_state'
+                    data = comment_data['data']
+                elif isinstance(comment_data, dict) and '_data' in comment_data:
+                    # New format
+                    comment_type = comment_data.get('type', 'update')
+                    data = comment_data['_data']
+                else:
+                    # Legacy update format (raw data)
+                    comment_type = 'update'
+                    data = comment_data
+
+                # Build metadata
+                if isinstance(comment_data, dict) and '_meta' in comment_data:
+                    metadata = comment_data['_meta']
+                else:
+                    metadata = {
                         'client_version': 'legacy',
                         'timestamp': comment.created_at.isoformat(),
                         'update_mode': 'append'
-                    })
+                    }
+                
+                history.append({
+                    "timestamp": comment.created_at.isoformat(),
+                    "type": comment_type,
+                    "data": data,
+                    "comment_id": comment.id,
+                    "metadata": metadata
                 })
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Skipping comment {comment.id}: {e}")
