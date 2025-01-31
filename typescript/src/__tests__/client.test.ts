@@ -1,4 +1,5 @@
 // typescript/src/__tests__/client.test.ts
+
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { GitHubStoreClient } from '../client';
 import { CLIENT_VERSION } from '../version';
@@ -218,6 +219,177 @@ describe('GitHubStoreClient', () => {
       expect(history[0].data).toEqual({ status: 'new' });
       expect(history[1].type).toBe('update');
       expect(history[1].data).toEqual({ status: 'updated' });
+    });
+  });
+
+  describe('API Error Handling', () => {
+    it('should throw error on API failure', async () => {
+      fetchMock.mockResponseOnce('', { 
+        status: 500,
+        statusText: 'Internal Server Error'
+      });
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow('GitHub API error: 500');
+    });
+
+    it('should handle malformed JSON responses', async () => {
+      fetchMock.mockResponseOnce('invalid json');
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow();
+    });
+  });
+
+  describe('listAll', () => {
+    it('should handle empty repository', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should handle invalid issue data', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: 'invalid json',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should skip issues without proper labels', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        labels: [
+          { name: 'stored-object' }  // Missing UID label
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('listUpdatedSince', () => {
+    it('should handle no updates', async () => {
+      const timestamp = new Date('2025-01-01T00:00:00Z');
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should ignore updates before timestamp', async () => {
+      const timestamp = new Date('2025-01-02T00:00:00Z');
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-01T12:00:00Z',  // Before timestamp
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ]
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('getObjectHistory', () => {
+    it('should handle missing object', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      await expect(client.getObjectHistory('nonexistent'))
+        .rejects
+        .toThrow('No object found with ID: nonexistent');
+    });
+
+    it('should handle invalid comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: 'invalid json'  // Invalid comment
+        },
+        {
+          id: 2,
+          created_at: '2025-01-02T00:00:00Z',
+          body: JSON.stringify({
+            _data: { status: 'valid' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);  // Only valid comment included
+      expect(history[0].data).toEqual({ status: 'valid' });
+    });
+
+    it('should process legacy format comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: JSON.stringify({ status: 'legacy' })  // Legacy format
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);
+      expect(history[0].type).toBe('update');
+      expect(history[0].data).toEqual({ status: 'legacy' });
     });
   });
 });
