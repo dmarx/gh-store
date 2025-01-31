@@ -1,4 +1,17 @@
 // typescript/src/version.ts
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-// This version should match package.json
-export const CLIENT_VERSION = '0.2.4';
+function getVersion(): string {
+    try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const pkgPath = resolve(__dirname, '../../package.json');
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+        return pkg.version;
+    } catch (error) {
+        return '0.2.4'; // Fallback version
+    }
+}
+
+export const CLIENT_VERSION = getVersion();
