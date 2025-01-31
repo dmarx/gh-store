@@ -22,6 +22,13 @@ class CommentHandler:
         self.initial_state_reaction = config.store.reactions.initial_state
         self.access_control = AccessControl(repo)
 
+    def _validate_metadata(self, metadata: dict) -> bool:
+        """Validate that metadata contains all required fields"""
+        return all(
+            key in metadata and metadata[key] is not None
+            for key in ['client_version', 'timestamp', 'update_mode']
+        )
+
     def get_unprocessed_updates(self, issue_number: int) -> list[Update]:
         """Get all unprocessed updates from issue comments"""
         logger.info(f"Fetching unprocessed updates for issue #{issue_number}")
@@ -46,6 +53,9 @@ class CommentHandler:
                             'update_mode': 'append'
                         }
                     }
+                elif not self._validate_metadata(comment_payload.get('_meta', {})):
+                    logger.warning(f"Skipping comment {comment.id} due to invalid metadata")
+                    continue
 
                 # Skip initial state comments
                 if comment_payload.get('type') == 'initial_state':
