@@ -42,15 +42,15 @@ class IssueHandler:
         # Create initial state comment with metadata
         initial_state_comment = CommentPayload(
             _data=data,
-            _meta={
-                'client_version': CLIENT_VERSION,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'update_mode': 'append'
-            },
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
             type='initial_state'
         )
         
-        comment = issue.create_comment(json.dumps(initial_state_comment, indent=2))
+        comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
         
         # Mark as processed to prevent update processing
         comment.create_reaction(self.config.store.reactions.processed)
@@ -69,7 +69,7 @@ class IssueHandler:
         issue.edit(state="closed")
         
         return StoredObject(meta=meta, data=data)
-    
+
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
         existing_labels = {label.name for label in self.repo.get_labels()}
@@ -158,7 +158,6 @@ class IssueHandler:
                 # Handle old format comments (backwards compatibility)
                 if not isinstance(payload, dict) or ('_data' not in payload):
                     payload = {
-                        'type': 'update',
                         '_data': payload,
                         '_meta': {
                             'client_version': 'legacy',
@@ -166,13 +165,21 @@ class IssueHandler:
                             'update_mode': 'append'
                         }
                     }
+                    
+                    # Check for explicit type in old format
+                    if isinstance(payload['_data'], dict) and 'type' in payload['_data']:
+                        payload['type'] = payload['_data'].pop('type')
                 
                 history.append({
                     "timestamp": comment.created_at.isoformat(),
                     "type": payload.get('type', 'update'),
                     "data": payload['_data'],
                     "comment_id": comment.id,
-                    "metadata": payload['_meta']
+                    "metadata": payload.get('_meta', {
+                        'client_version': 'legacy',
+                        'timestamp': comment.created_at.isoformat(),
+                        'update_mode': 'append'
+                    })
                 })
             except (json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"Skipping comment {comment.id}: {e}")
@@ -249,16 +256,16 @@ class IssueHandler:
         # Create update payload with metadata
         update_payload = CommentPayload(
             _data=changes,
-            _meta={
-                'client_version': CLIENT_VERSION,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'update_mode': 'append'
-            },
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
             type=None
         )
         
         # Add update comment
-        issue.create_comment(json.dumps(update_payload, indent=2))
+        issue.create_comment(json.dumps(update_payload.to_dict(), indent=2))
         
         # Reopen issue to trigger processing
         issue.edit(state="open")
