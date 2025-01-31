@@ -19,12 +19,12 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts",
-    "check-version": "tsx scripts/check-version.ts",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint src --ext .ts",
+    "prebuild": "tsx scripts/update-version.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:packaging": "node scripts/test-packaging.js",
+    "type-check": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run test:packaging"
   },
   "engines": {
