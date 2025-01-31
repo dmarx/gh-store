@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 function getVersion(): string {
     try {
         const __dirname = dirname(fileURLToPath(import.meta.url));
-        const pkgPath = resolve(__dirname, '../../package.json');
+        const pkgPath = resolve(__dirname, '../package.json');
         const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
         return pkg.version;
     } catch (error) {
