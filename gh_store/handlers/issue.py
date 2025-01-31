@@ -130,7 +130,8 @@ class IssueHandler:
         )
         
         return StoredObject(meta=meta, data=data)
-def get_object_history(self, object_id: str) -> list[dict]:
+
+    def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
         logger.info(f"Retrieving history for object: {object_id}")
         
