@@ -2,13 +2,15 @@
 
 import json
 from typing import Sequence
+from datetime import datetime, timezone
 from loguru import logger
 from github import Repository, IssueComment
 from omegaconf import DictConfig
 
-from ..core.types import StoredObject, Update
+from ..core.types import StoredObject, Update, CommentPayload, CommentMeta
 from ..core.exceptions import InvalidUpdate
 from ..core.access import AccessControl
+from ..core.version import CLIENT_VERSION
 
 class CommentHandler:
     """Handles processing of update comments"""
@@ -32,10 +34,21 @@ class CommentHandler:
                 continue
                 
             try:
-                update_data = json.loads(comment.body)
+                comment_payload = json.loads(comment.body)
                 
+                # Handle old format comments (backwards compatibility)
+                if not isinstance(comment_payload, dict) or ('_data' not in comment_payload):
+                    comment_payload = {
+                        '_data': comment_payload,
+                        '_meta': {
+                            'client_version': 'legacy',
+                            'timestamp': comment.created_at.isoformat(),
+                            'update_mode': 'append'
+                        }
+                    }
+
                 # Skip initial state comments
-                if isinstance(update_data, dict) and update_data.get("type") == "initial_state":
+                if comment_payload.get('type') == 'initial_state':
                     logger.debug(f"Skipping initial state comment {comment.id}")
                     continue
                     
@@ -44,18 +57,17 @@ class CommentHandler:
                     logger.debug(f"Skipping unauthorized comment {comment.id}")
                     continue
                     
-                # Parse and normalize JSON data
-                if not isinstance(update_data, dict):
-                    update_data = {"data": update_data}
-                    
                 updates.append(Update(
                     comment_id=comment.id,
                     timestamp=comment.created_at,
-                    changes=update_data
+                    changes=comment_payload['_data']
                 ))
             except json.JSONDecodeError:
                 # Not JSON, skip it
                 logger.debug(f"Skipping non-JSON comment {comment.id}")
+                continue
+            except KeyError as e:
+                logger.warning(f"Malformed comment payload in {comment.id}: {e}")
                 continue
         
         return sorted(updates, key=lambda u: u.timestamp)
@@ -88,6 +100,20 @@ class CommentHandler:
                 if comment.id == update.comment_id:
                     comment.create_reaction(self.processed_reaction)
                     break
+
+    def create_comment_payload(self, data: dict, comment_type: str | None = None) -> CommentPayload:
+        """Create a properly structured comment payload"""
+        meta = CommentMeta(
+            client_version=CLIENT_VERSION,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            update_mode="append"
+        )
+        
+        return CommentPayload(
+            _data=data,
+            _meta=meta,
+            type=comment_type
+        )
 
     def _is_processed(self, comment: IssueComment.IssueComment) -> bool:
         """Check if a comment has been processed"""
