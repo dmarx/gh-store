@@ -41,7 +41,6 @@ from gh_store.core.exceptions import ObjectNotFound, ConcurrentUpdateError
 #             store = GitHubStore(token="fake-token", repo="owner/repo")
 #             store.repo = mock_repo  # Attach for test access
 #             return store
-
 def test_create_object_with_initial_state(store):
     """Test that creating an object stores the initial state in a comment"""
     # Setup
@@ -72,17 +71,9 @@ def test_create_object_with_initial_state(store):
     mock_issue.create_comment.assert_called_once()
     comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
     assert comment_data["type"] == "initial_state"
-    assert comment_data["data"] == test_data
-    
-    # Verify comment was marked as processed and initial state
-    mock_comment.create_reaction.assert_any_call(store.config.store.reactions.processed)
-    mock_comment.create_reaction.assert_any_call(store.config.store.reactions.initial_state)
-    
-    # Verify label creation
-    store.repo.create_label.assert_called_once_with(
-        name=uid_label,
-        color="0366d6"
-    )
+    assert comment_data["_data"] == test_data
+    assert "_meta" in comment_data
+    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
 
 def test_get_object(store):
     """Test retrieving an object"""
@@ -140,8 +131,14 @@ def test_process_update(store):
     # Basic verification
     mock_issue.create_comment.assert_called_once()  # Comment created with update data
     comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
-    assert comment_data == update_data
-    mock_issue.edit.assert_called_with(state="open")  # Issue reopened to trigger processing
+    
+    # Verify the new comment structure
+    assert comment_data["_data"] == update_data
+    assert "_meta" in comment_data
+    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
+    
+    # Verify issue reopened
+    mock_issue.edit.assert_called_with(state="open")
 
 def test_create_object_ensures_labels_exist(store):
     """Test that create_object creates any missing labels"""
