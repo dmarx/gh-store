@@ -6,8 +6,9 @@ from loguru import logger
 from github import Repository
 from omegaconf import DictConfig
 
-from ..core.types import StoredObject, ObjectMeta, Json
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.version import CLIENT_VERSION
 
 from time import sleep
 from github.GithubException import RateLimitExceededException
@@ -38,13 +39,18 @@ class IssueHandler:
             labels=[self.base_label, uid_label]
         )
         
-        # Add initial state comment
-        initial_state_comment = {
-            "type": "initial_state",
-            "data": data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        comment = issue.create_comment(json.dumps(initial_state_comment, indent=2))
+        # Create initial state comment with metadata
+        initial_state_comment = CommentPayload(
+            _data=data,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
+            type='initial_state'
+        )
+        
+        comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
         
         # Mark as processed to prevent update processing
         comment.create_reaction(self.config.store.reactions.processed)
@@ -63,7 +69,7 @@ class IssueHandler:
         issue.edit(state="closed")
         
         return StoredObject(meta=meta, data=data)
-    
+
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
         existing_labels = {label.name for label in self.repo.get_labels()}
@@ -147,15 +153,41 @@ class IssueHandler:
         # Process all comments chronologically
         for comment in issue.get_comments():
             try:
-                update = json.loads(comment.body)
+                comment_data = json.loads(comment.body)
+                
+                # Handle old format comments (backwards compatibility)
+                if isinstance(comment_data, dict) and 'type' in comment_data and comment_data['type'] == 'initial_state':
+                    # Old initial state format
+                    comment_type = 'initial_state'
+                    data = comment_data['data']
+                elif isinstance(comment_data, dict) and '_data' in comment_data:
+                    # New format
+                    comment_type = comment_data.get('type', 'update')
+                    data = comment_data['_data']
+                else:
+                    # Legacy update format (raw data)
+                    comment_type = 'update'
+                    data = comment_data
+
+                # Build metadata
+                if isinstance(comment_data, dict) and '_meta' in comment_data:
+                    metadata = comment_data['_meta']
+                else:
+                    metadata = {
+                        'client_version': 'legacy',
+                        'timestamp': comment.created_at.isoformat(),
+                        'update_mode': 'append'
+                    }
+                
                 history.append({
                     "timestamp": comment.created_at.isoformat(),
-                    "type": update.get("type", "update"),
-                    "data": update.get("data", update),
-                    "comment_id": comment.id
+                    "type": comment_type,
+                    "data": data,
+                    "comment_id": comment.id,
+                    "metadata": metadata
                 })
-            except json.JSONDecodeError:
-                logger.warning(f"Skipping comment {comment.id}: Invalid JSON")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Skipping comment {comment.id}: {e}")
                 
         return history
     
@@ -226,8 +258,19 @@ class IssueHandler:
         
         issue = issues[0]
         
+        # Create update payload with metadata
+        update_payload = CommentPayload(
+            _data=changes,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
+            type=None
+        )
+        
         # Add update comment
-        issue.create_comment(json.dumps(changes, indent=2))
+        issue.create_comment(json.dumps(update_payload.to_dict(), indent=2))
         
         # Reopen issue to trigger processing
         issue.edit(state="open")

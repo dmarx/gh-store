@@ -22,3 +22,15 @@ export interface GitHubStoreConfig {
     initialState?: string;
   };
 }
+
+export interface CommentMeta {
+  client_version: string;
+  timestamp: string;
+  update_mode: string;
+}
+
+export interface CommentPayload {
+  _data: Json;
+  _meta: CommentMeta;
+  type?: string;
+}
