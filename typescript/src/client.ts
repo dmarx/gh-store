@@ -1,6 +1,7 @@
 // typescript/src/client.ts
-import { StoredObject, ObjectMeta, GitHubStoreConfig, Json } from './types';
+import { StoredObject, ObjectMeta, GitHubStoreConfig, Json, CommentPayload } from './types';
 import { IssueCache, CacheConfig } from './cache';
+import { CLIENT_VERSION } from './version';
 
 interface GitHubIssue {
   number: number;
@@ -59,6 +60,23 @@ export class GitHubStoreClient {
     }
 
     return response.json() as Promise<T>;
+  }
+
+  private createCommentPayload(data: Json, type?: string): CommentPayload {
+    const payload: CommentPayload = {
+      _data: data,
+      _meta: {
+        client_version: CLIENT_VERSION,
+        timestamp: new Date().toISOString(),
+        update_mode: "append"
+      }
+    };
+    
+    if (type) {
+      payload.type = type;
+    }
+    
+    return payload;
   }
 
   async getObject(objectId: string): Promise<StoredObject> {
@@ -144,17 +162,13 @@ export class GitHubStoreClient {
       updatedAt: new Date(issue.updated_at)
     });
 
-    // Rest of creation process...
-    const initialStateComment = {
-      type: "initial_state",
-      data: data,
-      timestamp: new Date().toISOString()
-    };
-
+    // Create and add initial state comment
+    const initialState = this.createCommentPayload(data, "initial_state");
+    
     const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
       method: "POST",
       body: JSON.stringify({
-        body: JSON.stringify(initialStateComment, null, 2)
+        body: JSON.stringify(initialState, null, 2)
       })
     });
 
@@ -211,21 +225,15 @@ export class GitHubStoreClient {
     }
 
     const issue = issues[0];
-
-    // Check if issue is already being processed
-    // if (issue.state === "open") {
-    //   throw new Error("Object is currently being processed");
-    // }
-    // ... actually, we don't care if issue appears to be in process. 
-    // there isn't really any opportunity for race conditions here because
-    // we're writing updates into comments, and the comments always get
-    // processed sequentially. we don't need a locking mechanism like this.
+    
+    // Create update payload with metadata
+    const updatePayload = this.createCommentPayload(changes);
 
     // Add update comment
     await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
       method: "POST",
       body: JSON.stringify({
-        body: JSON.stringify(changes, null, 2)
+        body: JSON.stringify(updatePayload, null, 2)
       })
     });
 
@@ -234,8 +242,6 @@ export class GitHubStoreClient {
       method: "PATCH",
       body: JSON.stringify({ state: "open" })
     });
-    // FYI: if this throws something like an "issue already open" error:
-    //   ignore it.
 
     // Return current state (before update is processed)
     return this.getObject(objectId);
@@ -366,11 +372,11 @@ export class GitHubStoreClient {
 
     for (const comment of comments) {
       try {
-        const update = JSON.parse(comment.body) as { type?: string; data?: Json };
+        const payload = JSON.parse(comment.body) as CommentPayload;
         history.push({
           timestamp: comment.created_at,
-          type: update.type || "update",
-          data: update.data || update,
+          type: payload.type || "update",
+          data: payload._data,
           commentId: comment.id,
         });
       } catch (error) {
@@ -388,11 +394,11 @@ export class GitHubStoreClient {
   }
 
   private _getObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
-    for (const label of issue.labels) {
-      if (label.name !== this.config.baseLabel && label.name.startsWith(this.config.uidPrefix)) {
-        return label.name.slice(this.config.uidPrefix.length);
+      for (const label of issue.labels) {
+        if (label.name !== this.config.baseLabel && label.name.startsWith(this.config.uidPrefix)) {
+          return label.name.slice(this.config.uidPrefix.length);
+        }
       }
+      throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
     }
-    throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
   }
-}
