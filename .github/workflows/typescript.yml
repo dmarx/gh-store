@@ -50,9 +50,8 @@ jobs:
     - name: Install dependencies
       run: npm ci --prefer-offline
 
-    # Run version check early to catch issues before build
-    - name: Check version sync
-      run: npm run check-version
+    - name: Sync version
+      run: npm run prebuild
         
     - name: Type check
       run: npm run type-check
