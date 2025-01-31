@@ -374,7 +374,7 @@ export class GitHubStoreClient {
       try {
         const payload = JSON.parse(comment.body);
         let commentType = 'update';
-        let commentData = payload;
+        let commentData: Json;
         let metadata = {
           client_version: 'legacy',
           timestamp: comment.created_at,
@@ -382,16 +382,21 @@ export class GitHubStoreClient {
         };
 
         if (typeof payload === 'object') {
-          if ('type' in payload && payload.type === 'initial_state') {
-            // Old initial state format
-            commentType = 'initial_state';
-            commentData = payload.data;
-          } else if ('_data' in payload) {
+          if ('_data' in payload) {
             // New format with metadata
             commentType = payload.type || 'update';
             commentData = payload._data;
             metadata = payload._meta || metadata;
+          } else if ('type' in payload && payload.type === 'initial_state') {
+            // Old initial state format
+            commentType = 'initial_state';
+            commentData = payload.data;
+          } else {
+            // Legacy format
+            commentData = payload;
           }
+        } else {
+          commentData = payload;
         }
 
         history.push({
@@ -408,6 +413,7 @@ export class GitHubStoreClient {
 
     return history;
   }
+
   private async _getVersion(issueNumber: number): Promise<number> {
     const comments = await this.fetchFromGitHub<Array<unknown>>(`/issues/${issueNumber}/comments`);
     return comments.length + 1;
