@@ -6,7 +6,7 @@ from loguru import logger
 from github import Repository
 from omegaconf import DictConfig
 
-from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
 from ..core.version import CLIENT_VERSION
 
