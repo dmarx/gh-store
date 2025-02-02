@@ -130,3 +130,5 @@ def store(mock_config):
             store.access_control.repo = mock_repo  # Ensure access control uses same mock
             store.config = mock_config  # Use the fixture's mock config
             return store
+
+mock_store = store
