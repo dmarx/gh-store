@@ -11,10 +11,19 @@ from gh_store.__main__ import CLI
 from gh_store.core.exceptions import GitHubStoreError
 
 @pytest.fixture
-def mock_store():
-    """Create a mock GitHubStore instance"""
-    with patch('gh_store.__main__.GitHubStore') as mock:
-        yield mock.return_value
+def mock_github():
+    """Create a mock Github instance and repo"""
+    with patch('gh_store.core.store.Github') as mock_github:
+        mock_repo = Mock()
+        
+        # Mock the owner info
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.get_owner.return_value = owner
+        
+        mock_github.return_value.get_repo.return_value = mock_repo
+        yield mock_github, mock_repo
 
 @pytest.fixture
 def mock_config_exists():
@@ -32,16 +41,17 @@ def cli_env_vars():
     del os.environ["GITHUB_REPOSITORY"]
 
 class TestCLIInitialization:
-    def test_init_with_env_vars(self, cli_env_vars, mock_store, mock_config_exists):
+    def test_init_with_env_vars(self, cli_env_vars, mock_github, mock_config_exists):
         """Test CLI initialization using environment variables"""
+        mock_gh, mock_repo = mock_github
         cli = CLI()
         assert cli.token == "test-token"
         assert cli.repo == "owner/repo"
-        mock_store.assert_called_once_with(
-            token="test-token",
-            repo="owner/repo",
-            config_path=Path.home() / ".config" / "gh-store" / "config.yml"
-        )
+        
+        # Verify Github was initialized with the token
+        mock_gh.assert_called_once_with("test-token")
+        # Verify correct repo was requested
+        mock_gh.return_value.get_repo.assert_called_once_with("owner/repo")
 
     def test_init_with_args(self, mock_store, mock_config_exists):
         """Test CLI initialization using explicit arguments"""
@@ -109,12 +119,17 @@ class TestCLIOperations:
         )
         mock_store.get.return_value = mock_obj
 
-        mock_file = mock_open()
-        with patch('builtins.open', mock_file):
+        with patch('builtins.open', mock_open()) as mock_file:
             cli.get("test-123", output="output.json")
 
         mock_store.get.assert_called_once_with("test-123")
-        mock_file().write.assert_called_once()
+        # Verify file was opened for writing
+        mock_file.assert_called_once_with("output.json", "w")
+        # json.dump was called with correct data
+        write_call = mock_file().write.call_args_list
+        # Verify some key parts were written
+        assert any("test-123" in str(call) for call in write_call)
+        assert any("2025-01-01" in str(call) for call in write_call)
 
     def test_update(self, cli, mock_store):
         """Test update command"""
