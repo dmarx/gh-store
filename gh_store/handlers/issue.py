@@ -21,18 +21,29 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
-    
+
+    def _add_uid_prefix(self, object_id: str) -> str:
+        """Add UID prefix to object ID if not present"""
+        if object_id.startswith(self.uid_prefix):
+            return object_id
+        return f"{self.uid_prefix}{object_id}"
+
+    def _remove_uid_prefix(self, label: str) -> str:
+        """Remove UID prefix from label if present"""
+        if label.startswith(self.uid_prefix):
+            return label[len(self.uid_prefix):]
+        return label
+
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
-        # Create uid label with prefix
-        uid_label = f"{self.uid_prefix}{object_id}"
+        # Ensure uid label has prefix
+        uid_label = self._add_uid_prefix(object_id)
         
-        # Ensure required labels exist
+        # Create issue with required labels
         self._ensure_labels_exist([self.base_label, uid_label])
         
-        # Create issue with object data and both required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
