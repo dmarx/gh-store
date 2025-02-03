@@ -125,7 +125,7 @@ def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
     assert history[0]["metadata"]["client_version"] == "legacy"
 
 def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
-    """Test that invalid comments are skipped in history"""
+    """Test that non-JSON comments are treated as legacy updates"""
     comments = [
         # Valid comment
         mock_comment(
@@ -133,7 +133,7 @@ def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
             body={"value": 42},
             comment_id=1
         ),
-        # Invalid JSON
+        # Non-JSON text is treated as legacy update
         mock_comment(
             user_login="repo-owner",
             body="not json",
@@ -155,8 +155,11 @@ def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
     
     history = store.issue_handler.get_object_history("test-123")
     
-    assert len(history) == 2
-    assert [entry["comment_id"] for entry in history] == [1, 3]
+    # All comments should be present in history with appropriate handling
+    assert len(history) == 3
+    # Check the non-JSON comment is treated as legacy data
+    assert history[1]["data"] == "not json"
+    assert history[1]["metadata"]["client_version"] == "legacy"
 
 def test_get_object_history_nonexistent(store):
     """Test retrieving history for nonexistent object"""
