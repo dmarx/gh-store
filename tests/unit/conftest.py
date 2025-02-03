@@ -276,6 +276,7 @@ def store(mock_github, default_config):
     store.repo = mock_repo  # Use mock repo
     store.access_control.repo = mock_repo  # Ensure access control uses same mock
     store.config = default_config  # Use the fixture's config
+    store.issue_handler.get_object_id_from_labels = lambda issue: "test-123"  # Override for testing
     return store
 
 @pytest.fixture
