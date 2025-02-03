@@ -1,8 +1,10 @@
 # tests/unit/test_cli_snapshot.py
 
-from unittest.mock import Mock, patch, mock_open
-import json
 from datetime import datetime, timezone
+import json
+import os
+from unittest.mock import Mock, patch, mock_open
+
 
 class TestCLISnapshotOperations:
     def test_snapshot(self, cli, mock_github):
