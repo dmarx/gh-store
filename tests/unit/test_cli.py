@@ -58,6 +58,7 @@ def test_process_updates_with_custom_config(mock_github, tmp_path):
     
     # Create custom config
     config_path = tmp_path / "custom_config.yml"
+    # Use the same reaction values as fixture but with custom label
     config_path.write_text("""
 store:
   base_label: "custom-label"
