@@ -215,3 +215,53 @@ def store(mock_config, mock_github):
     store.repo = mock_repo
     store.access_control.repo = mock_repo
     return store
+
+
+
+@pytest.fixture
+def test_config_dir(tmp_path):
+    """Provide a temporary directory for config files during testing"""
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
+
+@pytest.fixture
+def test_config_file(test_config_dir):
+    """Create a test config file with minimal valid content"""
+    config_path = test_config_dir / "config.yml"
+    config_path.write_text("""
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+  rate_limit:
+    max_requests_per_hour: 1000
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+    """)
+    return config_path
+
+@pytest.fixture
+def mock_env_setup(monkeypatch, test_config_dir):
+    """Mock environment setup for CLI testing"""
+    # Mock HOME directory to control config location
+    monkeypatch.setenv("HOME", str(test_config_dir.parent.parent))
+    
+    # Mock importlib.resources for default config
+    with patch('importlib.resources.files') as mock_files:
+        mock_package = mock_files.return_value
+        mock_package.joinpath.return_value.open.return_value.read.return_value = """
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+        """
+        yield mock_files
