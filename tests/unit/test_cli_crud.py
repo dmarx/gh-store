@@ -10,8 +10,8 @@ class TestCLIBasicOperations:
         mock_gh, mock_repo = mock_github
         mock_data = {"test": "data"}
         
-        # Create issue with the prefixed UID label
         test_issue = mock_issue(
+            body=mock_data,
             labels=["stored-object", "UID:test-123"]
         )
         mock_repo.create_issue.return_value = test_issue
@@ -19,10 +19,16 @@ class TestCLIBasicOperations:
         with patch('builtins.open', mock_open(read_data=json.dumps(mock_data))):
             cli.create("test-123", "data.json")
     
+        # Verify labels were created if needed
+        existing_labels = [label.name for label in mock_repo.get_labels()]
+        assert "stored-object" in existing_labels
+        assert "UID:test-123" in existing_labels
+        
+        # Verify issue was created with correct labels
         mock_repo.create_issue.assert_called_once()
         call_kwargs = mock_repo.create_issue.call_args[1]
         assert "test-123" in call_kwargs["title"]
-        assert "UID:test-123" in call_kwargs["labels"]
+        assert all(label in call_kwargs["labels"] for label in ["stored-object", "UID:test-123"])
 
     def test_get(self, cli, mock_github, mock_issue):
         """Test get command"""
