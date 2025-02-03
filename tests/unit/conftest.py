@@ -25,31 +25,6 @@ def mock_repo(mock_owner):
     repo.get_owner.return_value = mock_owner
     yield repo
 
-@pytest.fixture
-def mock_config():
-    """Create a mock store configuration"""
-    config = Mock(
-        store=Mock(
-            base_label="stored-object",
-            uid_prefix="UID:",
-            reactions=Mock(
-                processed="+1",
-                initial_state="rocket"
-            ),
-            retries=Mock(
-                max_attempts=3,
-                backoff_factor=2
-            ),
-            rate_limit=Mock(
-                max_requests_per_hour=1000
-            ),
-            log=Mock(
-                level="INFO",
-                format="{time} | {level} | {message}"
-            )
-        )
-    )
-    yield config
 
 @pytest.fixture
 def mock_comment():
@@ -70,7 +45,6 @@ def mock_comment():
     
     for comment in comments:
         comment.reset_mock()
-# tests/unit/conftest.py
 
 @pytest.fixture
 def mock_issue():
@@ -122,6 +96,21 @@ def store(mock_config):
 mock_store = store
 
 
+@pytest.fixture(autouse=True)
+def mock_config_path():
+    """Mock all file system operations for config"""
+    with patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.write_text"), \
+         patch("pathlib.Path.read_text", return_value="""
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+"""):
+        yield
+
 @pytest.fixture
 def mock_config_exists():
     """Mock config file existence check"""
@@ -155,36 +144,14 @@ def mock_config():
 
 @pytest.fixture
 def mock_github():
-    """Create a mock Github instance with proper configuration"""
+    """Create a mock Github instance"""
     with patch('gh_store.core.store.Github') as mock_gh:
         mock_repo = Mock()
         
-        # Mock owner info
         owner = Mock()
         owner.login = "repo-owner"
         owner.type = "User"
         mock_repo.owner = owner
-        
-        # Mock default config
-        default_config = """
-store:
-  base_label: "stored-object"
-  uid_prefix: "UID:"
-  reactions:
-    processed: "+1"
-    initial_state: "rocket"
-  retries:
-    max_attempts: 3
-    backoff_factor: 2
-  rate_limit:
-    max_requests_per_hour: 1000
-  log:
-    level: "INFO"
-    format: "{time} | {level} | {message}"
-"""
-        with patch('importlib.resources.files') as mock_files:
-            mock_files.return_value.joinpath.return_value.open.return_value = \
-                mock_open(read_data=default_config)()
         
         mock_gh.return_value.get_repo.return_value = mock_repo
         yield mock_gh, mock_repo
@@ -199,7 +166,6 @@ def cli_env_vars():
     del os.environ["GITHUB_REPOSITORY"]
 
 @pytest.fixture
-def cli(cli_env_vars, mock_github, mock_config_exists):
+def cli(cli_env_vars, mock_github, mock_config_path):
     """Create CLI instance with mocked dependencies"""
-    mock_gh, mock_repo = mock_github
     return CLI()
