@@ -139,7 +139,15 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
         number=1,
         labels=[mock_label_factory("stored-object")]  # Missing UID label
     )
-    valid_issue = mock_issue(number=2)  # Uses default valid labels
+    
+    # Create valid issue with explicit labels including UID
+    valid_issue = mock_issue(
+        number=2,
+        labels=[
+            mock_label_factory("stored-object"),
+            mock_label_factory("UID:test-2")  # Explicitly set UID label
+        ]
+    )
     
     store.repo.get_issues.return_value = [invalid_issue, valid_issue]
     
@@ -147,6 +155,7 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     def get_object_by_number(number):
         mock_obj = Mock()
         mock_obj.meta.object_id = f"test-{number}"
+        mock_obj.meta.label = f"UID:test-{number}"
         return mock_obj
     
     store.issue_handler.get_object_by_number = Mock(
