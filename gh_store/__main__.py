@@ -5,7 +5,8 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import importlib.resources
-import shutil
+import shutil, os
+from typing import Optional
 import fire
 from loguru import logger
 
@@ -28,30 +29,253 @@ def ensure_config_exists(config_path: Path) -> None:
 class CLI:
     """GitHub Issue Store CLI"""
     
-    def __init__(self):
-        """Initialize CLI with default config path"""
-        self.default_config_path = Path.home() / ".config" / "gh-store" / "config.yml"
+    def __init__(
+        self,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None
+    ):
+        """Initialize CLI with credentials and configuration
+        
+        Args:
+            token: GitHub token (optional if GITHUB_TOKEN env var is set)
+            repo: Repository in format owner/repo (optional if GITHUB_REPOSITORY env var is set)
+            config: Optional path to config file
+        """
+        # Get token from args or environment
+        self.token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or os.environ.get("GH_PAT")
+        if not self.token:
+            raise ValueError(
+                "No GitHub token found. Either provide --token argument or "
+                "set GITHUB_TOKEN environment variable"
+            )
+            
+        # Get repo from args or environment
+        self.repo = repo or os.environ.get("GITHUB_REPOSITORY")
+        if not self.repo:
+            raise ValueError(
+                "No repository specified. Either provide --repo argument or "
+                "set GITHUB_REPOSITORY environment variable"
+            )
+            
+        # Set up config path
+        self.config_path = Path(config) if config else Path.home() / ".config" / "gh-store" / "config.yml"
+        ensure_config_exists(self.config_path)
+        
+        # Initialize store instance
+        self.store = GitHubStore(token=self.token, repo=self.repo, config_path=self.config_path)
     
+    def create(
+        self,
+        object_id: str,
+        data_file: str
+    ) -> None:
+        """Create a new object in the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            data_file: Path to JSON file containing object data
+        """
+        try:
+            # Read data from file
+            with open(data_file) as f:
+                data = json.load(f)
+            
+            obj = self.store.create(object_id, data)
+            logger.info(f"Created object {obj.meta.object_id} (version {obj.meta.version})")
+            
+        except Exception as e:
+            logger.exception("Failed to create object")
+            raise SystemExit(1)
+
+    def get(
+        self,
+        object_id: str,
+        output: Optional[str] = None
+    ) -> None:
+        """Get an object from the store
+        
+        Args:
+            object_id: ID of object to retrieve
+            output: Optional path to write object data to
+        """
+        try:
+            obj = self.store.get(object_id)
+            
+            output_data = {
+                "data": obj.data,
+                "meta": {
+                    "object_id": obj.meta.object_id,
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version
+                }
+            }
+            
+            if output:
+                with open(output, 'w') as f:
+                    json.dump(output_data, f, indent=2)
+                logger.info(f"Object data written to {output}")
+            else:
+                print(json.dumps(output_data, indent=2))
+                
+        except Exception as e:
+            logger.exception("Failed to get object")
+            raise SystemExit(1)
+
+    def update(
+        self,
+        object_id: str,
+        data_file: str
+    ) -> None:
+        """Update an existing object
+        
+        Args:
+            object_id: ID of object to update
+            data_file: Path to JSON file containing update data
+        """
+        try:
+            # Read data from file
+            with open(data_file) as f:
+                data = json.load(f)
+            
+            obj = self.store.update(object_id, data)
+            logger.info(f"Update initiated for {obj.meta.object_id}")
+            logger.info("Note: Updates are processed asynchronously")
+            
+        except Exception as e:
+            logger.exception("Failed to update object")
+            raise SystemExit(1)
+
+    def delete(
+        self,
+        object_id: str
+    ) -> None:
+        """Delete an object from the store
+        
+        Args:
+            object_id: ID of object to delete
+        """
+        try:
+            self.store.delete(object_id)
+            logger.info(f"Deleted object {object_id}")
+            
+        except Exception as e:
+            logger.exception("Failed to delete object")
+            raise SystemExit(1)
+
+    def list_all(
+        self,
+        output: Optional[str] = None
+    ) -> None:
+        """List all objects in the store
+        
+        Args:
+            output: Optional path to write listing to
+        """
+        try:
+            objects = self.store.list_all()
+            
+            output_data = {
+                object_id: {
+                    "data": obj.data,
+                    "meta": {
+                        "object_id": obj.meta.object_id,
+                        "created_at": obj.meta.created_at.isoformat(),
+                        "updated_at": obj.meta.updated_at.isoformat(),
+                        "version": obj.meta.version
+                    }
+                }
+                for object_id, obj in objects.items()
+            }
+            
+            if output:
+                with open(output, 'w') as f:
+                    json.dump(output_data, f, indent=2)
+                logger.info(f"Object listing written to {output}")
+            else:
+                print(json.dumps(output_data, indent=2))
+                
+        except Exception as e:
+            logger.exception("Failed to list objects")
+            raise SystemExit(1)
+
+    def list_updated(
+        self,
+        since: str,
+        output: Optional[str] = None
+    ) -> None:
+        """List objects updated since a given timestamp
+        
+        Args:
+            since: ISO format timestamp (e.g. 2025-01-16T00:00:00Z)
+            output: Optional path to write listing to
+        """
+        try:
+            timestamp = datetime.fromisoformat(since.replace('Z', '+00:00'))
+            objects = self.store.list_updated_since(timestamp)
+            
+            output_data = {
+                object_id: {
+                    "data": obj.data,
+                    "meta": {
+                        "object_id": obj.meta.object_id,
+                        "created_at": obj.meta.created_at.isoformat(),
+                        "updated_at": obj.meta.updated_at.isoformat(),
+                        "version": obj.meta.version
+                    }
+                }
+                for object_id, obj in objects.items()
+            }
+            
+            if output:
+                with open(output, 'w') as f:
+                    json.dump(output_data, f, indent=2)
+                logger.info(f"Updated objects listing written to {output}")
+            else:
+                print(json.dumps(output_data, indent=2))
+                
+        except Exception as e:
+            logger.exception("Failed to list updated objects")
+            raise SystemExit(1)
+
+    def get_history(
+        self,
+        object_id: str,
+        output: Optional[str] = None
+    ) -> None:
+        """Get complete history of an object
+        
+        Args:
+            object_id: ID of object to get history for
+            output: Optional path to write history to
+        """
+        try:
+            history = self.store.issue_handler.get_object_history(object_id)
+            
+            if output:
+                with open(output, 'w') as f:
+                    json.dump(history, f, indent=2)
+                logger.info(f"Object history written to {output}")
+            else:
+                print(json.dumps(history, indent=2))
+                
+        except Exception as e:
+            logger.exception("Failed to get object history")
+            raise SystemExit(1)
+            
     def process_updates(
         self,
-        issue: int,
-        token: str,
-        repo: str,
-        config: str | None = None
+        issue: int
     ) -> None:
-        """Process pending updates for a stored object"""
+        """Process pending updates for a stored object
+        
+        Args:
+            issue: Issue number to process updates for
+        """
         try:
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
             logger.info(f"Processing updates for issue #{issue}")
-            
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            obj = store.process_updates(issue)
-            
+            obj = self.store.process_updates(issue)
             logger.info(f"Successfully processed updates for {obj.meta.object_id}")
             
         except GitHubStoreError as e:
@@ -63,28 +287,21 @@ class CLI:
 
     def snapshot(
         self,
-        token: str,
-        repo: str,
-        output: str = "snapshot.json",
-        config: str | None = None
+        output: str = "snapshot.json"
     ) -> None:
-        """Create a full snapshot of all objects in the store"""
+        """Create a full snapshot of all objects in the store
+        
+        Args:
+            output: Path to write snapshot file
+        """
         try:
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            
             # Get all stored objects
-            objects = store.list_all()
+            objects = self.store.list_all()
             
             # Create snapshot data
             snapshot_data = {
                 "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
-                "repository": repo,
+                "repository": self.repo,
                 "objects": {
                     obj_id: {
                         "data": obj.data,
@@ -113,19 +330,14 @@ class CLI:
 
     def update_snapshot(
         self,
-        token: str,
-        repo: str,
-        snapshot_path: str,
-        config: str | None = None
+        snapshot_path: str
     ) -> None:
-        """Update an existing snapshot with changes since its creation"""
+        """Update an existing snapshot with changes since its creation
+        
+        Args:
+            snapshot_path: Path to existing snapshot file
+        """
         try:
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
             # Read existing snapshot
             snapshot_path = Path(snapshot_path)
             if not snapshot_path.exists():
@@ -139,15 +351,14 @@ class CLI:
             logger.info(f"Updating snapshot from {last_snapshot}")
             
             # Get updated objects
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            updated_objects = store.list_updated_since(last_snapshot)
+            updated_objects = self.store.list_updated_since(last_snapshot)
             
             if not updated_objects:
                 logger.info("No updates found since last snapshot")
                 return
             
             # Update snapshot data
-            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat() # should probably use latest object updated time here
+            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
             for obj_id, obj in updated_objects.items():
                 snapshot_data["objects"][obj_id] = {
                     "data": obj.data,
@@ -167,22 +378,6 @@ class CLI:
             raise SystemExit(1)
         except Exception as e:
             logger.exception("Unexpected error occurred")
-            raise SystemExit(1)
-
-    def init(self, config: str | None = None) -> None:
-        """Initialize a new configuration file"""
-        try:
-            config_path = Path(config) if config else self.default_config_path
-            
-            if config_path.exists():
-                logger.warning(f"Configuration file already exists at {config_path}")
-                return
-            
-            ensure_config_exists(config_path)
-            logger.info(f"Configuration initialized at {config_path}")
-            
-        except Exception as e:
-            logger.exception("Failed to initialize configuration")
             raise SystemExit(1)
 
 def main():

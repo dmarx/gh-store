@@ -21,18 +21,29 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
-    
+
+    def _add_uid_prefix(self, object_id: str) -> str:
+        """Add UID prefix to object ID if not present"""
+        if object_id.startswith(self.uid_prefix):
+            return object_id
+        return f"{self.uid_prefix}{object_id}"
+
+    def _remove_uid_prefix(self, label: str) -> str:
+        """Remove UID prefix from label if present"""
+        if label.startswith(self.uid_prefix):
+            return label[len(self.uid_prefix):]
+        return label
+
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
-        # Create uid label with prefix
-        uid_label = f"{self.uid_prefix}{object_id}"
+        # Ensure uid label has prefix
+        uid_label = self._add_uid_prefix(object_id)
         
-        # Ensure required labels exist
+        # Create issue with required labels
         self._ensure_labels_exist([self.base_label, uid_label])
         
-        # Create issue with object data and both required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
@@ -192,18 +203,7 @@ class IssueHandler:
         return history
     
     def get_object_id_from_labels(self, issue) -> str:
-        """
-        Extract bare object ID from issue labels, removing any prefix.
-        
-        Args:
-            issue: GitHub issue object with labels attribute
-            
-        Returns:
-            str: Object ID without prefix
-            
-        Raises:
-            ValueError: If no matching label is found
-        """
+        """Extract object ID from issue labels, removing any prefix."""
         for label in issue.labels:
             # Get the actual label name, handling both string and Mock objects
             label_name = getattr(label, 'name', label)
@@ -211,10 +211,10 @@ class IssueHandler:
             if (label_name != self.base_label and 
                 isinstance(label_name, str) and 
                 label_name.startswith(self.uid_prefix)):
-                return label_name[len(self.uid_prefix):]
+                return self._remove_uid_prefix(label_name)
                 
         raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
-        
+    
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
         logger.info(f"Retrieving object by issue #{issue_number}")
@@ -282,8 +282,11 @@ class IssueHandler:
         """Delete an object by closing and archiving its issue"""
         logger.info(f"Deleting object: {object_id}")
         
+        # Ensure uid label has prefix for query
+        uid_label = self._add_uid_prefix(object_id)
+        
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, uid_label],
             state="all"
         ))
         
@@ -291,11 +294,16 @@ class IssueHandler:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
         
         issue = issues[0]
+        
+        # Transform labels, preserving any additional ones
+        current_labels = set(label.name for label in issue.labels)
+        current_labels.add("archived")
+        
         issue.edit(
             state="closed",
-            labels=["archived", self.base_label, object_id]
+            labels=list(current_labels)  # Let GitHub API handle label management
         )
-
+        
     def _get_version(self, issue) -> int:
         """Extract version number from issue"""
         comments = list(issue.get_comments())

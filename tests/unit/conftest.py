@@ -1,10 +1,15 @@
 # tests/unit/conftest.py
 
 import pytest
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, patch, mock_open
+from datetime import datetime, timezone
 import json
+import os
+from omegaconf import OmegaConf
 
+from gh_store.__main__ import CLI
 from gh_store.core.store import GitHubStore
+
 
 @pytest.fixture
 def mock_owner():
@@ -21,36 +26,11 @@ def mock_repo(mock_owner):
     repo.get_owner.return_value = mock_owner
     yield repo
 
-@pytest.fixture
-def mock_config():
-    """Create a mock store configuration"""
-    config = Mock(
-        store=Mock(
-            base_label="stored-object",
-            uid_prefix="UID:",
-            reactions=Mock(
-                processed="+1",
-                initial_state="rocket"
-            ),
-            retries=Mock(
-                max_attempts=3,
-                backoff_factor=2
-            ),
-            rate_limit=Mock(
-                max_requests_per_hour=1000
-            ),
-            log=Mock(
-                level="INFO",
-                format="{time} | {level} | {message}"
-            )
-        )
-    )
-    yield config
 
 @pytest.fixture
 def mock_comment():
     """Create a mock comment with configurable attributes"""
-    comments = []  # Keep track of created comments for cleanup
+    comments = []
     
     def _make_comment(user_login="repo-owner", body=None, comment_id=1, reactions=None):
         comment = Mock()
@@ -59,47 +39,30 @@ def mock_comment():
         comment.body = json.dumps(body) if body else "{}"
         comment.get_reactions.return_value = reactions or []
         comment.create_reaction = Mock()
-        comments.append(comment)  # Track the comment
+        comments.append(comment)
         return comment
     
     yield _make_comment
     
-    # Cleanup
     for comment in comments:
         comment.reset_mock()
 
-# In conftest.py
-
 @pytest.fixture
-def mock_issue(mock_comment):
-    """Create a mock issue with configurable attributes"""
-    issues = []  # Keep track of created issues for cleanup
-    
-    def _make_issue(number=1, user_login="repo-owner", body=None, comments=None, labels=None):
+def mock_issue():
+    """Create a mock issue with GitHub-like structure"""
+    def _make_issue(number=1, user_login="repo-owner", body=None, labels=None):
         issue = Mock()
         issue.number = number
-        issue.user = Mock(login=user_login)
+        user = Mock()
+        user.login = user_login 
+        issue.user = user
         issue.body = json.dumps(body) if body else "{}"
-        issue.get_comments = Mock(return_value=comments if comments is not None else [])
-        issue.edit = Mock()  # For closing the issue
-        
-        # Set up default labels if none provided
-        if labels is None:
-            mock_label1 = Mock()
-            mock_label1.name = "stored-object"
-            mock_label2 = Mock()
-            mock_label2.name = "UID:test-123"
-            labels = [mock_label1, mock_label2]
-        issue.labels = labels
-            
-        issues.append(issue)  # Track the issue
+        issue.labels = [Mock(name=l) for l in (labels or ["stored-object", "UID:test-123"])]
+        issue.get_comments = Mock(return_value=[])
+        issue.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
         return issue
-    
-    yield _make_issue
-    
-    # Cleanup
-    for issue in issues:
-        issue.reset_mock()
+    return _make_issue
         
 @pytest.fixture
 def store(mock_config):
@@ -130,3 +93,94 @@ def store(mock_config):
             store.access_control.repo = mock_repo  # Ensure access control uses same mock
             store.config = mock_config  # Use the fixture's mock config
             return store
+
+mock_store = store
+
+
+@pytest.fixture(autouse=True)
+def mock_config_path():
+    """Mock all file system operations for config"""
+    with patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.write_text"), \
+         patch("pathlib.Path.read_text", return_value="""
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+"""):
+        yield
+
+@pytest.fixture
+def mock_config_exists():
+    """Mock config file existence check"""
+    with patch('gh_store.__main__.ensure_config_exists') as mock:
+        yield mock
+        
+@pytest.fixture(autouse=True)
+def mock_config():
+    """Mock OmegaConf loading for tests"""
+    config = OmegaConf.create({
+        "store": {
+            "base_label": "stored-object",
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",
+                "initial_state": "rocket"
+            },
+            "retries": {
+                "max_attempts": 3,
+                "backoff_factor": 2
+            },
+            "rate_limit": {
+                "max_requests_per_hour": 1000
+            },
+            "log": {
+                "level": "INFO",
+                "format": "{time} | {level} | {message}"
+            }
+        }
+    })
+    
+    with patch('omegaconf.OmegaConf.load', return_value=config):
+        yield
+
+@pytest.fixture
+def mock_github():
+    """Create a mock Github instance with proper label handling"""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_repo = Mock()
+        
+        # Setup owner
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.owner = owner
+        
+        # Setup labels
+        mock_labels = [Mock(name="stored-object")]
+        mock_repo.get_labels.return_value = mock_labels
+        
+        def create_label(name, color="0366d6"):
+            new_label = Mock(name=name)
+            mock_labels.append(new_label)
+            return new_label
+        mock_repo.create_label = Mock(side_effect=create_label)
+        
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo
+
+@pytest.fixture
+def cli_env_vars():
+    """Set up environment variables for CLI"""
+    os.environ["GITHUB_TOKEN"] = "test-token"
+    os.environ["GITHUB_REPOSITORY"] = "owner/repo"
+    yield
+    del os.environ["GITHUB_TOKEN"]
+    del os.environ["GITHUB_REPOSITORY"]
+
+@pytest.fixture
+def cli(cli_env_vars, mock_github):
+    """Create CLI instance with mocked dependencies"""
+    return CLI()
