@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 import json
-import os
 from unittest.mock import Mock, patch, mock_open
 
 
