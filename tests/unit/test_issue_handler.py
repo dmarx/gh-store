@@ -1,5 +1,7 @@
 # tests/unit/test_issue_handler.py
 
+from unittest.mock import Mock, mock_open, patch
+
 def test_uid_prefix_handling(store):
     """Test UID prefix handling in IssueHandler"""
     handler = store.issue_handler
