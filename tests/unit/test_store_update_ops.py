@@ -110,22 +110,23 @@ def test_update_nonexistent_object(store):
     with pytest.raises(ObjectNotFound):
         store.update("nonexistent", {"value": 43})
 
-def test_update_closes_issue(store):
+def test_update_closes_issue(store, mock_issue):
     """Test that process_updates closes the issue when complete"""
     test_data = {"initial": "state"}
     
-    # Create mock issue with update
-    mock_issue = Mock()
-    mock_issue.body = json.dumps(test_data)
-    mock_issue.get_comments = Mock(return_value=[])
-    mock_issue.number = 123
-    
-    store.repo.get_issue.return_value = mock_issue
+    # Create mock issue with proper authorization
+    issue = mock_issue(
+        number=123,
+        user_login="repo-owner",  # Set authorized user
+        body=json.dumps(test_data),
+        comments=[]  # Explicitly set empty comments
+    )
+    store.repo.get_issue.return_value = issue
     
     store.process_updates(123)
     
-    # Verify issue closed
-    mock_issue.edit.assert_called_with(
+    # Verify issue closed with formatted body
+    issue.edit.assert_called_with(
         body=json.dumps(test_data, indent=2),
         state="closed"
     )
