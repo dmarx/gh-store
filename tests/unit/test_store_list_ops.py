@@ -54,12 +54,24 @@ def test_list_updated_since_no_updates(store, mock_issue):
     # Verify no updates found
     assert len(updated) == 0
 
-def test_list_all_objects(store, mock_issue):
+def test_list_all_objects(store, mock_issue, mock_label_factory):
     """Test listing all objects in store"""
-    # Create mock issues
+    # Create mock issues with proper labels
     issues = [
-        mock_issue(number=1),
-        mock_issue(number=2)
+        mock_issue(
+            number=1,
+            labels=[
+                mock_label_factory("stored-object"),
+                mock_label_factory("UID:test-1")
+            ]
+        ),
+        mock_issue(
+            number=2,
+            labels=[
+                mock_label_factory("stored-object"),
+                mock_label_factory("UID:test-2")
+            ]
+        )
     ]
     store.repo.get_issues.return_value = issues
     
