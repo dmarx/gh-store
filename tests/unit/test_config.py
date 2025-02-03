@@ -41,9 +41,9 @@ store:
             
             store = GitHubStore(token="fake-token", repo="owner/repo")
             
-            # Updated assertions to match fixture config
             assert store.config.store.base_label == "stored-object"
             assert store.config.store.reactions.processed == "+1"
+            assert store.config.store.reactions.initial_state == "rocket"
 
 def test_store_uses_provided_config_path(mock_github, tmp_path):
     """Test that store uses provided config path when it exists"""
@@ -53,11 +53,11 @@ def test_store_uses_provided_config_path(mock_github, tmp_path):
     config_path = tmp_path / "test_config.yml"
     test_config = {
         "store": {
-            "base_label": "stored-object",  # Updated to match fixture
+            "base_label": "stored-object",  # Matches fixture
             "uid_prefix": "UID:",
             "reactions": {
-                "processed": "+1",  # Updated to match fixture
-                "initial_state": "rocket"  # Updated to match fixture
+                "processed": "+1",  # Matches fixture
+                "initial_state": "rocket"  # Matches fixture
             }
         }
     }
@@ -65,9 +65,9 @@ def test_store_uses_provided_config_path(mock_github, tmp_path):
     
     store = GitHubStore(token="fake-token", repo="owner/repo", config_path=config_path)
     
-    # Updated assertions to match fixture config
     assert store.config.store.base_label == "stored-object"
     assert store.config.store.reactions.processed == "+1"
+    assert store.config.store.reactions.initial_state == "rocket"
 
 def test_store_raises_error_for_nonexistent_custom_config(mock_github):
     """Test that store raises error when custom config path doesn't exist"""
