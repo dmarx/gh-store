@@ -27,15 +27,15 @@ def test_init_creates_default_config(mock_env_setup, test_config_dir):
 def test_init_skips_existing_config(test_config_file):
     """Test that init doesn't overwrite existing config"""
     original_content = test_config_file.read_text()
-    
+
     cli = CLI()
     cli.init()
-    
+
     assert test_config_file.read_text() == original_content
 
-def test_process_updates_with_default_config(mock_github, mock_env_setup, test_config_file):
+def test_process_updates_with_default_config(mock_github_auth, mock_env_setup, test_config_file):
     """Test processing updates using default config location"""
-    _, mock_repo = mock_github
+    _, mock_repo = mock_github_auth
     
     # Setup mock issue
     mock_issue = Mock()
@@ -52,13 +52,12 @@ def test_process_updates_with_default_config(mock_github, mock_env_setup, test_c
     # Verify issue was processed
     mock_repo.get_issue.assert_called_with(123)
 
-def test_process_updates_with_custom_config(mock_github, tmp_path):
+def test_process_updates_with_custom_config(mock_github_auth, tmp_path):
     """Test processing updates with custom config path"""
-    _, mock_repo = mock_github
+    _, mock_repo = mock_github_auth
     
     # Create custom config
     config_path = tmp_path / "custom_config.yml"
-    # Use the same reaction values as fixture but with custom label
     config_path.write_text("""
 store:
   base_label: "custom-label"
@@ -84,9 +83,9 @@ store:
     # Verify issue was processed
     mock_repo.get_issue.assert_called_with(123)
 
-def test_snapshot_creation(mock_github, mock_issue, test_config_file, tmp_path):
+def test_snapshot_creation(mock_github_auth, mock_issue, test_config_file, tmp_path):
     """Test creating a snapshot of all objects"""
-    _, mock_repo = mock_github
+    _, mock_repo = mock_github_auth
     
     # Setup mock issues with data
     issues = [
@@ -121,9 +120,9 @@ def test_snapshot_creation(mock_github, mock_issue, test_config_file, tmp_path):
     assert "objects" in snapshot
     assert len(snapshot["objects"]) == 2
 
-def test_update_snapshot(mock_github, mock_issue, test_config_file, tmp_path):
+def test_update_snapshot(mock_github_auth, mock_issue, test_config_file, tmp_path):
     """Test updating an existing snapshot"""
-    _, mock_repo = mock_github
+    _, mock_repo = mock_github_auth
     
     # Create initial snapshot
     snapshot_path = tmp_path / "snapshot.json"
@@ -166,12 +165,13 @@ def test_update_snapshot(mock_github, mock_issue, test_config_file, tmp_path):
 
 def test_nonexistent_snapshot_error(tmp_path):
     """Test error handling for nonexistent snapshot file"""
+    nonexistent_path = tmp_path / "nonexistent.json"
     cli = CLI()
     with pytest.raises(FileNotFoundError):
         cli.update_snapshot(
             token="fake-token",
             repo="owner/repo",
-            snapshot_path=str(tmp_path / "nonexistent.json")
+            snapshot_path=str(nonexistent_path)
         )
 
 def test_process_updates_error_handling(mock_github):
