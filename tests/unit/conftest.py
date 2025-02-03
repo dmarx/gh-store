@@ -138,6 +138,30 @@ mock_store = store
 
 
 @pytest.fixture
+def mock_config_exists():
+    """Mock config file existence check"""
+    with patch('gh_store.__main__.ensure_config_exists') as mock:
+        yield mock
+
+@pytest.fixture
+def mock_github():
+    """Create a mock Github instance"""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        # Setup mock repo
+        mock_repo = Mock()
+        
+        # Mock the owner info
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.owner = owner
+        
+        # Set up mock repo in mock Github instance
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        
+        yield mock_gh, mock_repo
+
+@pytest.fixture
 def cli_env_vars():
     """Set up environment variables for CLI"""
     os.environ["GITHUB_TOKEN"] = "test-token"
