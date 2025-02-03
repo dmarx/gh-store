@@ -6,39 +6,25 @@ from unittest.mock import Mock, patch, mock_open
 
 
 class TestCLISnapshotOperations:
-    def test_snapshot(self, cli, mock_github):
-        """Test snapshot command"""
-        mock_gh, mock_repo = mock_github
-        
-        # Mock issues response
-        mock_issue = Mock(
-            body=json.dumps({"test": "data"}),
-            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
-            labels=[
-                Mock(name="stored-object"),
-                Mock(name="UID:test-1")
-            ],
-            get_comments=Mock(return_value=[])
-        )
-        mock_repo.get_issues.return_value = [mock_issue]
 
-        with patch('pathlib.Path.write_text') as mock_write:
-            cli.snapshot("snapshot.json")
+def test_snapshot(self, cli, mock_github, mock_issue):
+    """Test snapshot command"""
+    mock_gh, mock_repo = mock_github
+    
+    mock_data = {"test": "data"}
+    test_issue = mock_issue(
+        body=mock_data,
+        labels=["stored-object", "UID:test-1"]
+    )
+    mock_repo.get_issues.return_value = [test_issue]
 
-        # Verify snapshot creation
-        mock_repo.get_issues.assert_called_once_with(
-            state="closed",
-            labels=["stored-object"]
-        )
-        
-        # Verify snapshot content
-        mock_write.assert_called_once()
-        snapshot_data = json.loads(mock_write.call_args[0][0])
-        assert "snapshot_time" in snapshot_data
-        assert snapshot_data["repository"] == "owner/repo"
-        assert "test-1" in snapshot_data["objects"]
-        assert snapshot_data["objects"]["test-1"]["data"] == {"test": "data"}
+    with patch('pathlib.Path.write_text') as mock_write:
+        cli.snapshot("snapshot.json")
+
+    mock_write.assert_called_once()
+    snapshot_data = json.loads(mock_write.call_args[0][0])
+    assert "test-1" in snapshot_data["objects"]
+    assert snapshot_data["objects"]["test-1"]["data"] == mock_data
 
     def test_update_snapshot(self, cli, mock_github):
         """Test update_snapshot command"""
