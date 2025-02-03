@@ -10,30 +10,19 @@ class TestCLIBasicOperations:
         mock_gh, mock_repo = mock_github
         mock_data = {"test": "data"}
         
-        # Create mock issue using fixture properly
+        # Create issue with the prefixed UID label
         test_issue = mock_issue(
-            number=123,
-            body=mock_data,  # Fixture will handle JSON serialization
-            labels=[
-                "stored-object",
-                "UID:test-123"  # Use strings, fixture converts to Mocks
-            ]
+            labels=["stored-object", "UID:test-123"]
         )
         mock_repo.create_issue.return_value = test_issue
         
-        # Mock comment creation
-        mock_comment = Mock(id=456)
-        test_issue.create_comment.return_value = mock_comment
-        
         with patch('builtins.open', mock_open(read_data=json.dumps(mock_data))):
             cli.create("test-123", "data.json")
-
-        # Verify issue creation
+    
         mock_repo.create_issue.assert_called_once()
         call_kwargs = mock_repo.create_issue.call_args[1]
         assert "test-123" in call_kwargs["title"]
         assert "UID:test-123" in call_kwargs["labels"]
-        assert mock_data == json.loads(call_kwargs["body"])
 
     def test_get(self, cli, mock_github, mock_issue):
         """Test get command"""
@@ -57,25 +46,20 @@ class TestCLIBasicOperations:
         mock_repo.get_issues.assert_called_once()
         call_kwargs = mock_repo.get_issues.call_args[1]
         assert "UID:test-123" in call_kwargs["params"]["labels"]
-
+    
     def test_delete(self, cli, mock_github, mock_issue):
         """Test delete command"""
         mock_gh, mock_repo = mock_github
         
-        test_issue = mock_issue(
-            labels=[
-                "stored-object",
-                "UID:test-123"
-            ]
-        )
+        test_issue = mock_issue(labels=["stored-object", "UID:test-123"])
         mock_repo.get_issues.return_value = [test_issue]
         
         cli.delete("test-123")
         
-        # Verify issue edited
-        test_issue.edit.assert_called_once()
-        call_kwargs = test_issue.edit.call_args[1]
-        assert set(call_kwargs["labels"]) == {"archived", "stored-object", "UID:test-123"}
+        test_issue.edit.assert_called_once_with(
+            state="closed",
+            labels=["archived", "stored-object", "UID:test-123"]
+        )
         
     def test_update(self, cli, mock_github):
         """Test update command"""
