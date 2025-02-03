@@ -74,56 +74,20 @@ def mock_comment():
 
 @pytest.fixture
 def mock_issue():
-    """Create a mock issue with configurable attributes matching GitHub's structure"""
-    issues = []
-    
-    def _make_issue(
-        number=1, 
-        user_login="repo-owner",  # We still accept login as param for convenience
-        body=None, 
-        comments=None, 
-        labels=None,
-        created_at=None,
-        updated_at=None
-    ):
+    """Create a mock issue with GitHub-like structure"""
+    def _make_issue(number=1, user_login="repo-owner", body=None, labels=None):
         issue = Mock()
         issue.number = number
-        
-        # Create proper user object structure
         user = Mock()
-        user.login = user_login
+        user.login = user_login 
         issue.user = user
-        
         issue.body = json.dumps(body) if body else "{}"
-        
-        # Make get_comments return a list and be iterable
-        mock_comments = comments if comments is not None else []
-        issue.get_comments = Mock(return_value=mock_comments)
-        
-        # Set up default labels if none provided
-        if labels is None:
-            mock_label1 = Mock(name="stored-object")
-            mock_label2 = Mock(name="UID:test-123")
-            labels = [mock_label1, mock_label2]
-        
-        # Ensure labels have proper name attribute
-        issue.labels = [
-            label if isinstance(label, Mock) else Mock(name=label)
-            for label in labels
-        ]
-        
-        # Set timestamps
-        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
-        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
-        
-        issue.edit = Mock()
-        issues.append(issue)
+        issue.labels = [Mock(name=l) for l in (labels or ["stored-object", "UID:test-123"])]
+        issue.get_comments = Mock(return_value=[])
+        issue.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
         return issue
-    
-    yield _make_issue
-    
-    for issue in issues:
-        issue.reset_mock()
+    return _make_issue
         
 @pytest.fixture
 def store(mock_config):
