@@ -1,10 +1,11 @@
 # tests/unit/conftest.py
 
-from datetime import datetime, timezone 
+import pytest
+from unittest.mock import Mock, patch, mock_open
+from datetime import datetime, timezone
 import json
 import os
-import pytest
-from unittest.mock import Mock, mock_open, patch
+from omegaconf import OmegaConf
 
 from gh_store.__main__ import CLI
 from gh_store.core.store import GitHubStore
@@ -116,31 +117,35 @@ def mock_config_exists():
     """Mock config file existence check"""
     with patch('gh_store.__main__.ensure_config_exists') as mock:
         yield mock
-
-@pytest.fixture
+        
+@pytest.fixture(autouse=True)
 def mock_config():
-    """Create a mock store configuration"""
-    return Mock(
-        store=Mock(
-            base_label="stored-object",
-            uid_prefix="UID:",
-            reactions=Mock(
-                processed="+1",
-                initial_state="rocket"
-            ),
-            retries=Mock(
-                max_attempts=3,
-                backoff_factor=2
-            ),
-            rate_limit=Mock(
-                max_requests_per_hour=1000
-            ),
-            log=Mock(
-                level="INFO",
-                format="{time} | {level} | {message}"
-            )
-        )
-    )
+    """Mock OmegaConf loading for tests"""
+    config = OmegaConf.create({
+        "store": {
+            "base_label": "stored-object",
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",
+                "initial_state": "rocket"
+            },
+            "retries": {
+                "max_attempts": 3,
+                "backoff_factor": 2
+            },
+            "rate_limit": {
+                "max_requests_per_hour": 1000
+            },
+            "log": {
+                "level": "INFO",
+                "format": "{time} | {level} | {message}"
+            }
+        }
+    })
+    
+    with patch('omegaconf.OmegaConf.load', return_value=config):
+        yield
+
 
 @pytest.fixture
 def mock_github():
@@ -166,6 +171,6 @@ def cli_env_vars():
     del os.environ["GITHUB_REPOSITORY"]
 
 @pytest.fixture
-def cli(cli_env_vars, mock_github, mock_config_path):
+def cli(cli_env_vars, mock_github):
     """Create CLI instance with mocked dependencies"""
     return CLI()
