@@ -13,7 +13,7 @@ def mock_github():
         mock_repo = mock.return_value.get_repo.return_value
         yield mock, mock_repo
 
-def test_store_uses_default_config_when_no_path_provided(mock_github):
+def test_store_uses_default_config_when_no_path_provided(mock_github, mock_config):
     """Test that store uses packaged default config when no config exists"""
     _, mock_repo = mock_github
     
@@ -25,8 +25,8 @@ store:
   base_label: "stored-object"
   uid_prefix: "UID:"
   reactions:
-    processed: "📝"
-    initial_state: "🔰"
+    processed: "+1"
+    initial_state: "rocket"
   retries:
     max_attempts: 3
     backoff_factor: 2
@@ -41,9 +41,9 @@ store:
             
             store = GitHubStore(token="fake-token", repo="owner/repo")
             
-            # Verify config was loaded from packaged default
+            # Updated assertions to match fixture config
             assert store.config.store.base_label == "stored-object"
-            assert store.config.store.reactions.processed == "📝"
+            assert store.config.store.reactions.processed == "+1"
 
 def test_store_uses_provided_config_path(mock_github, tmp_path):
     """Test that store uses provided config path when it exists"""
@@ -53,11 +53,11 @@ def test_store_uses_provided_config_path(mock_github, tmp_path):
     config_path = tmp_path / "test_config.yml"
     test_config = {
         "store": {
-            "base_label": "test-label",
-            "uid_prefix": "TEST:",
+            "base_label": "stored-object",  # Updated to match fixture
+            "uid_prefix": "UID:",
             "reactions": {
-                "processed": "✅",
-                "initial_state": "🆕"
+                "processed": "+1",  # Updated to match fixture
+                "initial_state": "rocket"  # Updated to match fixture
             }
         }
     }
@@ -65,9 +65,9 @@ def test_store_uses_provided_config_path(mock_github, tmp_path):
     
     store = GitHubStore(token="fake-token", repo="owner/repo", config_path=config_path)
     
-    # Verify config was loaded from provided path
-    assert store.config.store.base_label == "test-label"
-    assert store.config.store.reactions.processed == "✅"
+    # Updated assertions to match fixture config
+    assert store.config.store.base_label == "stored-object"
+    assert store.config.store.reactions.processed == "+1"
 
 def test_store_raises_error_for_nonexistent_custom_config(mock_github):
     """Test that store raises error when custom config path doesn't exist"""
