@@ -293,8 +293,11 @@ class IssueHandler:
         """Delete an object by closing and archiving its issue"""
         logger.info(f"Deleting object: {object_id}")
         
+        # Ensure uid label has prefix for query
+        uid_label = self._add_uid_prefix(object_id)
+        
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, uid_label],
             state="all"
         ))
         
@@ -302,11 +305,16 @@ class IssueHandler:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
         
         issue = issues[0]
+        
+        # Transform labels, preserving any additional ones
+        current_labels = set(label.name for label in issue.labels)
+        current_labels.add("archived")
+        
         issue.edit(
             state="closed",
-            labels=["archived", self.base_label, object_id]
+            labels=list(current_labels)  # Let GitHub API handle label management
         )
-
+        
     def _get_version(self, issue) -> int:
         """Extract version number from issue"""
         comments = list(issue.get_comments())
