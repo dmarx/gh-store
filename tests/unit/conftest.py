@@ -4,7 +4,9 @@ import pytest
 from unittest.mock import Mock, mock_open, patch
 import json
 
+from gh_store.__main__ import CLI
 from gh_store.core.store import GitHubStore
+
 
 @pytest.fixture
 def mock_owner():
@@ -132,3 +134,19 @@ def store(mock_config):
             return store
 
 mock_store = store
+
+
+@pytest.fixture
+def cli_env_vars():
+    """Set up environment variables for CLI"""
+    os.environ["GITHUB_TOKEN"] = "test-token"
+    os.environ["GITHUB_REPOSITORY"] = "owner/repo"
+    yield
+    del os.environ["GITHUB_TOKEN"]
+    del os.environ["GITHUB_REPOSITORY"]
+
+@pytest.fixture
+def cli(cli_env_vars, mock_github, mock_config_exists):
+    """Create CLI instance with mocked dependencies"""
+    mock_gh, mock_repo = mock_github
+    return CLI()
