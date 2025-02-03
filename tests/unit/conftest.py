@@ -70,15 +70,16 @@ def mock_comment():
     
     for comment in comments:
         comment.reset_mock()
+# tests/unit/conftest.py
 
 @pytest.fixture
 def mock_issue():
-    """Create a mock issue with configurable attributes"""
+    """Create a mock issue with configurable attributes matching GitHub's structure"""
     issues = []
     
     def _make_issue(
         number=1, 
-        user_login="repo-owner", 
+        user_login="repo-owner",  # We still accept login as param for convenience
         body=None, 
         comments=None, 
         labels=None,
@@ -87,7 +88,12 @@ def mock_issue():
     ):
         issue = Mock()
         issue.number = number
-        issue.user = Mock(login=user_login)
+        
+        # Create proper user object structure
+        user = Mock()
+        user.login = user_login
+        issue.user = user
+        
         issue.body = json.dumps(body) if body else "{}"
         
         # Make get_comments return a list and be iterable
