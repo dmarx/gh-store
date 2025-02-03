@@ -5,18 +5,18 @@ import json
 from datetime import datetime, timezone
 
 class TestCLIBasicOperations:
-    def test_create(self, cli, mock_github):
+    def test_create(self, cli, mock_github, mock_issue):
         """Test create command"""
         mock_gh, mock_repo = mock_github
         mock_data = {"test": "data"}
         
         # Mock issue creation
-        mock_issue = Mock(
-            number=123,
-            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-            updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
-            body=json.dumps(mock_data)
-        )
+        # mock_issue = Mock(
+        #     number=123,
+        #     created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        #     updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        #     body=json.dumps(mock_data)
+        # )
         mock_repo.create_issue.return_value = mock_issue
         
         # Mock comment creation and reactions
