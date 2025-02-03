@@ -265,3 +265,17 @@ store:
     initial_state: "rocket"
         """
         yield mock_files
+
+@pytest.fixture
+def mock_github_auth(monkeypatch):
+    """Mock GitHub authentication and API initialization"""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        # Mock the repo setup
+        mock_repo = Mock()
+        mock_repo.get_issue.return_value = Mock(state="closed")
+        mock_repo.get_issues.return_value = []
+        mock_repo.owner = Mock(login="owner", type="User")
+        
+        # Setup the mock Github instance
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo
