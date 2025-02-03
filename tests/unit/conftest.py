@@ -1,8 +1,9 @@
 # tests/unit/conftest.py
 
+import json
+import os
 import pytest
 from unittest.mock import Mock, mock_open, patch
-import json
 
 from gh_store.__main__ import CLI
 from gh_store.core.store import GitHubStore
