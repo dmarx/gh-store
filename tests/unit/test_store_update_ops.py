@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import Mock
 
 from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
+from gh_store.core.version import CLIENT_VERSION
 
 def test_process_update(store):
     """Test processing an update"""
@@ -32,6 +33,7 @@ def test_process_update(store):
     comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
     assert comment_data["_data"] == update_data
     assert "_meta" in comment_data
+    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
     
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
@@ -69,7 +71,9 @@ def test_update_metadata_structure(store):
     
     assert "_data" in comment_data
     assert "_meta" in comment_data
-    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
+    assert comment_data["_meta"]["client_version"] == CLIENT_VERSION
+    assert comment_data["_meta"]["update_mode"] == "append"
+    assert "timestamp" in comment_data["_meta"]
 
 def test_update_nonexistent_object(store):
     """Test updating an object that doesn't exist"""
@@ -78,17 +82,59 @@ def test_update_nonexistent_object(store):
     with pytest.raises(ObjectNotFound):
         store.update("nonexistent", {"value": 43})
 
-def test_update_closes_issue(store, mock_issue):
+def test_update_closes_issue(store):
     """Test that process_updates closes the issue when complete"""
-    issue = mock_issue(
-        body={"status": "initial"},
-        comments=[]
-    )
-    store.repo.get_issue.return_value = issue
+    test_data = {"initial": "state"}
+    
+    # Create mock issue with update
+    mock_issue = Mock()
+    mock_issue.body = json.dumps(test_data)
+    mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.number = 123
+    
+    store.repo.get_issue.return_value = mock_issue
     
     store.process_updates(123)
     
-    issue.edit.assert_called_with(
-        body=json.dumps({"status": "initial"}, indent=2),
+    # Verify issue closed
+    mock_issue.edit.assert_called_with(
+        body=json.dumps(test_data, indent=2),
         state="closed"
     )
+
+def test_update_preserves_metadata(store, mock_issue, mock_comment):
+    """Test that updates preserve existing metadata"""
+    existing_data = {
+        "value": 42,
+        "_meta": {
+            "preserved": "data"
+        }
+    }
+    
+    update = mock_comment(
+        body={
+            "_data": {
+                "value": 43,
+                "_meta": {
+                    "new": "metadata"
+                }
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-01T00:00:00Z",
+                "update_mode": "append"
+            }
+        }
+    )
+    
+    issue = mock_issue(
+        body=existing_data,
+        comments=[update]
+    )
+    
+    store.repo.get_issue.return_value = issue
+    obj = store.process_updates(123)
+    
+    # Verify metadata preserved and merged
+    assert obj.data["_meta"]["preserved"] == "data"
+    assert obj.data["_meta"]["new"] == "metadata"
