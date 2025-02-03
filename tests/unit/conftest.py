@@ -54,7 +54,7 @@ def mock_config():
 @pytest.fixture
 def mock_comment():
     """Create a mock comment with configurable attributes"""
-    comments = []  # Keep track of created comments for cleanup
+    comments = []
     
     def _make_comment(user_login="repo-owner", body=None, comment_id=1, reactions=None):
         comment = Mock()
@@ -63,45 +63,59 @@ def mock_comment():
         comment.body = json.dumps(body) if body else "{}"
         comment.get_reactions.return_value = reactions or []
         comment.create_reaction = Mock()
-        comments.append(comment)  # Track the comment
+        comments.append(comment)
         return comment
     
     yield _make_comment
     
-    # Cleanup
     for comment in comments:
         comment.reset_mock()
 
-# In conftest.py
-
 @pytest.fixture
-def mock_issue(mock_comment):
+def mock_issue():
     """Create a mock issue with configurable attributes"""
-    issues = []  # Keep track of created issues for cleanup
+    issues = []
     
-    def _make_issue(number=1, user_login="repo-owner", body=None, comments=None, labels=None):
+    def _make_issue(
+        number=1, 
+        user_login="repo-owner", 
+        body=None, 
+        comments=None, 
+        labels=None,
+        created_at=None,
+        updated_at=None
+    ):
         issue = Mock()
         issue.number = number
         issue.user = Mock(login=user_login)
         issue.body = json.dumps(body) if body else "{}"
-        issue.get_comments = Mock(return_value=comments if comments is not None else [])
-        issue.edit = Mock()  # For closing the issue
+        
+        # Make get_comments return a list and be iterable
+        mock_comments = comments if comments is not None else []
+        issue.get_comments = Mock(return_value=mock_comments)
         
         # Set up default labels if none provided
         if labels is None:
-            mock_label1 = Mock()
-            mock_label1.name = "stored-object"
-            mock_label2 = Mock()
-            mock_label2.name = "UID:test-123"
+            mock_label1 = Mock(name="stored-object")
+            mock_label2 = Mock(name="UID:test-123")
             labels = [mock_label1, mock_label2]
-        issue.labels = labels
-            
-        issues.append(issue)  # Track the issue
+        
+        # Ensure labels have proper name attribute
+        issue.labels = [
+            label if isinstance(label, Mock) else Mock(name=label)
+            for label in labels
+        ]
+        
+        # Set timestamps
+        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
+        
+        issue.edit = Mock()
+        issues.append(issue)
         return issue
     
     yield _make_issue
     
-    # Cleanup
     for issue in issues:
         issue.reset_mock()
         
@@ -145,21 +159,64 @@ def mock_config_exists():
         yield mock
 
 @pytest.fixture
+def mock_config():
+    """Create a mock store configuration"""
+    return Mock(
+        store=Mock(
+            base_label="stored-object",
+            uid_prefix="UID:",
+            reactions=Mock(
+                processed="+1",
+                initial_state="rocket"
+            ),
+            retries=Mock(
+                max_attempts=3,
+                backoff_factor=2
+            ),
+            rate_limit=Mock(
+                max_requests_per_hour=1000
+            ),
+            log=Mock(
+                level="INFO",
+                format="{time} | {level} | {message}"
+            )
+        )
+    )
+
+@pytest.fixture
 def mock_github():
-    """Create a mock Github instance"""
+    """Create a mock Github instance with proper configuration"""
     with patch('gh_store.core.store.Github') as mock_gh:
-        # Setup mock repo
         mock_repo = Mock()
         
-        # Mock the owner info
+        # Mock owner info
         owner = Mock()
         owner.login = "repo-owner"
         owner.type = "User"
         mock_repo.owner = owner
         
-        # Set up mock repo in mock Github instance
-        mock_gh.return_value.get_repo.return_value = mock_repo
+        # Mock default config
+        default_config = """
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+  rate_limit:
+    max_requests_per_hour: 1000
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+"""
+        with patch('importlib.resources.files') as mock_files:
+            mock_files.return_value.joinpath.return_value.open.return_value = \
+                mock_open(read_data=default_config)()
         
+        mock_gh.return_value.get_repo.return_value = mock_repo
         yield mock_gh, mock_repo
 
 @pytest.fixture
