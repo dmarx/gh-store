@@ -37,6 +37,35 @@ def default_config():
         }
     })
 
+
+@pytest.fixture(autouse=True)
+def mock_config_file():
+    """Mock OmegaConf config loading"""
+    config = OmegaConf.create({
+        "store": {
+            "base_label": "stored-object",
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",
+                "initial_state": "rocket"
+            },
+            "retries": {
+                "max_attempts": 3,
+                "backoff_factor": 2
+            },
+            "rate_limit": {
+                "max_requests_per_hour": 1000
+            },
+            "log": {
+                "level": "INFO",
+                "format": "{time} | {level} | {message}"
+            }
+        }
+    })
+    
+    with patch('omegaconf.OmegaConf.load', return_value=config) as mock_load:
+        yield mock_load
+
 @pytest.fixture
 def mock_env_setup(monkeypatch, test_config_dir):
     """Mock environment and config setup for tests"""
@@ -96,23 +125,33 @@ store:
 
 @pytest.fixture
 def mock_comment():
-    """Create a mock comment with GitHub-like structure"""
+    """Create a mock comment with configurable attributes"""
     comments = []
     
-    def _make_comment(user_login="repo-owner", body=None, comment_id=1, reactions=None):
+    def _make_comment(
+        user_login="repo-owner",
+        body=None,
+        comment_id=1,
+        reactions=None,
+        created_at=None  # Added support for created_at
+    ):
         comment = Mock()
+        
         # Set up user properly
         user = Mock()
         user.login = user_login
         comment.user = user
         
-        # Proper body handling
+        # Handle body serialization
         comment.body = json.dumps(body) if body else "{}"
         comment.id = comment_id
         
         # Set up reactions
         comment.get_reactions = Mock(return_value=reactions or [])
         comment.create_reaction = Mock()
+        
+        # Set timestamp
+        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         
         comments.append(comment)
         return comment
@@ -124,8 +163,23 @@ def mock_comment():
         comment.reset_mock()
 
 @pytest.fixture
-def mock_issue():
-    """Create a mock issue with GitHub-like structure"""
+def mock_label_factory():
+    """Create GitHub-style label objects"""
+    def create_label(name: str):
+        label = Mock()
+        label.name = name
+        return label
+    return create_label
+
+def wrap_in_list(val_or_list):
+    """Helper to ensure value is a list"""
+    if val_or_list is None:
+        return []
+    return val_or_list if isinstance(val_or_list, (list, tuple)) else [val_or_list]
+
+@pytest.fixture
+def mock_issue(mock_label_factory):
+    """Create a mock issue with complete GitHub-like structure"""
     def _make_issue(
         number=1,
         user_login="repo-owner",
@@ -145,22 +199,34 @@ def mock_issue():
         user.login = user_login
         issue.user = user
         
-        # Handle body serialization
-        issue.body = json.dumps(body) if body else "{}"
+        # Handle body serialization properly
+        issue.body = json.dumps(body) if body not in (None, "") else "{}"
         
-        # Set up comments
-        issue.get_comments = Mock(return_value=comments or [])
+        # Set up comments with proper wrapper
+        mock_comments = wrap_in_list(comments)
+        issue.get_comments = Mock(return_value=mock_comments)
         issue.create_comment = Mock()
         
-        # Set up labels with proper structure
-        issue.labels = [
-            label if isinstance(label, Mock) else Mock(name=label)
-            for label in (labels or ["stored-object", "UID:test-123"])
+        # Set up default labels if none provided
+        default_labels = [
+            mock_label_factory("stored-object"),
+            mock_label_factory("UID:test-123")
         ]
+        # Handle both string and Mock label inputs
+        if labels is not None:
+            issue.labels = [
+                label if isinstance(label, Mock) else mock_label_factory(label)
+                for label in wrap_in_list(labels)
+            ]
+        else:
+            issue.labels = default_labels
         
         # Set timestamps
         issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
+        
+        # Set up edit method
+        issue.edit = Mock()
         
         return issue
     
@@ -225,3 +291,62 @@ def cli_env_vars():
 def cli(cli_env_vars, mock_github, mock_env_setup):
     """Create CLI instance with mocked dependencies"""
     return CLI()
+
+# Add these fixtures to your conftest.py
+
+@pytest.fixture
+def history_mock_comments(mock_comment):
+    """Create series of comments representing object history"""
+    comments = []
+    
+    # Initial state
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "type": "initial_state",
+            "_data": {"name": "test", "value": 42},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-01T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    ))
+    
+    # First update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 43},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-02T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=2,
+        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+    ))
+    
+    # Second update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 44},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-03T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=3,
+        created_at=datetime(2025, 1, 3, tzinfo=timezone.utc)
+    ))
+    
+    return comments
+
+# Add to the existing store fixture in conftest.py to make this method available:
+# Inside the store fixture, before the return:
+store.issue_handler.get_object_id_from_labels = lambda issue: "test-123"  # Override for testing
