@@ -120,7 +120,7 @@ def test_unauthorized_issue_creator_denied(store, mock_issue):
     with pytest.raises(AccessDeniedError):
         store.process_updates(456)
 
-def test_authorized_codeowners_updates(store, mock_comment, mock_github):
+def test_authorized_codeowners_updates(store, mock_issue, mock_comment, mock_github):
     """Test that CODEOWNERS team members can make updates"""
     _, mock_repo = mock_github
     
