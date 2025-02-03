@@ -146,17 +146,27 @@ def mock_config():
     with patch('omegaconf.OmegaConf.load', return_value=config):
         yield
 
-
 @pytest.fixture
 def mock_github():
-    """Create a mock Github instance"""
+    """Create a mock Github instance with proper label handling"""
     with patch('gh_store.core.store.Github') as mock_gh:
         mock_repo = Mock()
         
+        # Setup owner
         owner = Mock()
         owner.login = "repo-owner"
         owner.type = "User"
         mock_repo.owner = owner
+        
+        # Setup labels
+        mock_labels = [Mock(name="stored-object")]
+        mock_repo.get_labels.return_value = mock_labels
+        
+        def create_label(name, color="0366d6"):
+            new_label = Mock(name=name)
+            mock_labels.append(new_label)
+            return new_label
+        mock_repo.create_label = Mock(side_effect=create_label)
         
         mock_gh.return_value.get_repo.return_value = mock_repo
         yield mock_gh, mock_repo
