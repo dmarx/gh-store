@@ -276,7 +276,18 @@ def store(mock_github, default_config):
     store.repo = mock_repo  # Use mock repo
     store.access_control.repo = mock_repo  # Ensure access control uses same mock
     store.config = default_config  # Use the fixture's config
-    store.issue_handler.get_object_id_from_labels = lambda issue: "test-123"  # Override for testing
+    
+    # Add the override inside the fixture function
+    def get_object_id(issue) -> str:
+        """Override get_object_id_from_labels for testing"""
+        for label in issue.labels:
+            if hasattr(label, 'name') and label.name.startswith("UID:"):
+                return label.name[4:]  # Strip "UID:" prefix
+        return "test-123"  # Default ID for testing
+    
+    # Override the method
+    store.issue_handler.get_object_id_from_labels = get_object_id
+    
     return store
 
 @pytest.fixture
