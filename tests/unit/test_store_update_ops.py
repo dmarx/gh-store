@@ -58,8 +58,15 @@ def test_update_metadata_structure(store):
     mock_issue.body = json.dumps({"initial": "data"})
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.number = 123
+    mock_issue.user = Mock()
+    mock_issue.user.login = "repo-owner"  # Set authorized user
     
-    store.repo.get_issues.return_value = [mock_issue]
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No concurrent processing
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
     store.repo.get_issue.return_value = mock_issue
     
     update_data = {"new": "value"}
@@ -74,6 +81,27 @@ def test_update_metadata_structure(store):
     assert comment_data["_meta"]["client_version"] == CLIENT_VERSION
     assert comment_data["_meta"]["update_mode"] == "append"
     assert "timestamp" in comment_data["_meta"]
+
+def test_update_closes_issue(store, mock_issue):
+    """Test that process_updates closes the issue when complete"""
+    test_data = {"initial": "state"}
+    
+    # Create mock issue with proper authorization
+    issue = mock_issue(
+        user_login="repo-owner",  # Set authorized user
+        body=json.dumps(test_data),
+        number=123
+    )
+    store.repo.get_issue.return_value = issue
+    
+    # Process updates
+    store.process_updates(123)
+    
+    # Verify issue closed
+    issue.edit.assert_called_with(
+        body=json.dumps(test_data, indent=2),
+        state="closed"
+    )
 
 def test_update_nonexistent_object(store):
     """Test updating an object that doesn't exist"""
