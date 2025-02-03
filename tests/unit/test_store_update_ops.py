@@ -118,7 +118,7 @@ def test_update_closes_issue(store, mock_issue):
     issue = mock_issue(
         number=123,
         user_login="repo-owner",  # Set authorized user
-        body=json.dumps(test_data),
+        body=test_data,  # Pass raw data - mock_issue will handle JSON encoding
         comments=[]  # Explicitly set empty comments
     )
     store.repo.get_issue.return_value = issue
