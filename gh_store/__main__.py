@@ -41,6 +41,9 @@ class CLI:
     ) -> None:
         """Process pending updates for a stored object"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
@@ -70,6 +73,9 @@ class CLI:
     ) -> None:
         """Create a full snapshot of all objects in the store"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
@@ -120,6 +126,9 @@ class CLI:
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
