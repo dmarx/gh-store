@@ -20,7 +20,9 @@ def store(mock_github, default_config):
         for label in issue.labels:
             if hasattr(label, 'name') and label.name.startswith("UID:"):
                 return label.name[4:]  # Strip "UID:" prefix
-        return "test-123"  # Default ID for testing
+        # Important - only use test-123 if no other UID label exists
+        # This allows tests to explicitly set their own IDs
+        return None
     
     store.issue_handler.get_object_id_from_labels = get_object_id
     return store
