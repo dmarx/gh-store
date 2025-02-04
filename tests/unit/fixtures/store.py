@@ -8,22 +8,23 @@ from gh_store.core.version import CLIENT_VERSION
 from gh_store.core.exceptions import ObjectNotFound
 
 @pytest.fixture
-def store(mock_github, default_config):
+def store(mock_repo_factory, default_config):
     """Create GitHubStore instance with mocked dependencies."""
-    _, mock_repo = mock_github
+    # Create store with default config
     store = GitHubStore(token="fake-token", repo="owner/repo")
-    store.repo = mock_repo  # Use mock repo
-    store.access_control.repo = mock_repo  # Ensure access control uses same mock
-    store.config = default_config  # Use the fixture's config
     
-    def get_object_id(issue) -> str:
-        """Override get_object_id_from_labels for testing."""
-        for label in issue.labels:
-            if hasattr(label, 'name') and label.name.startswith("UID:"):
-                return label.name[4:]  # Strip "UID:" prefix
-        raise ValueError(f"No UID label found for issue {issue.number}")
+    # Set up repository with mock factory
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        labels=["stored-object"]  # Default label always exists
+    )
     
-    store.issue_handler.get_object_id_from_labels = get_object_id
+    # Assign mock repo to both store and its access control
+    store.repo = repo
+    store.access_control.repo = repo
+    store.config = default_config
+    
     return store
 
 @pytest.fixture
