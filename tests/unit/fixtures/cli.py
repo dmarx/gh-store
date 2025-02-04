@@ -11,143 +11,129 @@ import pytest
 from unittest.mock import Mock, patch
 from loguru import logger
 
-from gh_store.__main__ import CLI
-
 @pytest.fixture(autouse=True)
-def cli_env_vars(monkeypatch):
-    """Setup environment variables for CLI testing."""
-    monkeypatch.setenv('GITHUB_TOKEN', 'test-token')
-    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
-    yield
-
-@pytest.fixture
-def mock_config(tmp_path):
-    """Create a mock config file for testing."""
-    config_dir = tmp_path / ".config" / "gh-store"
-    config_dir.mkdir(parents=True)
-    config_path = config_dir / "config.yml"
+def setup_test_logging():
+    """Configure logging for tests without using loguru's internal handlers."""
+    # Remove any existing handlers
+    logger.remove()
     
-    # Create default config
-    default_config = """
-store:
-  base_label: "stored-object"
-  uid_prefix: "UID:"
-  reactions:
-    processed: "+1"
-    initial_state: "rocket"
-  retries:
-    max_attempts: 3
-    backoff_factor: 2
-  rate_limit:
-    max_requests_per_hour: 1000
-  log:
-    level: "INFO"
-    format: "{time} | {level} | {message}"
-"""
-    config_path.write_text(default_config)
-    return config_path
-
-@pytest.fixture
-def mock_gh_repo():
-    """Create a mocked GitHub repo for testing."""
-    mock_repo = Mock()
-    with patch('gh_store.core.store.Github') as MockGithub:
-        # Setup mock repo
-        mock_repo = Mock()
-        mock_repo.get_issue.return_value = Mock(state="closed")
-        mock_repo.get_issues.return_value = []
-        mock_repo.owner = Mock(login="owner", type="User")
-        
-        # Set up mock Github client
-        MockGithub.return_value.get_repo.return_value = mock_repo
-        yield mock_repo
-
-class InterceptHandler(logging.Handler):
-    def emit(self, record):
-        logger_opt = logger.opt(depth=6, exception=record.exc_info)
-        logger_opt.log(record.levelno, record.getMessage())
-
-@pytest.fixture(autouse=True)
-def setup_loguru(caplog):
-    """Configure loguru for testing with pytest caplog."""
-    logger.remove()  # Remove default handler
+    # Create a simple format that won't cause recursion
+    format_string = "{message}"
     
-    # Add handler that writes to caplog
-    caplog.set_level(logging.INFO)
-    logging.getLogger().addHandler(InterceptHandler())
-    handler_id = logger.add(
-        lambda msg: logging.getLogger().info(msg),
-        format="{message}"
-    )
+    # Add a simple handler that writes to stdout
+    logger.add(sys.stdout, format=format_string, level="INFO")
     
     yield
     
     # Cleanup
-    logger.remove(handler_id)
-    logging.getLogger().removeHandler(InterceptHandler())
+    logger.remove()
 
 @pytest.fixture
-def mock_cli(mock_config, mock_gh_repo):
-    """Create a CLI instance with mocked dependencies."""
-    with patch('gh_store.__main__.ensure_config_exists') as mock_ensure:
-        cli = CLI()
-        # Mock HOME to point to our test config
-        with patch.dict(os.environ, {'HOME': str(mock_config.parent.parent.parent)}):
-            yield cli
+def mock_github_api():
+    """Create a MockGitHubAPI instance with proper issue creation."""
+    class MockGitHubAPI:
+        def __init__(self):
+            self.labels = []
+            self.issues = []
+            self._next_issue_number = 1
+            self._setup_base_labels()
+        
+        def _setup_base_labels(self):
+            self.create_label("stored-object", "0366d6")
+        
+        def create_label(self, name: str, color: str = "0366d6") -> Mock:
+            label = Mock()
+            label.name = name
+            label.color = color
+            self.labels.append(label)
+            return label
+        
+        def create_issue(
+            self,
+            title: str | None = None,
+            body: dict | str | None = None,
+            labels: list[str] | None = None
+        ) -> Mock:
+            """Create a mock issue with auto-incrementing number."""
+            issue = Mock()
+            issue.number = self._next_issue_number
+            self._next_issue_number += 1
+            
+            # Set basic attributes
+            issue.title = title or f"Issue {issue.number}"
+            issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
+            
+            # Set up labels
+            issue_labels = []
+            if labels:
+                for label_name in labels:
+                    label = next(
+                        (l for l in self.labels if l.name == label_name),
+                        self.create_label(label_name)
+                    )
+                    issue_labels.append(label)
+            issue.labels = issue_labels
+            
+            # Set up other attributes
+            issue.state = "open"
+            issue.created_at = datetime.now(timezone.utc)
+            issue.updated_at = datetime.now(timezone.utc)
+            issue.get_comments = Mock(return_value=[])
+            issue.create_comment = Mock()
+            issue.edit = Mock()
+            
+            self.issues.append(issue)
+            return issue
+    
+    return MockGitHubAPI()
 
 @pytest.fixture
-def mock_store_response():
-    """Mock common GitHubStore responses."""
-    mock_obj = Mock()
-    mock_obj.meta = Mock(
-        object_id="test-123",
-        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-        updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
-        version=1
-    )
-    mock_obj.data = {"name": "test", "value": 42}
-    return mock_obj
-
-@pytest.fixture
-def mock_stored_objects():
-    """Create mock stored objects for testing."""
-    objects = {}
-    for i in range(1, 3):
-        mock_obj = Mock()
-        mock_obj.meta = Mock(
-            object_id=f"test-obj-{i}",
-            created_at=datetime(2025, 1, i, tzinfo=timezone.utc),
-            updated_at=datetime(2025, 1, i+1, tzinfo=timezone.utc),
-            version=1
+def github_mock(mock_github_api):
+    """Create GitHub mock with proper repo setup."""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        # Setup mock repo
+        mock_repo = Mock()
+        
+        # Setup owner
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.owner = owner
+        
+        # Setup labels
+        mock_repo.get_labels = Mock(return_value=mock_github_api.labels)
+        mock_repo.create_label = mock_github_api.create_label
+        
+        # Setup issue management
+        mock_repo.create_issue = mock_github_api.create_issue
+        mock_repo.get_issues = Mock(return_value=mock_github_api.issues)
+        mock_repo.get_issue = Mock(
+            side_effect=lambda number: next(
+                (i for i in mock_github_api.issues if i.number == number),
+                None
+            )
         )
-        mock_obj.data = {
-            "name": f"test{i}",
-            "value": i * 42
-        }
-        objects[f"test-obj-{i}"] = mock_obj
-    return objects
+        
+        # Setup CODEOWNERS
+        def mock_codeowners(path):
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                content = Mock()
+                content.decoded_content = b"* @repo-owner"
+                return content
+            raise GithubException(404, "Not found")
+        
+        mock_repo.get_contents = Mock(side_effect=mock_codeowners)
+        
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo, mock_github_api
 
+# Update the store fixture to use the new github_mock
 @pytest.fixture
-def mock_snapshot_file(tmp_path, mock_stored_objects):
-    """Create a mock snapshot file for testing."""
-    snapshot_path = tmp_path / "test_snapshot.json"
-    
-    # Convert objects to serializable format
-    snapshot_data = {
-        "snapshot_time": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
-        "repository": "owner/repo",
-        "objects": {
-            obj_id: {
-                "data": obj.data,
-                "meta": {
-                    "created_at": obj.meta.created_at.isoformat(),
-                    "updated_at": obj.meta.updated_at.isoformat(),
-                    "version": obj.meta.version
-                }
-            }
-            for obj_id, obj in mock_stored_objects.items()
-        }
-    }
-    
-    snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
-    return snapshot_path
+def store(github_mock, default_config):
+    """Create GitHubStore instance with proper mocking."""
+    _, mock_repo, _ = github_mock
+    store = GitHubStore(token="fake-token", repo="owner/repo")
+    store.repo = mock_repo
+    store.access_control.repo = mock_repo
+    store.config = default_config
+    return store
