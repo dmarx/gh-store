@@ -98,6 +98,8 @@ class InterceptHandler(logging.Handler):
             )
         )
 
+# tests/unit/fixtures/cli.py - Update logging setup
+
 @pytest.fixture(autouse=True)
 def setup_loguru(caplog):
     """Configure loguru for testing with pytest caplog."""
@@ -107,24 +109,16 @@ def setup_loguru(caplog):
     # Set up caplog
     caplog.set_level(logging.INFO)
     
-    # Create and add our handler
-    handler = InterceptHandler()
-    logging.getLogger().addHandler(handler)
+    # Add a test handler that writes directly to caplog
+    def log_to_caplog(message):
+        logging.getLogger().info(message)
     
-    # Add a basic loguru handler that writes to stdout
-    # This avoids the re-entrancy issue
-    logger.add(
-        sys.stdout,
-        format="{message}",
-        level="INFO",
-        enqueue=True  # Use queue to avoid re-entrancy
-    )
+    handler_id = logger.add(log_to_caplog, format="{message}")
     
     yield
     
-    # Clean up
-    logger.remove()
-    logging.getLogger().removeHandler(handler)
+    # Cleanup
+    logger.remove(handler_id)
 
 @pytest.fixture
 def mock_cli(mock_config, mock_gh_repo):
