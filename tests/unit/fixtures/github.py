@@ -2,135 +2,191 @@
 """GitHub API mocks for gh-store unit tests."""
 
 from datetime import datetime, timezone
-import json
-from typing import Any, Callable
+from typing import Any
 import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
-@pytest.fixture
-def mock_label_factory() -> Callable[[str], Mock]:
-    """Create GitHub-style label objects."""
-    def create_label(name: str) -> Mock:
-        label = Mock()
-        label.name = name
+from .common import (
+    create_base_mock,
+    create_github_issue,
+    create_github_comment,
+    create_update_payload
+)
+from .test_data import SAMPLE_CONFIGS
+
+class MockGitHubAPI:
+    """Helper class to manage GitHub API mocking."""
+    
+    def __init__(self, owner_login: str = "repo-owner", owner_type: str = "User"):
+        self.owner_login = owner_login
+        self.owner_type = owner_type
+        self.labels: list[Mock] = []
+        self.issues: list[Mock] = []
+        self._setup_base_labels()
+    
+    def _setup_base_labels(self) -> None:
+        """Initialize default labels."""
+        self.create_label("stored-object", "0366d6")
+    
+    def create_label(self, name: str, color: str = "0366d6") -> Mock:
+        """Create a mock label with standard attributes."""
+        label = create_base_mock(
+            id=f"label_{name}",
+            name=name,
+            color=color
+        )
+        self.labels.append(label)
         return label
-    return create_label
-
-@pytest.fixture
-def mock_comment():
-    """Create a mock comment with configurable attributes."""
-    def _make_comment(
-        user_login: str = "repo-owner",
-        body: dict | None = None,
-        comment_id: int = 1,
-        reactions: list | None = None,
-        created_at: datetime | None = None
+    
+    def get_label(self, name: str) -> Mock | None:
+        """Get a label by name."""
+        return next((l for l in self.labels if l.name == name), None)
+    
+    def create_issue(
+        self,
+        number: int,
+        title: str,
+        body: dict[str, Any] | str,
+        labels: list[str] | None = None
     ) -> Mock:
-        comment = Mock()
-        
-        # Set up user
-        user = Mock()
-        user.login = user_login
-        comment.user = user
-        
-        # Handle body serialization
-        comment.body = json.dumps(body) if body else "{}"
-        comment.id = comment_id
-        
-        # Set up reactions
-        comment.get_reactions = Mock(return_value=reactions or [])
-        comment.create_reaction = Mock()
-        
-        # Set timestamp
-        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
-        
-        return comment
-    return _make_comment
-
-@pytest.fixture
-def mock_issue(mock_label_factory: Callable[[str], Mock]):
-    """Create a mock issue with complete GitHub-like structure."""
-    def _make_issue(
-        number: int = 1,
-        user_login: str = "repo-owner",
-        body: dict | None = None,
-        comments: list | None = None,
-        labels: list | None = None,
-        created_at: datetime | None = None,
-        updated_at: datetime | None = None,
-        state: str = "closed"
-    ) -> Mock:
-        issue = Mock()
-        
-        # Set basic attributes
-        issue.number = number
-        issue.state = state
-        
-        # Set up user
-        user = Mock()
-        user.login = user_login
-        issue.user = user
-        
-        # Handle body serialization
-        issue.body = json.dumps(body) if body not in (None, "") else "{}"
-        
-        # Set up comments
-        issue.get_comments = Mock(return_value=comments or [])
-        issue.create_comment = Mock()
-        
-        # Set up labels
-        default_labels = [
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-123")
-        ]
-        if labels is not None:
-            issue.labels = [
-                label if isinstance(label, Mock) else mock_label_factory(label)
-                for label in (labels if isinstance(labels, (list, tuple)) else [labels])
-            ]
-        else:
-            issue.labels = default_labels
-            
-        # Set timestamps
-        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
-        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
-        
-        issue.edit = Mock()
+        """Create a mock issue with standard structure."""
+        issue = create_github_issue(
+            number=number,
+            user_login=self.owner_login,
+            body=body,
+            labels=labels or ["stored-object"],
+            state="open"
+        )
+        self.issues.append(issue)
         return issue
-    return _make_issue
+    
+    def setup_mock_repo(self) -> Mock:
+        """Create a mock repository with standard configuration."""
+        repo = create_base_mock(id="mock_repo")
+        
+        # Set up owner
+        owner = create_base_mock(
+            id="owner",
+            login=self.owner_login,
+            type=self.owner_type
+        )
+        repo.owner = owner
+        
+        # Set up label management
+        repo.get_labels = Mock(return_value=self.labels)
+        repo.create_label = Mock(side_effect=self.create_label)
+        
+        # Set up issue management
+        repo.get_issues = Mock(return_value=self.issues)
+        repo.create_issue = Mock(side_effect=self.create_issue)
+        repo.get_issue = Mock(side_effect=lambda number: next(
+            (i for i in self.issues if i.number == number),
+            None
+        ))
+        
+        # Set up CODEOWNERS handling
+        repo.get_contents = Mock(side_effect=self._mock_codeowners_handler)
+        
+        return repo
+    
+    def _mock_codeowners_handler(self, path: str) -> Mock:
+        """Handle CODEOWNERS file requests."""
+        if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+            content = create_base_mock(
+                id="codeowners",
+                decoded_content=f"* @{self.owner_login}".encode()
+            )
+            return content
+        raise GithubException(404, "Not found")
 
 @pytest.fixture
-def mock_github():
-    """Create a mock Github instance with proper repository structure."""
+def github_mock():
+    """Create a standard GitHub API mock."""
+    mock_api = MockGitHubAPI()
+    
     with patch('gh_store.core.store.Github') as mock_gh:
-        # Setup mock repo
-        mock_repo = Mock()
-        
-        # Setup owner
-        owner = Mock()
-        owner.login = "repo-owner"
-        owner.type = "User"
-        mock_repo.owner = owner
-        
-        # Setup labels
-        mock_labels = [Mock(name="stored-object")]
-        mock_repo.get_labels = Mock(return_value=mock_labels)
-        
-        def create_label(name: str, color: str = "0366d6") -> Mock:
-            new_label = Mock(name=name)
-            mock_labels.append(new_label)
-            return new_label
-        mock_repo.create_label = Mock(side_effect=create_label)
-        
-        # Mock CODEOWNERS access
-        mock_content = Mock()
-        mock_content.decoded_content = b"* @repo-owner"
-        def get_contents_side_effect(path: str) -> Mock:
-            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
-                return mock_content
-            raise GithubException(404, "Not found")
-        mock_repo.get_contents = Mock(side_effect=get_contents_side_effect)
-        
+        mock_repo = mock_api.setup_mock_repo()
         mock_gh.return_value.get_repo.return_value = mock_repo
-        yield mock_gh, mock_repo
+        yield mock_gh, mock_repo, mock_api
+
+@pytest.fixture
+def org_github_mock():
+    """Create a GitHub API mock for organization repositories."""
+    mock_api = MockGitHubAPI(
+        owner_login="test-org",
+        owner_type="Organization"
+    )
+    
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_repo = mock_api.setup_mock_repo()
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo, mock_api
+
+@pytest.fixture
+def mock_issue_factory(github_mock):
+    """Create a factory for mock issues with proper GitHub structure."""
+    _, _, mock_api = github_mock
+    
+    def create_test_issue(
+        number: int,
+        body: dict[str, Any] | str | None = None,
+        labels: list[str] | None = None,
+        state: str = "closed",
+        **kwargs
+    ) -> Mock:
+        """Create a test issue with standard configuration."""
+        issue = create_github_issue(
+            number=number,
+            user_login=mock_api.owner_login,
+            body=body,
+            labels=labels or ["stored-object"],
+            state=state,
+            **kwargs
+        )
+        mock_api.issues.append(issue)
+        return issue
+    
+    return create_test_issue
+
+@pytest.fixture
+def mock_comment_factory():
+    """Create a factory for mock comments with proper GitHub structure."""
+    def create_test_comment(
+        body: dict[str, Any] | str,
+        user_login: str = "repo-owner",
+        comment_id: int | None = None,
+        reactions: list[str] | None = None,
+        **kwargs
+    ) -> Mock:
+        """Create a test comment with standard configuration."""
+        return create_github_comment(
+            user_login=user_login,
+            body=body,
+            comment_id=comment_id or len(kwargs.get("comments", [])) + 1,
+            reactions=reactions,
+            **kwargs
+        )
+    
+    return create_test_comment
+
+# Example usage in tests:
+"""
+def test_process_update(github_mock, mock_issue_factory, mock_comment_factory):
+    _, mock_repo, _ = github_mock
+    
+    # Create test issue with comments
+    issue = mock_issue_factory(
+        number=123,
+        body={"initial": "state"},
+        comments=[
+            mock_comment_factory(
+                body=create_update_payload({"value": 42}),
+                user_login="repo-owner"
+            )
+        ]
+    )
+    
+    # Test update processing
+    ...
+"""
