@@ -260,7 +260,7 @@ mock_issue = mock_issue_factory
 def mock_repo_factory(mock_label_factory):
     """
     Create GitHub repository mocks with standard structure.
-    
+    	
     Note: Creates basic repository structure. Labels, issues, and permissions
     should be explicitly set up in tests where they matter.
     """
@@ -274,7 +274,6 @@ def mock_repo_factory(mock_label_factory):
     ) -> Mock:
         """
         Create a mock repository with GitHub-like structure.
-
         Args:
             name: Repository name in owner/repo format
             owner_login: Repository owner's login
@@ -288,8 +287,8 @@ def mock_repo_factory(mock_label_factory):
         # Set basic attributes
         repo.full_name = name
         
-        # Set up owner
-        owner = Mock()
+        # Set up owner - making it more explicit
+        owner = Mock(spec=['login', 'type'])  # Specify expected attributes
         owner.login = owner_login
         owner.type = owner_type
         repo.owner = owner
@@ -309,11 +308,15 @@ def mock_repo_factory(mock_label_factory):
         
         # Set up issues
         repo_issues = issues or []
+        def get_issue(number):
+            matching = [i for i in repo_issues if i.number == number]
+            if matching:
+                return matching[0]
+            mock_issue = Mock()
+            mock_issue.state = "closed"
+            return mock_issue
+        repo.get_issue = Mock(side_effect=get_issue)
         repo.get_issues = Mock(return_value=repo_issues)
-        repo.get_issue = Mock(side_effect=lambda number: next(
-            (i for i in repo_issues if i.number == number),
-            Mock(state="closed")  # Default if not found
-        ))
         
         # Set up CODEOWNERS handling
         def get_contents(path: str) -> Mock:
