@@ -33,24 +33,101 @@ def mock_label_factory():
     
     return create_label
 
+# tests/unit/fixtures/github.py - Enhanced mock_comment_factory
+
+from datetime import datetime, timezone
+from typing import Any, Literal, TypedDict
+from unittest.mock import Mock
+import pytest
+import json
+
+class CommentMetadata(TypedDict, total=False):
+    """Metadata for comment creation."""
+    client_version: str
+    timestamp: str
+    update_mode: Literal['append', 'replace']
+
+class CommentBody(TypedDict, total=False):
+    """Structure for comment body data."""
+    _data: dict[str, Any]
+    _meta: CommentMetadata
+    type: Literal['initial_state'] | None
+
 @pytest.fixture
 def mock_comment_factory():
-    """Create GitHub comment mocks with standard structure."""
+    """
+    Create GitHub comment mocks with standard structure.
+
+    This factory creates mock comment objects that mirror GitHub's API structure,
+    with proper typing and validation for reactions and metadata.
+
+    Args in create_comment:
+        body: Comment body (dict will be JSON serialized)
+        user_login: GitHub username of comment author
+        comment_id: Unique comment ID (auto-generated if None)
+        reactions: List of reaction types or mock reactions
+        created_at: Comment creation timestamp
+        **kwargs: Additional attributes to set on the comment
+
+    Examples:
+        # Basic comment with data
+        comment = mock_comment_factory(
+            body={"value": 42},
+            user_login="owner"
+        )
+
+        # Comment with metadata
+        comment = mock_comment_factory(
+            body={
+                "_data": {"value": 42},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Initial state comment
+        comment = mock_comment_factory(
+            body={
+                "type": "initial_state",
+                "_data": {"initial": "state"},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Comment with reactions
+        comment = mock_comment_factory(
+            body={"value": 42},
+            reactions=["+1", "rocket"]
+        )
+    """
     def create_comment(
-        body: dict[str, Any] | str,
+        body: dict[str, Any] | CommentBody,
         user_login: str = "repo-owner",
         comment_id: int | None = None,
         reactions: list[str | Mock] | None = None,
         created_at: datetime | None = None,
         **kwargs
     ) -> Mock:
+        """Create a mock comment with GitHub-like structure."""
+        # Validate body structure if it's meant to be a CommentBody
+        if isinstance(body, dict) and "_meta" in body:
+            if "update_mode" in body["_meta"] and body["_meta"]["update_mode"] not in ["append", "replace"]:
+                raise ValueError("update_mode must be 'append' or 'replace'")
+            if "type" in body and body["type"] not in [None, "initial_state"]:
+                raise ValueError("type must be None or 'initial_state'")
+
         comment = Mock()
         
         # Set basic attributes
         comment.id = comment_id or 1
-        
-        # Handle both dict and string bodies without JSON serialization for string bodies
-        comment.body = json.dumps(body) if isinstance(body, dict) else str(body)
+        comment.body = json.dumps(body)
         comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         
         # Set up user
@@ -58,15 +135,17 @@ def mock_comment_factory():
         user.login = user_login
         comment.user = user
         
-        # Set up reactions
+        # Set up reactions with validation
         mock_reactions = []
         if reactions:
             for reaction in reactions:
                 if isinstance(reaction, Mock):
+                    if not hasattr(reaction, 'content'):
+                        raise ValueError("Mock reaction must have 'content' attribute")
                     mock_reactions.append(reaction)
                 else:
                     mock_reaction = Mock()
-                    mock_reaction.content = reaction
+                    mock_reaction.content = str(reaction)
                     mock_reactions.append(mock_reaction)
         
         comment.get_reactions = Mock(return_value=mock_reactions)
@@ -79,6 +158,9 @@ def mock_comment_factory():
         return comment
     
     return create_comment
+
+# Keep backward compatibility
+mock_comment = mock_comment_factory
 
 # Keep backward compatibility
 mock_comment = mock_comment_factory
