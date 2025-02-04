@@ -123,7 +123,6 @@ def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
     assert history[0]["type"] == "update"
     assert history[0]["data"] == {"value": 43}
     assert history[0]["metadata"]["client_version"] == "legacy"
-
 def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
     """Test that non-JSON comments are treated as legacy updates"""
     comments = [
@@ -133,7 +132,7 @@ def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
             body={"value": 42},
             comment_id=1
         ),
-        # Non-JSON text is treated as legacy update
+        # Non-JSON text should be included with its raw content as data
         mock_comment(
             user_login="repo-owner",
             body="not json",
@@ -157,9 +156,21 @@ def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
     
     # All comments should be present in history with appropriate handling
     assert len(history) == 3
-    # Check the non-JSON comment is treated as legacy data
+    
+    # Check specific comment handling
+    assert history[0]["comment_id"] == 1
+    assert history[0]["data"] == {"value": 42}
+    assert history[0]["metadata"]["client_version"] == "legacy"
+    
+    # Non-JSON comment should be included with raw content
+    assert history[1]["comment_id"] == 2
     assert history[1]["data"] == "not json"
     assert history[1]["metadata"]["client_version"] == "legacy"
+    
+    assert history[2]["comment_id"] == 3
+    assert history[2]["data"] == {"value": 43}
+    assert history[2]["metadata"]["client_version"] == "legacy"
+
 
 def test_get_object_history_nonexistent(store):
     """Test retrieving history for nonexistent object"""
