@@ -22,35 +22,72 @@ def mock_label_factory():
     return create_label
 
 @pytest.fixture
-def mock_comment():
-    """Create a mock comment with configurable attributes."""
-    def _make_comment(
+def mock_comment_factory():
+    """
+    Create GitHub comment mocks with standard structure.
+    
+    Example:
+        comment = mock_comment_factory(
+            body={"test": "data"},
+            user_login="repo-owner",
+            reactions=["+1"]
+        )
+    """
+    def create_comment(
+        body: dict[str, Any] | str,
         user_login: str = "repo-owner",
-        body: dict | None = None,
-        comment_id: int = 1,
-        reactions: list | None = None,
-        created_at: datetime | None = None
+        comment_id: int | None = None,
+        reactions: list[str] | None = None,
+        created_at: datetime | None = None,
+        **kwargs
     ) -> Mock:
-        comment = Mock()
+        """
+        Create a mock comment with GitHub-like structure.
+        
+        Args:
+            body: Comment body (dict will be JSON serialized)
+            user_login: GitHub username of comment author
+            comment_id: Unique comment ID (auto-generated if None)
+            reactions: List of reaction types
+            created_at: Comment creation timestamp
+            **kwargs: Additional attributes to set
+        """
+        # Create base mock with timestamps
+        comment = create_base_mock(
+            id=str(comment_id or 1),
+            created_at=created_at,
+            body=json.dumps(body) if isinstance(body, dict) else body
+        )
         
         # Set up user
-        user = Mock()
-        user.login = user_login
+        user = create_base_mock(
+            id=f"user_{user_login}",
+            login=user_login
+        )
         comment.user = user
         
-        # Handle body serialization
-        comment.body = json.dumps(body) if body else "{}"
-        comment.id = comment_id
-        
         # Set up reactions
-        comment.get_reactions = Mock(return_value=reactions or [])
+        mock_reactions = []
+        if reactions:
+            for reaction in reactions:
+                mock_reaction = create_base_mock(
+                    id=f"reaction_{reaction}",
+                    content=reaction
+                )
+                mock_reactions.append(mock_reaction)
+        
+        comment.get_reactions = Mock(return_value=mock_reactions)
         comment.create_reaction = Mock()
         
-        # Set timestamp
-        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(comment, key, value)
         
         return comment
-    return _make_comment
+    
+    return create_comment
+
+mock_comment = mock_comment_factory
 
 @pytest.fixture
 def mock_issue(mock_label_factory: Callable[[str], Mock]):
