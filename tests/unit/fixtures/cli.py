@@ -3,6 +3,7 @@
 
 import os
 import sys
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 import json
@@ -61,13 +62,29 @@ def mock_gh_repo():
         MockGithub.return_value.get_repo.return_value = mock_repo
         yield mock_repo
 
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        logger_opt = logger.opt(depth=6, exception=record.exc_info)
+        logger_opt.log(record.levelno, record.getMessage())
+
 @pytest.fixture(autouse=True)
-def setup_loguru():
-    """Configure loguru for testing."""
+def setup_loguru(caplog):
+    """Configure loguru for testing with pytest caplog."""
     logger.remove()  # Remove default handler
-    logger.add(sys.stderr, level="INFO")  # Add test handler
+    
+    # Add handler that writes to caplog
+    caplog.set_level(logging.INFO)
+    logging.getLogger().addHandler(InterceptHandler())
+    handler_id = logger.add(
+        lambda msg: logging.getLogger().info(msg),
+        format="{message}"
+    )
+    
     yield
-    logger.remove()  # Clean up
+    
+    # Cleanup
+    logger.remove(handler_id)
+    logging.getLogger().removeHandler(InterceptHandler())
 
 @pytest.fixture
 def mock_cli(mock_config, mock_gh_repo):
