@@ -35,36 +35,15 @@ def mock_label_factory():
 
 @pytest.fixture
 def mock_comment_factory():
-    """
-    Create GitHub comment mocks with standard structure.
-    
-    Example:
-        comment = mock_comment_factory(
-            body={"test": "data"},
-            user_login="repo-owner",
-            comment_id=1,
-            reactions=["+1"]
-        )
-    """
+    """Create GitHub comment mocks with standard structure."""
     def create_comment(
         body: dict[str, Any] | str,
         user_login: str = "repo-owner",
         comment_id: int | None = None,
-        reactions: list[str] | None = None,
+        reactions: list[str | Mock] | None = None,
         created_at: datetime | None = None,
         **kwargs
     ) -> Mock:
-        """
-        Create a mock comment with GitHub-like structure.
-        
-        Args:
-            body: Comment body (dict will be JSON serialized)
-            user_login: GitHub username of comment author
-            comment_id: Unique comment ID
-            reactions: List of reaction types
-            created_at: Comment creation timestamp
-            **kwargs: Additional attributes to set
-        """
         comment = Mock()
         
         # Set basic attributes
@@ -77,13 +56,16 @@ def mock_comment_factory():
         user.login = user_login
         comment.user = user
         
-        # Set up reactions
+        # Set up reactions - handle both string types and pre-made Mock reactions
         mock_reactions = []
         if reactions:
             for reaction in reactions:
-                mock_reaction = Mock()
-                mock_reaction.content = reaction
-                mock_reactions.append(mock_reaction)
+                if isinstance(reaction, Mock):
+                    mock_reactions.append(reaction)
+                else:
+                    mock_reaction = Mock()
+                    mock_reaction.content = reaction
+                    mock_reactions.append(mock_reaction)
         
         comment.get_reactions = Mock(return_value=mock_reactions)
         comment.create_reaction = Mock()
