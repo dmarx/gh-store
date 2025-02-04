@@ -21,7 +21,7 @@ def store(mock_github, default_config):
         for label in issue.labels:
             if hasattr(label, 'name') and label.name.startswith("UID:"):
                 return label.name[4:]  # Strip "UID:" prefix
-        raise ObjectNotFound(f"No UID label found for issue {issue.number}")
+        raise ValueError(f"No UID label found for issue {issue.number}")
     
     store.issue_handler.get_object_id_from_labels = get_object_id
     return store
