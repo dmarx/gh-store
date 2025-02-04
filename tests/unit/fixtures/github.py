@@ -8,13 +8,17 @@ import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
+from tests.unit.fixtures.common import create_base_mock
+
 @pytest.fixture
-def mock_label_factory() -> Callable[[str], Mock]:
+def mock_label_factory():
     """Create GitHub-style label objects."""
-    def create_label(name: str) -> Mock:
-        label = Mock()
-        label.name = name
-        return label
+    def create_label(name: str, color: str = "0366d6") -> Mock:
+        return create_base_mock(
+            id=f"label_{name}",
+            name=name,
+            color=color
+        )
     return create_label
 
 @pytest.fixture
