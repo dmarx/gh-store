@@ -8,23 +8,43 @@ import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
-from tests.unit.fixtures.common import create_base_mock
 
 @pytest.fixture
 def mock_label_factory():
-    """Create GitHub-style label objects."""
+    """
+    Create GitHub-style label objects.
+    
+    Example:
+        label = mock_label_factory("enhancement")
+        label = mock_label_factory("bug", "fc2929")
+    """
     def create_label(name: str, color: str = "0366d6") -> Mock:
-        return create_base_mock(
-            id=f"label_{name}",
-            name=name,
-            color=color
-        )
+        """
+        Create a mock label with GitHub-like structure.
+        
+        Args:
+            name: Name of the label
+            color: Color hex code without #
+        """
+        label = Mock()
+        label.name = name
+        label.color = color
+        return label
+    
     return create_label
 
 @pytest.fixture
 def mock_comment_factory():
     """
     Create GitHub comment mocks with standard structure.
+    
+    Example:
+        comment = mock_comment_factory(
+            body={"test": "data"},
+            user_login="repo-owner",
+            comment_id=1,
+            reactions=["+1"]
+        )
     """
     def create_comment(
         body: dict[str, Any] | str,
@@ -34,35 +54,38 @@ def mock_comment_factory():
         created_at: datetime | None = None,
         **kwargs
     ) -> Mock:
-        """Create a mock comment with GitHub-like structure."""
-        # Create base mock with timestamps, keeping comment_id as integer
-        comment = create_base_mock(
-            id=str(comment_id or 1),  # String ID for base mock
-            created_at=created_at
-        )
-        comment.id = comment_id or 1  # Integer ID for GitHub compatibility
+        """
+        Create a mock comment with GitHub-like structure.
         
-        # Set up body
+        Args:
+            body: Comment body (dict will be JSON serialized)
+            user_login: GitHub username of comment author
+            comment_id: Unique comment ID
+            reactions: List of reaction types
+            created_at: Comment creation timestamp
+            **kwargs: Additional attributes to set
+        """
+        comment = Mock()
+        
+        # Set basic attributes
+        comment.id = comment_id or 1
         comment.body = json.dumps(body) if isinstance(body, dict) else body
+        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         
         # Set up user
-        user = create_base_mock(
-            id=f"user_{user_login}",
-            login=user_login
-        )
+        user = Mock()
+        user.login = user_login
         comment.user = user
         
         # Set up reactions
+        mock_reactions = []
         if reactions:
-            mock_reactions = []
             for reaction in reactions:
                 mock_reaction = Mock()
                 mock_reaction.content = reaction
                 mock_reactions.append(mock_reaction)
-            comment.get_reactions = Mock(return_value=mock_reactions)
-        else:
-            comment.get_reactions = Mock(return_value=[])
-            
+        
+        comment.get_reactions = Mock(return_value=mock_reactions)
         comment.create_reaction = Mock()
         
         # Add any additional attributes
