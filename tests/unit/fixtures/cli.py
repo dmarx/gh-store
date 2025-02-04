@@ -62,29 +62,69 @@ def mock_gh_repo():
         MockGithub.return_value.get_repo.return_value = mock_repo
         yield mock_repo
 
+
 class InterceptHandler(logging.Handler):
     def emit(self, record):
-        logger_opt = logger.opt(depth=6, exception=record.exc_info)
-        logger_opt.log(record.levelno, record.getMessage())
+        # Try to find caller's module path
+        try:
+            frame = logging.currentframe()
+            depth = 6  # Adjust if needed to find the correct caller
+            while frame and depth > 0:
+                frame = frame.f_back
+                depth -= 1
+            module_path = frame.f_code.co_filename if frame else ""
+            function_name = frame.f_code.co_name if frame else ""
+        except (AttributeError, ValueError):
+            module_path = ""
+            function_name = ""
+
+        # Safely format the message
+        try:
+            msg = self.format(record)
+        except Exception:
+            msg = record.getMessage()
+
+        # Write directly to caplog's handler instead of going through loguru
+        logging.getLogger(record.name).handle(
+            logging.LogRecord(
+                name=record.name,
+                level=record.levelno,
+                pathname=module_path,
+                lineno=record.lineno,
+                msg=msg,
+                args=(),
+                exc_info=record.exc_info,
+                func=function_name
+            )
+        )
 
 @pytest.fixture(autouse=True)
 def setup_loguru(caplog):
     """Configure loguru for testing with pytest caplog."""
-    logger.remove()  # Remove default handler
+    # Remove any existing handlers
+    logger.remove()
     
-    # Add handler that writes to caplog
+    # Set up caplog
     caplog.set_level(logging.INFO)
-    logging.getLogger().addHandler(InterceptHandler())
-    handler_id = logger.add(
-        lambda msg: logging.getLogger().info(msg),
-        format="{message}"
+    
+    # Create and add our handler
+    handler = InterceptHandler()
+    logging.getLogger().addHandler(handler)
+    
+    # Add a basic loguru handler that writes to stdout
+    # This avoids the re-entrancy issue
+    logger.add(
+        sys.stdout,
+        format="{message}",
+        level="INFO",
+        enqueue=True  # Use queue to avoid re-entrancy
     )
     
     yield
     
-    # Cleanup
-    logger.remove(handler_id)
-    logging.getLogger().removeHandler(InterceptHandler())
+    # Clean up
+    logger.remove()
+    logging.getLogger().removeHandler(handler)
 
 @pytest.fixture
 def mock_cli(mock_config, mock_gh_repo):
