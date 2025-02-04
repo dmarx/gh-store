@@ -2,7 +2,7 @@
 """Pytest configuration and shared fixtures for gh-store unit tests."""
 
 # Re-export all fixtures to make them available to tests
-from .fixtures.config import *
-from .fixtures.github import *
-from .fixtures.cli import *
-from .fixtures.store import *
+from tests.unit.fixtures.config import *
+from tests.unit.fixtures.github import *
+from tests.unit.fixtures.cli import *
+from tests.unit.fixtures.store import *
