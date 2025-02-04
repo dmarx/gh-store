@@ -237,9 +237,17 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         issue.labels = issue_labels
         
         # Set up comments
-        mock_comments = comments if comments is not None else []
+        mock_comments = list(comments) if comments is not None else []
         issue.get_comments = Mock(return_value=mock_comments)
         issue.create_comment = Mock()
+
+        # Set up proper owner permissions
+        repo = Mock()
+        owner = Mock()
+        owner.login = user_login
+        owner.type = "User"
+        repo.owner = owner
+        issue.repository = repo  # Needed for access control checks
         
         # Set up issue editing
         issue.edit = Mock()
