@@ -8,22 +8,22 @@ import pytest
 from unittest.mock import patch, mock_open, Mock
 from gh_store.__main__ import CLI
 
-@pytest.fixture
-def cli_env_vars():
+@pytest.fixture(autouse=True)
+def cli_env_vars(monkeypatch):
     """Setup environment variables for CLI testing."""
-    with patch.dict('os.environ', {
-        'GITHUB_TOKEN': 'test-token',
-        'GITHUB_REPOSITORY': 'owner/repo'
-    }):
-        yield
+    monkeypatch.setenv('GITHUB_TOKEN', 'test-token')
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
+    yield
 
 @pytest.fixture
-def mock_env_setup(monkeypatch, test_config_dir: Path):
+def mock_env_setup(monkeypatch, tmp_path):
     """Mock environment setup for CLI testing."""
-    # Mock HOME directory to control config location
-    monkeypatch.setenv("HOME", str(test_config_dir.parent.parent))
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
     
-    # Mock default config access
+    # Create default config
+    config_path = config_dir / "config.yml"
     default_config = """
 store:
   base_label: "stored-object"
@@ -40,10 +40,8 @@ store:
     level: "INFO"
     format: "{time} | {level} | {message}"
 """
-    with patch('importlib.resources.files') as mock_files:
-        mock_files.return_value.joinpath.return_value.read_bytes = \
-            lambda: default_config.encode('utf-8')
-        yield mock_files
+    config_path.write_text(default_config)
+    return config_path
 
 @pytest.fixture
 def cli(cli_env_vars, mock_github, mock_env_setup):
