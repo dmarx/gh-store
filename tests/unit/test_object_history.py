@@ -123,6 +123,7 @@ def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
     assert history[0]["type"] == "update"
     assert history[0]["data"] == {"value": 43}
     assert history[0]["metadata"]["client_version"] == "legacy"
+    
 def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
     """Test that non-JSON comments are treated as legacy updates"""
     comments = [
