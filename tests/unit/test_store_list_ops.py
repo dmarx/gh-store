@@ -7,7 +7,7 @@ from typing import Any
 
 from gh_store.core.exceptions import ObjectNotFound
 from gh_store.core.version import CLIENT_VERSION
-from .fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
+from tests.unit.fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
 
 def test_list_all_objects(store, mock_issue_factory):
     """Test listing all objects in store."""
