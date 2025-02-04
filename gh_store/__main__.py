@@ -35,9 +35,9 @@ class CLI:
     def process_updates(
         self,
         issue: int,
-        token: str,
-        repo: str,
-        config: str | None = None
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
     ) -> None:
         """Process pending updates for a stored object"""
         try:
@@ -66,10 +66,10 @@ class CLI:
 
     def snapshot(
         self,
-        token: str,
-        repo: str,
+        token: str | None = None,
+        repo: str | None = None,
         output: str = "snapshot.json",
-        config: str | None = None
+        config: str | None = None,
     ) -> None:
         """Create a full snapshot of all objects in the store"""
         try:
@@ -119,10 +119,10 @@ class CLI:
 
     def update_snapshot(
         self,
-        token: str,
-        repo: str,
+        token: str | None = None,
+        repo: str | None = None,
         snapshot_path: str,
-        config: str | None = None
+        config: str | None = None,
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
         try:
