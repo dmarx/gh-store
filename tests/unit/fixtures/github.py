@@ -48,7 +48,9 @@ def mock_comment_factory():
         
         # Set basic attributes
         comment.id = comment_id or 1
-        comment.body = json.dumps(body) if isinstance(body, dict) else body
+        
+        # Handle both dict and string bodies without JSON serialization for string bodies
+        comment.body = json.dumps(body) if isinstance(body, dict) else str(body)
         comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         
         # Set up user
@@ -56,7 +58,7 @@ def mock_comment_factory():
         user.login = user_login
         comment.user = user
         
-        # Set up reactions - handle both string types and pre-made Mock reactions
+        # Set up reactions
         mock_reactions = []
         if reactions:
             for reaction in reactions:
