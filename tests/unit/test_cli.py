@@ -1,6 +1,7 @@
 # tests/unit/test_cli.py
 """Command-line interface tests for gh-store."""
 
+import os
 import sys
 from pathlib import Path
 import json
@@ -9,44 +10,54 @@ import pytest
 from unittest.mock import Mock, patch
 from loguru import logger
 
-from gh_store.__main__ import CLI, GitHubStoreError
+from gh_store.__main__ import CLI
+from gh_store.core.exceptions import GitHubStoreError
 
 @pytest.fixture(autouse=True)
-def setup_logging(caplog):
+def setup_loguru():
     """Configure loguru for testing."""
-    # Remove default handler
-    logger.remove()
-    # Add handler that writes to caplog
-    logger.add(sys.stderr, format="{message}")
+    logger.remove()  # Remove default handler
+    logger.add(sys.stderr, level="INFO")  # Add test handler
     yield
-    logger.remove()
+    logger.remove()  # Clean up
 
-def test_process_updates_success(cli, mock_issue):
+@pytest.fixture
+def mock_cli():
+    """Mock CLI with test configuration."""
+    with patch('gh_store.__main__.ensure_config_exists') as mock_ensure:
+        cli = CLI()
+        yield cli
+
+def test_process_updates_success(mock_cli, mock_issue):
     """Test successful processing of updates."""
-    # Setup test data
     issue_number = 123
-    test_data = {"name": "test", "value": 42}
     
-    with patch('gh_store.core.store.GitHubStore.process_updates') as mock_process:
+    with patch('gh_store.core.store.GitHubStore') as MockStore:
+        # Mock store instance
+        mock_store = Mock()
+        mock_store.process_updates.return_value = Mock(meta=Mock(object_id="test-123"))
+        MockStore.return_value = mock_store
+        
         # Run command
-        cli.process_updates(
+        mock_cli.process_updates(
             issue=issue_number,
             token="test-token",
             repo="owner/repo"
         )
         
         # Verify process_updates was called
-        mock_process.assert_called_once_with(issue_number)
+        mock_store.process_updates.assert_called_once_with(issue_number)
 
-def test_process_updates_error(cli, caplog):
+def test_process_updates_error(mock_cli, caplog):
     """Test handling of errors during update processing."""
-    with patch('gh_store.core.store.GitHubStore.process_updates') as mock_process:
-        # Mock process_updates to raise an error
-        mock_process.side_effect = GitHubStoreError("Test error")
+    with patch('gh_store.core.store.GitHubStore') as MockStore:
+        mock_store = Mock()
+        mock_store.process_updates.side_effect = GitHubStoreError("Test error")
+        MockStore.return_value = mock_store
         
         # Run command and verify it exits with error
         with pytest.raises(SystemExit) as exc_info:
-            cli.process_updates(
+            mock_cli.process_updates(
                 issue=123,
                 token="test-token",
                 repo="owner/repo"
@@ -55,16 +66,17 @@ def test_process_updates_error(cli, caplog):
         assert exc_info.value.code == 1
         assert "Failed to process updates: Test error" in caplog.text
 
-def test_snapshot_success(cli, mock_stored_objects, tmp_path):
+def test_snapshot_success(mock_cli, mock_stored_objects, tmp_path):
     """Test successful creation of snapshot."""
     output_path = tmp_path / "test_snapshot.json"
     
-    with patch('gh_store.core.store.GitHubStore.list_all') as mock_list:
-        # Setup mock data
-        mock_list.return_value = mock_stored_objects
+    with patch('gh_store.core.store.GitHubStore') as MockStore:
+        mock_store = Mock()
+        mock_store.list_all.return_value = mock_stored_objects
+        MockStore.return_value = mock_store
         
         # Run command
-        cli.snapshot(
+        mock_cli.snapshot(
             token="test-token",
             repo="owner/repo",
             output=str(output_path)
@@ -78,20 +90,24 @@ def test_snapshot_success(cli, mock_stored_objects, tmp_path):
         assert "test-obj-1" in snapshot["objects"]
         assert "test-obj-2" in snapshot["objects"]
 
-def test_update_snapshot_success(cli, mock_stored_objects, mock_snapshot_file):
+def test_update_snapshot_success(mock_cli, mock_stored_objects, mock_snapshot_file):
     """Test successful update of existing snapshot."""
-    # Mock current time to be after the snapshot time
     current_time = datetime(2025, 2, 1, tzinfo=timezone.utc)
     
-    with patch('gh_store.core.store.GitHubStore.list_updated_since') as mock_list, \
+    with patch('gh_store.core.store.GitHubStore') as MockStore, \
          patch('datetime.datetime') as mock_datetime:
         # Setup mocks
-        mock_list.return_value = {"test-obj-1": mock_stored_objects["test-obj-1"]}
+        mock_store = Mock()
+        mock_store.list_updated_since.return_value = {"test-obj-1": mock_stored_objects["test-obj-1"]}
+        MockStore.return_value = mock_store
+        
+        # Mock datetime
         mock_datetime.now.return_value = current_time
         mock_datetime.fromisoformat = datetime.fromisoformat
+        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
         
         # Run command
-        cli.update_snapshot(
+        mock_cli.update_snapshot(
             token="test-token",
             repo="owner/repo",
             snapshot_path=str(mock_snapshot_file)
@@ -102,55 +118,60 @@ def test_update_snapshot_success(cli, mock_stored_objects, mock_snapshot_file):
         assert updated_snapshot["snapshot_time"] == current_time.isoformat()
         assert "test-obj-1" in updated_snapshot["objects"]
 
-def test_init_creates_config(cli, tmp_path, caplog):
+def test_init_creates_config(mock_cli, tmp_path, caplog):
     """Test initialization of new config file."""
     config_path = tmp_path / "new_config.yml"
     
-    with patch('gh_store.__main__.ensure_config_exists') as mock_ensure:
-        # Run command
-        cli.init(config=str(config_path))
-        mock_ensure.assert_called_once_with(config_path)
+    # Run command
+    mock_cli.init(config=str(config_path))
+    
+    # Verify config creation was attempted
+    from gh_store.__main__ import ensure_config_exists
+    ensure_config_exists.assert_called_once_with(config_path)
 
-def test_init_existing_config(cli, tmp_path, caplog):
+def test_init_existing_config(mock_cli, tmp_path, caplog):
     """Test init command with existing config."""
     config_path = tmp_path / "existing_config.yml"
     config_path.touch()
     
-    # Run command
-    cli.init(config=str(config_path))
-    
-    # Verify warning was logged
-    assert "Configuration file already exists" in caplog.text
+    with patch('gh_store.__main__.logger.warning') as mock_warning:
+        # Run command
+        mock_cli.init(config=str(config_path))
+        
+        # Verify warning was logged
+        mock_warning.assert_called_once_with(f"Configuration file already exists at {config_path}")
 
-def test_cli_environment_variables(monkeypatch):
+def test_cli_environment_variables(tmp_path, monkeypatch):
     """Test CLI uses environment variables correctly."""
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     
-    with patch('gh_store.core.store.GitHubStore') as mock_store:
+    with patch('gh_store.core.store.GitHubStore') as MockStore:
+        mock_store = Mock()
+        mock_store.process_updates.return_value = Mock(meta=Mock(object_id="test-123"))
+        MockStore.return_value = mock_store
+        
         cli = CLI()
-        
-        # Mock process_updates to prevent actual execution
-        mock_store.return_value.process_updates = Mock()
-        
         cli.process_updates(issue=123)
         
         # Verify store was initialized with env vars
-        mock_store.assert_called_once()
-        call_args = mock_store.call_args[1]
+        MockStore.assert_called_once()
+        call_args = MockStore.call_args[1]
         assert call_args["token"] == "test-token"
         assert call_args["repo"] == "owner/repo"
 
-def test_cli_custom_config_path(cli, tmp_path):
+def test_cli_custom_config_path(mock_cli, tmp_path):
     """Test CLI respects custom config path."""
     config_path = tmp_path / "custom_config.yml"
     
-    with patch('gh_store.core.store.GitHubStore') as mock_store:
-        # Mock process_updates to prevent actual execution
-        mock_store.return_value.process_updates = Mock()
+    with patch('gh_store.core.store.GitHubStore') as MockStore:
+        # Mock store instance
+        mock_store = Mock()
+        mock_store.process_updates.return_value = Mock(meta=Mock(object_id="test-123"))
+        MockStore.return_value = mock_store
         
         # Run command with custom config
-        cli.process_updates(
+        mock_cli.process_updates(
             issue=123,
             token="test-token",
             repo="owner/repo",
@@ -158,6 +179,6 @@ def test_cli_custom_config_path(cli, tmp_path):
         )
         
         # Verify store was initialized with custom config
-        mock_store.assert_called_once()
-        call_args = mock_store.call_args[1]
+        MockStore.assert_called_once()
+        call_args = MockStore.call_args[1]
         assert call_args["config_path"] == config_path
