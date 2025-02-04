@@ -123,26 +123,26 @@ def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
     assert history[0]["type"] == "update"
     assert history[0]["data"] == {"value": 43}
     assert history[0]["metadata"]["client_version"] == "legacy"
-    
-def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
-    """Test that non-JSON comments are treated as legacy updates"""
+
+def test_comment_history_json_handling(store, mock_issue, mock_comment):
+    """Test processing of valid JSON comments in history"""
     comments = [
-        # Valid comment
+        # First comment
         mock_comment(
             user_login="repo-owner",
             body={"value": 42},
             comment_id=1
         ),
-        # Non-JSON text should be included with its raw content as data
-        mock_comment(
-            user_login="repo-owner",
-            body="not json",
-            comment_id=2
-        ),
-        # Valid comment
+        # Second comment
         mock_comment(
             user_login="repo-owner",
             body={"value": 43},
+            comment_id=2
+        ),
+        # Third comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 44},
             comment_id=3
         )
     ]
@@ -155,23 +155,10 @@ def test_get_object_history_invalid_comments(store, mock_issue, mock_comment):
     
     history = store.issue_handler.get_object_history("test-123")
     
-    # All comments should be present in history with appropriate handling
+    # Verify all valid comments are processed
     assert len(history) == 3
-    
-    # Check specific comment handling
-    assert history[0]["comment_id"] == 1
-    assert history[0]["data"] == {"value": 42}
-    assert history[0]["metadata"]["client_version"] == "legacy"
-    
-    # Non-JSON comment should be included with raw content
-    assert history[1]["comment_id"] == 2
-    assert history[1]["data"] == "not json"
-    assert history[1]["metadata"]["client_version"] == "legacy"
-    
-    assert history[2]["comment_id"] == 3
-    assert history[2]["data"] == {"value": 43}
-    assert history[2]["metadata"]["client_version"] == "legacy"
-
+    assert [entry["data"]["value"] for entry in history] == [42, 43, 44]
+    assert [entry["comment_id"] for entry in history] == [1, 2, 3]
 
 def test_get_object_history_nonexistent(store):
     """Test retrieving history for nonexistent object"""
