@@ -162,60 +162,99 @@ def mock_comment_factory():
 # Keep backward compatibility
 mock_comment = mock_comment_factory
 
-# Keep backward compatibility
-mock_comment = mock_comment_factory
 
 @pytest.fixture
-def mock_issue(mock_label_factory: Callable[[str], Mock]):
-    """Create a mock issue with complete GitHub-like structure."""
-    def _make_issue(
-        number: int = 1,
+def mock_issue_factory(mock_comment_factory, mock_label_factory):
+    """
+    Create GitHub issue mocks with standard structure.
+
+    Examples:
+        # Basic issue
+        issue = mock_issue_factory(
+            number=123,
+            body={"test": "data"}
+        )
+
+        # Issue with labels
+        issue = mock_issue_factory(
+            number=123,
+            labels=["stored-object", "UID:test-123"]
+        )
+
+        # Issue with comments
+        issue = mock_issue_factory(
+            number=123,
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=1
+                )
+            ]
+        )
+    """
+    def create_issue(
+        number: int,
+        body: dict[str, Any] | str | None = None,
+        labels: list[str] | None = None,
+        comments: list[Mock] | None = None,
+        state: str = "closed",
         user_login: str = "repo-owner",
-        body: dict | None = None,
-        comments: list | None = None,
-        labels: list | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
-        state: str = "closed"
+        **kwargs
     ) -> Mock:
+        """
+        Create a mock issue with GitHub-like structure.
+
+        Args:
+            number: Issue number
+            body: Issue body content (dict will be JSON serialized)
+            labels: List of label names to add
+            comments: List of mock comments
+            state: Issue state (open/closed)
+            user_login: GitHub username of issue creator
+            created_at: Issue creation timestamp
+            updated_at: Issue last update timestamp
+            **kwargs: Additional attributes to set
+        """
         issue = Mock()
         
         # Set basic attributes
         issue.number = number
+        issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
         issue.state = state
+        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
         
         # Set up user
         user = Mock()
         user.login = user_login
         issue.user = user
         
-        # Handle body serialization
-        issue.body = json.dumps(body) if body not in (None, "") else "{}"
+        # Set up labels
+        issue_labels = []
+        if labels:
+            for label_name in labels:
+                issue_labels.append(mock_label_factory(label_name))
+        issue.labels = issue_labels
         
         # Set up comments
         issue.get_comments = Mock(return_value=comments or [])
         issue.create_comment = Mock()
         
-        # Set up labels
-        default_labels = [
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-123")
-        ]
-        if labels is not None:
-            issue.labels = [
-                label if isinstance(label, Mock) else mock_label_factory(label)
-                for label in (labels if isinstance(labels, (list, tuple)) else [labels])
-            ]
-        else:
-            issue.labels = default_labels
-            
-        # Set timestamps
-        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
-        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
-        
+        # Set up issue editing
         issue.edit = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(issue, key, value)
+        
         return issue
-    return _make_issue
+    
+    return create_issue
+
+# Keep backward compatibility
+mock_issue = mock_issue_factory
 
 @pytest.fixture
 def mock_github():
