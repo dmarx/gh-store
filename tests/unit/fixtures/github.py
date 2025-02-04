@@ -25,13 +25,6 @@ def mock_label_factory():
 def mock_comment_factory():
     """
     Create GitHub comment mocks with standard structure.
-    
-    Example:
-        comment = mock_comment_factory(
-            body={"test": "data"},
-            user_login="repo-owner",
-            reactions=["+1"]
-        )
     """
     def create_comment(
         body: dict[str, Any] | str,
@@ -41,23 +34,16 @@ def mock_comment_factory():
         created_at: datetime | None = None,
         **kwargs
     ) -> Mock:
-        """
-        Create a mock comment with GitHub-like structure.
-        
-        Args:
-            body: Comment body (dict will be JSON serialized)
-            user_login: GitHub username of comment author
-            comment_id: Unique comment ID (auto-generated if None)
-            reactions: List of reaction types
-            created_at: Comment creation timestamp
-            **kwargs: Additional attributes to set
-        """
-        # Create base mock with timestamps
+        """Create a mock comment with GitHub-like structure."""
+        # Create base mock with timestamps, keeping comment_id as integer
         comment = create_base_mock(
-            id=str(comment_id or 1),
-            created_at=created_at,
-            body=json.dumps(body) if isinstance(body, dict) else body
+            id=str(comment_id or 1),  # String ID for base mock
+            created_at=created_at
         )
+        comment.id = comment_id or 1  # Integer ID for GitHub compatibility
+        
+        # Set up body
+        comment.body = json.dumps(body) if isinstance(body, dict) else body
         
         # Set up user
         user = create_base_mock(
@@ -67,16 +53,16 @@ def mock_comment_factory():
         comment.user = user
         
         # Set up reactions
-        mock_reactions = []
         if reactions:
+            mock_reactions = []
             for reaction in reactions:
-                mock_reaction = create_base_mock(
-                    id=f"reaction_{reaction}",
-                    content=reaction
-                )
+                mock_reaction = Mock()
+                mock_reaction.content = reaction
                 mock_reactions.append(mock_reaction)
-        
-        comment.get_reactions = Mock(return_value=mock_reactions)
+            comment.get_reactions = Mock(return_value=mock_reactions)
+        else:
+            comment.get_reactions = Mock(return_value=[])
+            
         comment.create_reaction = Mock()
         
         # Add any additional attributes
@@ -87,6 +73,7 @@ def mock_comment_factory():
     
     return create_comment
 
+# Keep backward compatibility
 mock_comment = mock_comment_factory
 
 @pytest.fixture
