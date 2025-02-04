@@ -6,7 +6,7 @@ import pytest
 
 from gh_store.core.exceptions import ObjectNotFound
 from gh_store.core.version import CLIENT_VERSION
-from .fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
+from tests.unit.fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
 
 def test_create_object_with_initial_state(store, github_mock, mock_comment_factory):
     """Test creating an object with initial state."""
