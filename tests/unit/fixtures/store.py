@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from gh_store.core.store import GitHubStore
 from gh_store.core.version import CLIENT_VERSION
+from gh_store.core.exceptions import ObjectNotFound
 
 @pytest.fixture
 def store(mock_github, default_config):
@@ -20,9 +21,7 @@ def store(mock_github, default_config):
         for label in issue.labels:
             if hasattr(label, 'name') and label.name.startswith("UID:"):
                 return label.name[4:]  # Strip "UID:" prefix
-        # Important - only use test-123 if no other UID label exists
-        # This allows tests to explicitly set their own IDs
-        return None
+        raise ObjectNotFound(f"No UID label found for issue {issue.number}")
     
     store.issue_handler.get_object_id_from_labels = get_object_id
     return store
