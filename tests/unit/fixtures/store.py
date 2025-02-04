@@ -16,17 +16,16 @@ def store(mock_repo_factory, default_config):
     repo = mock_repo_factory(
         name="owner/repo",
         owner_login="repo-owner",
+        owner_type="User",
         labels=["stored-object"]
     )
     
-    # Patch Github class for initialization
     with patch('gh_store.core.store.Github') as mock_gh:
         mock_gh.return_value.get_repo.return_value = repo
         
-        # Create store with mocked Github
         store = GitHubStore(token="fake-token", repo="owner/repo")
-        store.repo = repo  # Ensure our mock repo is used
-        store.access_control.repo = repo  # Ensure access control uses same mock
+        store.repo = repo
+        store.access_control.repo = repo
         store.config = default_config
         
         return store
