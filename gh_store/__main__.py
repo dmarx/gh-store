@@ -119,9 +119,9 @@ class CLI:
 
     def update_snapshot(
         self,
+        snapshot_path: str,
         token: str | None = None,
         repo: str | None = None,
-        snapshot_path: str,
         config: str | None = None,
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
