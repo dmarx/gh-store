@@ -237,7 +237,8 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         issue.labels = issue_labels
         
         # Set up comments
-        issue.get_comments = Mock(return_value=comments or [])
+        mock_comments = comments if comments is not None else []
+        issue.get_comments = Mock(return_value=mock_comments)
         issue.create_comment = Mock()
         
         # Set up issue editing
