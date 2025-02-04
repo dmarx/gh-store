@@ -171,11 +171,10 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
     Examples:
         # Basic issue
         issue = mock_issue_factory(
-            number=123,
             body={"test": "data"}
         )
 
-        # Issue with labels
+        # Issue with explicit number
         issue = mock_issue_factory(
             number=123,
             labels=["stored-object", "UID:test-123"]
@@ -183,7 +182,6 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
 
         # Issue with comments
         issue = mock_issue_factory(
-            number=123,
             comments=[
                 mock_comment_factory(
                     body={"value": 42},
@@ -193,7 +191,7 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         )
     """
     def create_issue(
-        number: int,
+        number: int | None = None,
         body: dict[str, Any] | str | None = None,
         labels: list[str] | None = None,
         comments: list[Mock] | None = None,
@@ -207,7 +205,7 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         Create a mock issue with GitHub-like structure.
 
         Args:
-            number: Issue number
+            number: Issue number (defaults to 1 if not provided)
             body: Issue body content (dict will be JSON serialized)
             labels: List of label names to add
             comments: List of mock comments
@@ -220,7 +218,7 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         issue = Mock()
         
         # Set basic attributes
-        issue.number = number
+        issue.number = number or 1  # Default to 1 if not provided
         issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
         issue.state = state
         issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -255,6 +253,7 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
 
 # Keep backward compatibility
 mock_issue = mock_issue_factory
+
 
 @pytest.fixture
 def mock_github():
