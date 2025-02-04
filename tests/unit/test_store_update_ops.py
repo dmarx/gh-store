@@ -119,7 +119,8 @@ def test_update_closes_issue(store, mock_issue):
         number=123,
         user_login="repo-owner",  # Set authorized user
         body=test_data,  # Pass raw data - mock_issue will handle JSON encoding
-        comments=[]  # Explicitly set empty comments
+        comments=[],  # Explicitly set empty comments
+        labels=["stored-object", f"UID:foo"],
     )
     store.repo.get_issue.return_value = issue
     
@@ -158,7 +159,8 @@ def test_update_preserves_metadata(store, mock_issue, mock_comment):
     
     issue = mock_issue(
         body=existing_data,
-        comments=[update]
+        comments=[update],
+        labels=["stored-object", f"UID:foo"],
     )
     
     store.repo.get_issue.return_value = issue
