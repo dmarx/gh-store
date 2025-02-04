@@ -254,6 +254,83 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
 # Keep backward compatibility
 mock_issue = mock_issue_factory
 
+# tests/unit/fixtures/github.py - Add mock_repo_factory
+
+@pytest.fixture
+def mock_repo_factory(mock_label_factory):
+    """
+    Create GitHub repository mocks with standard structure.
+    
+    Note: Creates basic repository structure. Labels, issues, and permissions
+    should be explicitly set up in tests where they matter.
+    """
+    def create_repo(
+        name: str = "owner/repo",
+        owner_login: str = "repo-owner",
+        owner_type: str = "User",
+        labels: list[str] | None = None,
+        issues: list[Mock] | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock repository with GitHub-like structure.
+
+        Args:
+            name: Repository name in owner/repo format
+            owner_login: Repository owner's login
+            owner_type: Owner type ("User" or "Organization")
+            labels: Initial repository labels
+            issues: Initial repository issues
+            **kwargs: Additional attributes to set
+        """
+        repo = Mock()
+        
+        # Set basic attributes
+        repo.full_name = name
+        
+        # Set up owner
+        owner = Mock()
+        owner.login = owner_login
+        owner.type = owner_type
+        repo.owner = owner
+        
+        # Set up labels
+        repo_labels = []
+        if labels:
+            repo_labels = [mock_label_factory(name) for name in labels]
+        repo.get_labels = Mock(return_value=repo_labels)
+        
+        # Set up label creation
+        def create_label(name: str, color: str = "0366d6") -> Mock:
+            label = mock_label_factory(name, color)
+            repo_labels.append(label)
+            return label
+        repo.create_label = Mock(side_effect=create_label)
+        
+        # Set up issues
+        repo_issues = issues or []
+        repo.get_issues = Mock(return_value=repo_issues)
+        repo.get_issue = Mock(side_effect=lambda number: next(
+            (i for i in repo_issues if i.number == number),
+            Mock(state="closed")  # Default if not found
+        ))
+        
+        # Set up CODEOWNERS handling
+        def get_contents(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                content = Mock()
+                content.decoded_content = f"* @{owner_login}".encode()
+                return content
+            raise GithubException(404, "Not found")
+        repo.get_contents = Mock(side_effect=get_contents)
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(repo, key, value)
+        
+        return repo
+    
+    return create_repo
 
 @pytest.fixture
 def mock_github():
