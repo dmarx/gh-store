@@ -1,5 +1,5 @@
 # gh_store/__main__.py
-
+import os
 from pathlib import Path
 import json
 from datetime import datetime
@@ -35,12 +35,15 @@ class CLI:
     def process_updates(
         self,
         issue: int,
-        token: str,
-        repo: str,
-        config: str | None = None
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
     ) -> None:
         """Process pending updates for a stored object"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
@@ -63,13 +66,16 @@ class CLI:
 
     def snapshot(
         self,
-        token: str,
-        repo: str,
+        token: str | None = None,
+        repo: str | None = None,
         output: str = "snapshot.json",
-        config: str | None = None
+        config: str | None = None,
     ) -> None:
         """Create a full snapshot of all objects in the store"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
@@ -113,13 +119,16 @@ class CLI:
 
     def update_snapshot(
         self,
-        token: str,
-        repo: str,
         snapshot_path: str,
-        config: str | None = None
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
         try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
             # Use provided config path or default
             config_path = Path(config) if config else self.default_config_path
             
