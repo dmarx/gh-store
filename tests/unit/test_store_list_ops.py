@@ -41,7 +41,7 @@ def test_list_updated_since_no_updates(store, mock_issue):
     issue = mock_issue(
         created_at=timestamp - timedelta(minutes=30),
         updated_at=timestamp - timedelta(minutes=30),
-        labels=["stored-object", f"UID:{object_id}"],
+        labels=["stored-object", f"UID:foo"],
     )
     store.repo.get_issues.return_value = [issue]
     
@@ -62,11 +62,11 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     issues = [
         mock_issue(
             number=1,
-            labels=["stored-object", f"UID:foo"],
+            labels=["stored-object", f"UID:test-1"],
         ),
         mock_issue(
             number=2,
-            labels=["stored-object", f"UID:bar"],
+            labels=["stored-object", f"UID:test-2"],
         )
     ]
     store.repo.get_issues.return_value = issues
