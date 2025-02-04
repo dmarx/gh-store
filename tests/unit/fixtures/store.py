@@ -7,6 +7,9 @@ from gh_store.core.store import GitHubStore
 from gh_store.core.version import CLIENT_VERSION
 from gh_store.core.exceptions import ObjectNotFound
 
+from unittest.mock import patch
+
+
 @pytest.fixture
 def store(mock_repo_factory, default_config):
     """Create GitHubStore instance with mocked dependencies."""
