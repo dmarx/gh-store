@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound, AccessDeniedError
 from gh_store.core.version import CLIENT_VERSION
-from .fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
+from tests.unit.fixtures.test_data import DEFAULT_TEST_DATA, create_test_object
 
 def test_process_single_update(store, mock_issue_factory, mock_comment_factory):
     """Test processing a single update."""
