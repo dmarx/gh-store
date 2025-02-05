@@ -22,12 +22,24 @@ class IssueHandler:
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
     
+    def _add_uid_prefix(self, object_id: str) -> str:
+        """Add UID prefix to object ID if not present"""
+        if object_id.startswith(self.uid_prefix):
+            return object_id
+        return f"{self.uid_prefix}{object_id}"
+    
+    def _remove_uid_prefix(self, label: str) -> str:
+        """Remove UID prefix from label if present"""
+        if label.startswith(self.uid_prefix):
+            return label[len(self.uid_prefix):]
+        return label
+
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
         # Create uid label with prefix
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = self._add_uid_prefix(object_id)
         
         # Ensure required labels exist
         self._ensure_labels_exist([self.base_label, uid_label])
@@ -101,7 +113,7 @@ class IssueHandler:
         """Retrieve an object by its ID"""
         logger.info(f"Retrieving object: {object_id}")
         
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = self._add_uid_prefix(object_id)
         
         # Query for issue with matching labels
         issues = list(self._with_retry(
@@ -135,7 +147,7 @@ class IssueHandler:
         """Get complete history of an object, including initial state"""
         logger.info(f"Retrieving history for object: {object_id}")
         
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = self._add_uid_prefix(object_id)
         
         # Query for issue with matching labels
         issues = list(self._with_retry(
@@ -192,26 +204,14 @@ class IssueHandler:
         return history
     
     def get_object_id_from_labels(self, issue) -> str:
-        """
-        Extract bare object ID from issue labels, removing any prefix.
-        
-        Args:
-            issue: GitHub issue object with labels attribute
-            
-        Returns:
-            str: Object ID without prefix
-            
-        Raises:
-            ValueError: If no matching label is found
-        """
+        """Extract bare object ID from issue labels, removing any prefix."""
         for label in issue.labels:
             # Get the actual label name, handling both string and Mock objects
             label_name = getattr(label, 'name', label)
             
             if (label_name != self.base_label and 
-                isinstance(label_name, str) and 
-                label_name.startswith(self.uid_prefix)):
-                return label_name[len(self.uid_prefix):]
+                isinstance(label_name, str)):
+                return self._remove_uid_prefix(label_name)
                 
         raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
         
@@ -223,9 +223,12 @@ class IssueHandler:
         object_id = self.get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
+        # Add prefix for label field in metadata
+        uid_label = self._add_uid_prefix(object_id)
+        
         meta = ObjectMeta(
             object_id=object_id,
-            label=object_id,
+            label=uid_label,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -247,9 +250,11 @@ class IssueHandler:
         """Update an object by adding a comment and reopening the issue"""
         logger.info(f"Updating object: {object_id}")
         
+        uid_label = self._add_uid_prefix(object_id)
+        
         # Get the object's issue
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, uid_label],
             state="closed"
         ))
         
@@ -282,8 +287,10 @@ class IssueHandler:
         """Delete an object by closing and archiving its issue"""
         logger.info(f"Deleting object: {object_id}")
         
+        uid_label = self._add_uid_prefix(object_id)
+        
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, uid_label],
             state="all"
         ))
         
@@ -293,7 +300,7 @@ class IssueHandler:
         issue = issues[0]
         issue.edit(
             state="closed",
-            labels=["archived", self.base_label, object_id]
+            labels=["archived", self.base_label, uid_label]
         )
 
     def _get_version(self, issue) -> int:
