@@ -71,10 +71,9 @@ def test_codeowners_file_locations(mock_github):
         
         assert ac._is_authorized("authorized-user") is True
 
-# Update Authorization Tests
-
 def test_unauthorized_update_rejection(store, mock_comment):
     """Test that updates from unauthorized users are rejected"""
+    # Create unauthorized and authorized updates
     unauthorized_update = mock_comment(
         user_login="attacker",
         body={
@@ -98,15 +97,17 @@ def test_unauthorized_update_rejection(store, mock_comment):
         }
     )
     
-    # Mock issue with both comments
+    # Setup mock issue
     issue = Mock()
     issue.get_comments = Mock(return_value=[unauthorized_update, authorized_update])
-    store.repo.get_issue.return_value = issue
+    issue.user = Mock(login="repo-owner")  # Authorized creator
     
-    # Process updates
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Only authorized update should be processed
     assert len(updates) == 1
     assert updates[0].changes == {'valid': 'update'}
 
@@ -120,15 +121,11 @@ def test_unauthorized_issue_creator_denied(store, mock_issue):
     with pytest.raises(AccessDeniedError):
         store.process_updates(456)
 
-def test_authorized_codeowners_updates(store, mock_issue, mock_comment, mock_github):
+def test_authorized_codeowners_updates(authorized_store, mock_comment):
     """Test that CODEOWNERS team members can make updates"""
-    _, mock_repo = mock_github
+    store = authorized_store(['repo-owner', 'team-member'])
     
-    # Set up CODEOWNERS authorization
-    mock_content = Mock()
-    mock_content.decoded_content = b"* @team-member"
-    mock_repo.get_contents = Mock(return_value=mock_content)
-    
+    # Create update from team member
     team_update = mock_comment(
         user_login="team-member",
         body={
@@ -141,46 +138,50 @@ def test_authorized_codeowners_updates(store, mock_issue, mock_comment, mock_git
         }
     )
     
-    # Mock issue with team member's update
-    issue = mock_issue(
-        user_login="repo-owner",
-        comments=[team_update]
-    )
-    store.repo.get_issue.return_value = issue
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[team_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
     
-    # Process updates
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Team member's update should be processed
     assert len(updates) == 1
     assert updates[0].changes == {'team': 'update'}
 
-def test_metadata_tampering_protection(store, mock_comment, mock_issue):
+def test_metadata_tampering_protection(store, mock_comment):
     """Test protection against metadata tampering in updates"""
+    # Create update with invalid metadata
     tampered_update = mock_comment(
-        user_login="repo-owner",
+        user_login="repo-owner",  # Even authorized users can't use invalid metadata
         body={
             '_data': {'update': 'data'},
             '_meta': {
-                # Missing required fields
                 'client_version': CLIENT_VERSION
+                # Missing required fields
             }
         }
     )
     
-    issue = mock_issue(
-        comments=[tampered_update]
-    )
-    store.repo.get_issue.return_value = issue
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[tampered_update])
+    issue.user = Mock(login="repo-owner")
     
-    # Process updates
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty due to invalid metadata
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Update with invalid metadata should be rejected
     assert len(updates) == 0
 
-def test_reaction_based_processing_protection(store, mock_comment, mock_issue):
+def test_reaction_based_processing_protection(store, mock_comment):
     """Test that processed updates cannot be reprocessed"""
+    # Create a processed update with the processed reaction
     processed_update = mock_comment(
         user_login="repo-owner",
         body={
@@ -191,16 +192,18 @@ def test_reaction_based_processing_protection(store, mock_comment, mock_issue):
                 'update_mode': 'append'
             }
         },
-        reactions=[Mock(content="+1")]
+        reactions=[Mock(content="+1")]  # Add processed reaction
     )
     
-    issue = mock_issue(
-        comments=[processed_update]
-    )
-    store.repo.get_issue.return_value = issue
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[processed_update])
+    issue.user = Mock(login="repo-owner")
     
-    # Try to process updates
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty since update is already processed
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Already processed update should be skipped
     assert len(updates) == 0

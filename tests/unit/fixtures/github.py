@@ -3,102 +3,337 @@
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Literal, TypedDict
 import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
-@pytest.fixture
-def mock_label_factory() -> Callable[[str], Mock]:
-    """Create GitHub-style label objects."""
-    def create_label(name: str) -> Mock:
-        label = Mock()
-        label.name = name
-        return label
-    return create_label
 
 @pytest.fixture
-def mock_comment():
-    """Create a mock comment with configurable attributes."""
-    def _make_comment(
+def mock_label_factory():
+    """
+    Create GitHub-style label objects.
+    
+    Example:
+        label = mock_label_factory("enhancement")
+        label = mock_label_factory("bug", "fc2929")
+    """
+    def create_label(name: str, color: str = "0366d6") -> Mock:
+        """
+        Create a mock label with GitHub-like structure.
+        
+        Args:
+            name: Name of the label
+            color: Color hex code without #
+        """
+        label = Mock()
+        label.name = name
+        label.color = color
+        return label
+    
+    return create_label
+
+class CommentMetadata(TypedDict, total=False):
+    """Metadata for comment creation."""
+    client_version: str
+    timestamp: str
+    update_mode: Literal['append', 'replace']
+
+class CommentBody(TypedDict, total=False):
+    """Structure for comment body data."""
+    _data: dict[str, Any]
+    _meta: CommentMetadata
+    type: Literal['initial_state'] | None
+
+@pytest.fixture
+def mock_comment_factory():
+    """
+    Create GitHub comment mocks with standard structure.
+
+    This factory creates mock comment objects that mirror GitHub's API structure,
+    with proper typing and validation for reactions and metadata.
+
+    Args in create_comment:
+        body: Comment body (dict will be JSON serialized)
+        user_login: GitHub username of comment author
+        comment_id: Unique comment ID (auto-generated if None)
+        reactions: List of reaction types or mock reactions
+        created_at: Comment creation timestamp
+        **kwargs: Additional attributes to set on the comment
+
+    Examples:
+        # Basic comment with data
+        comment = mock_comment_factory(
+            body={"value": 42},
+            user_login="owner"
+        )
+
+        # Comment with metadata
+        comment = mock_comment_factory(
+            body={
+                "_data": {"value": 42},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Initial state comment
+        comment = mock_comment_factory(
+            body={
+                "type": "initial_state",
+                "_data": {"initial": "state"},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Comment with reactions
+        comment = mock_comment_factory(
+            body={"value": 42},
+            reactions=["+1", "rocket"]
+        )
+    """
+    def create_comment(
+        body: dict[str, Any] | CommentBody,
         user_login: str = "repo-owner",
-        body: dict | None = None,
-        comment_id: int = 1,
-        reactions: list | None = None,
-        created_at: datetime | None = None
+        comment_id: int | None = None,
+        reactions: list[str | Mock] | None = None,
+        created_at: datetime | None = None,
+        **kwargs
     ) -> Mock:
+        """Create a mock comment with GitHub-like structure."""
+        # Validate body structure if it's meant to be a CommentBody
+        if isinstance(body, dict) and "_meta" in body:
+            if "update_mode" in body["_meta"] and body["_meta"]["update_mode"] not in ["append", "replace"]:
+                raise ValueError("update_mode must be 'append' or 'replace'")
+            if "type" in body and body["type"] not in [None, "initial_state"]:
+                raise ValueError("type must be None or 'initial_state'")
+
         comment = Mock()
+        
+        # Set basic attributes
+        comment.id = comment_id or 1
+        comment.body = json.dumps(body)
+        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
         
         # Set up user
         user = Mock()
         user.login = user_login
         comment.user = user
         
-        # Handle body serialization
-        comment.body = json.dumps(body) if body else "{}"
-        comment.id = comment_id
+        # Set up reactions with validation
+        mock_reactions = []
+        if reactions:
+            for reaction in reactions:
+                if isinstance(reaction, Mock):
+                    if not hasattr(reaction, 'content'):
+                        raise ValueError("Mock reaction must have 'content' attribute")
+                    mock_reactions.append(reaction)
+                else:
+                    mock_reaction = Mock()
+                    mock_reaction.content = str(reaction)
+                    mock_reactions.append(mock_reaction)
         
-        # Set up reactions
-        comment.get_reactions = Mock(return_value=reactions or [])
+        comment.get_reactions = Mock(return_value=mock_reactions)
         comment.create_reaction = Mock()
         
-        # Set timestamp
-        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(comment, key, value)
         
         return comment
-    return _make_comment
+    
+    return create_comment
+
+
+mock_comment = mock_comment_factory
+
 
 @pytest.fixture
-def mock_issue(mock_label_factory: Callable[[str], Mock]):
-    """Create a mock issue with complete GitHub-like structure."""
-    def _make_issue(
-        number: int = 1,
+def mock_issue_factory(mock_comment_factory, mock_label_factory):
+    """
+    Create GitHub issue mocks with standard structure.
+
+    Examples:
+        # Basic issue
+        issue = mock_issue_factory(
+            body={"test": "data"}
+        )
+
+        # Issue with explicit number
+        issue = mock_issue_factory(
+            number=123,
+            labels=["stored-object", "UID:test-123"]
+        )
+
+        # Issue with comments
+        issue = mock_issue_factory(
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=1
+                )
+            ]
+        )
+    """
+    def create_issue(
+        number: int | None = None,
+        body: dict[str, Any] | str | None = None,
+        labels: list[str] | None = None,
+        comments: list[Mock] | None = None,
+        state: str = "closed",
         user_login: str = "repo-owner",
-        body: dict | None = None,
-        comments: list | None = None,
-        labels: list | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
-        state: str = "closed"
+        **kwargs
     ) -> Mock:
+        """
+        Create a mock issue with GitHub-like structure.
+
+        Args:
+            number: Issue number (defaults to 1 if not provided)
+            body: Issue body content (dict will be JSON serialized)
+            labels: List of label names to add
+            comments: List of mock comments
+            state: Issue state (open/closed)
+            user_login: GitHub username of issue creator
+            created_at: Issue creation timestamp
+            updated_at: Issue last update timestamp
+            **kwargs: Additional attributes to set
+        """
         issue = Mock()
         
         # Set basic attributes
-        issue.number = number
+        issue.number = number or 1  # Default to 1 if not provided
+        issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
         issue.state = state
+        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
         
         # Set up user
         user = Mock()
         user.login = user_login
         issue.user = user
         
-        # Handle body serialization
-        issue.body = json.dumps(body) if body not in (None, "") else "{}"
+        # Set up labels
+        issue_labels = []
+        if labels:
+            for label_name in labels:
+                issue_labels.append(mock_label_factory(label_name))
+        issue.labels = issue_labels
         
         # Set up comments
-        issue.get_comments = Mock(return_value=comments or [])
+        mock_comments = list(comments) if comments is not None else []
+        issue.get_comments = Mock(return_value=mock_comments)
         issue.create_comment = Mock()
+
+        # Set up proper owner permissions
+        repo = Mock()
+        owner = Mock()
+        owner.login = user_login
+        owner.type = "User"
+        repo.owner = owner
+        issue.repository = repo  # Needed for access control checks
+        
+        # Set up issue editing
+        issue.edit = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(issue, key, value)
+        
+        return issue
+    
+    return create_issue
+
+# Keep backward compatibility
+mock_issue = mock_issue_factory
+
+
+@pytest.fixture
+def mock_repo_factory(mock_label_factory):
+    """
+    Create GitHub repository mocks with standard structure.
+    	
+    Note: Creates basic repository structure. Labels, issues, and permissions
+    should be explicitly set up in tests where they matter.
+    """
+    def create_repo(
+        name: str = "owner/repo",
+        owner_login: str = "repo-owner",
+        owner_type: str = "User",
+        labels: list[str] | None = None,
+        issues: list[Mock] | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock repository with GitHub-like structure.
+        Args:
+            name: Repository name in owner/repo format
+            owner_login: Repository owner's login
+            owner_type: Owner type ("User" or "Organization")
+            labels: Initial repository labels
+            issues: Initial repository issues
+            **kwargs: Additional attributes to set
+        """
+        repo = Mock()
+        
+        # Set basic attributes
+        repo.full_name = name
+        
+        # Set up owner - making it more explicit
+        owner = Mock(spec=['login', 'type'])  # Specify expected attributes
+        owner.login = owner_login
+        owner.type = owner_type
+        repo.owner = owner
         
         # Set up labels
-        default_labels = [
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-123")
-        ]
-        if labels is not None:
-            issue.labels = [
-                label if isinstance(label, Mock) else mock_label_factory(label)
-                for label in (labels if isinstance(labels, (list, tuple)) else [labels])
-            ]
-        else:
-            issue.labels = default_labels
-            
-        # Set timestamps
-        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
-        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
+        repo_labels = []
+        if labels:
+            repo_labels = [mock_label_factory(name) for name in labels]
+        repo.get_labels = Mock(return_value=repo_labels)
         
-        issue.edit = Mock()
-        return issue
-    return _make_issue
+        # Set up label creation
+        def create_label(name: str, color: str = "0366d6") -> Mock:
+            label = mock_label_factory(name, color)
+            repo_labels.append(label)
+            return label
+        repo.create_label = Mock(side_effect=create_label)
+        
+        # Set up issues
+        repo_issues = issues or []
+        def get_issue(number):
+            matching = [i for i in repo_issues if i.number == number]
+            if matching:
+                return matching[0]
+            mock_issue = Mock()
+            mock_issue.state = "closed"
+            return mock_issue
+        repo.get_issue = Mock(side_effect=get_issue)
+        repo.get_issues = Mock(return_value=repo_issues)
+        
+        # Set up CODEOWNERS handling
+        def get_contents(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                content = Mock()
+                content.decoded_content = f"* @{owner_login}".encode()
+                return content
+            raise GithubException(404, "Not found")
+        repo.get_contents = Mock(side_effect=get_contents)
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(repo, key, value)
+        
+        return repo
+    
+    return create_repo
 
 @pytest.fixture
 def mock_github():

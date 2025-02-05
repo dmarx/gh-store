@@ -13,7 +13,8 @@ def test_list_updated_since(store, mock_issue):
     # Create mock issue updated after timestamp
     issue = mock_issue(
         created_at=timestamp - timedelta(minutes=30),
-        updated_at=timestamp + timedelta(minutes=30)
+        updated_at=timestamp + timedelta(minutes=30),
+        labels=["stored-object", f"UID:{object_id}"],
     )
     store.repo.get_issues.return_value = [issue]
     
@@ -39,7 +40,8 @@ def test_list_updated_since_no_updates(store, mock_issue):
     # Create mock issue updated before timestamp
     issue = mock_issue(
         created_at=timestamp - timedelta(minutes=30),
-        updated_at=timestamp - timedelta(minutes=30)
+        updated_at=timestamp - timedelta(minutes=30),
+        labels=["stored-object", f"UID:foo"],
     )
     store.repo.get_issues.return_value = [issue]
     
@@ -60,17 +62,11 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     issues = [
         mock_issue(
             number=1,
-            labels=[
-                mock_label_factory("stored-object"),
-                mock_label_factory("UID:test-1")
-            ]
+            labels=["stored-object", f"UID:test-1"],
         ),
         mock_issue(
             number=2,
-            labels=[
-                mock_label_factory("stored-object"),
-                mock_label_factory("UID:test-2")
-            ]
+            labels=["stored-object", f"UID:test-2"],
         )
     ]
     store.repo.get_issues.return_value = issues
@@ -99,17 +95,14 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     archived_issue = mock_issue(
         number=1,
         labels=[
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-1"),
-            mock_label_factory("archived")
+            "stored-object",
+            "UID:test-1",
+            "archived",
         ]
     )
     active_issue = mock_issue(
         number=2,
-        labels=[
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-2")
-        ]
+        labels=["stored-object", "UID:test-2"]
     )
     
     store.repo.get_issues.return_value = [archived_issue, active_issue]
@@ -137,16 +130,13 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     # Create issue missing UID label
     invalid_issue = mock_issue(
         number=1,
-        labels=[mock_label_factory("stored-object")]  # Missing UID label
+        labels=["stored-object"]  # Missing UID label
     )
     
     # Create valid issue with explicit labels including UID
     valid_issue = mock_issue(
         number=2,
-        labels=[
-            mock_label_factory("stored-object"),
-            mock_label_factory("UID:test-2")  # Explicitly set UID label
-        ]
+        labels=["stored-object","UID:test-2"]  # Explicitly set UID label
     )
     
     store.repo.get_issues.return_value = [invalid_issue, valid_issue]

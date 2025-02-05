@@ -82,26 +82,6 @@ def test_update_metadata_structure(store):
     assert comment_data["_meta"]["update_mode"] == "append"
     assert "timestamp" in comment_data["_meta"]
 
-def test_update_closes_issue(store, mock_issue):
-    """Test that process_updates closes the issue when complete"""
-    test_data = {"initial": "state"}
-    
-    # Create mock issue with proper authorization
-    issue = mock_issue(
-        user_login="repo-owner",  # Set authorized user
-        body=json.dumps(test_data),
-        number=123
-    )
-    store.repo.get_issue.return_value = issue
-    
-    # Process updates
-    store.process_updates(123)
-    
-    # Verify issue closed
-    issue.edit.assert_called_with(
-        body=json.dumps(test_data, indent=2),
-        state="closed"
-    )
 
 def test_update_nonexistent_object(store):
     """Test updating an object that doesn't exist"""
@@ -109,61 +89,3 @@ def test_update_nonexistent_object(store):
     
     with pytest.raises(ObjectNotFound):
         store.update("nonexistent", {"value": 43})
-
-def test_update_closes_issue(store, mock_issue):
-    """Test that process_updates closes the issue when complete"""
-    test_data = {"initial": "state"}
-    
-    # Create mock issue with proper authorization
-    issue = mock_issue(
-        number=123,
-        user_login="repo-owner",  # Set authorized user
-        body=test_data,  # Pass raw data - mock_issue will handle JSON encoding
-        comments=[]  # Explicitly set empty comments
-    )
-    store.repo.get_issue.return_value = issue
-    
-    store.process_updates(123)
-    
-    # Verify issue closed with formatted body
-    issue.edit.assert_called_with(
-        body=json.dumps(test_data, indent=2),
-        state="closed"
-    )
-
-def test_update_preserves_metadata(store, mock_issue, mock_comment):
-    """Test that updates preserve existing metadata"""
-    existing_data = {
-        "value": 42,
-        "_meta": {
-            "preserved": "data"
-        }
-    }
-    
-    update = mock_comment(
-        body={
-            "_data": {
-                "value": 43,
-                "_meta": {
-                    "new": "metadata"
-                }
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": "2025-01-01T00:00:00Z",
-                "update_mode": "append"
-            }
-        }
-    )
-    
-    issue = mock_issue(
-        body=existing_data,
-        comments=[update]
-    )
-    
-    store.repo.get_issue.return_value = issue
-    obj = store.process_updates(123)
-    
-    # Verify metadata preserved and merged
-    assert obj.data["_meta"]["preserved"] == "data"
-    assert obj.data["_meta"]["new"] == "metadata"

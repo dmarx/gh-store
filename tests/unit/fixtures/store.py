@@ -7,24 +7,74 @@ from gh_store.core.store import GitHubStore
 from gh_store.core.version import CLIENT_VERSION
 from gh_store.core.exceptions import ObjectNotFound
 
+from unittest.mock import patch
+
+
+from typing import Sequence
+from unittest.mock import Mock
+
+def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
+    """Set up mocked authorization for testing.
+    
+    Args:
+        store: GitHubStore instance to configure
+        authorized_users: List of usernames to authorize (defaults to ['repo-owner'])
+    """
+    if authorized_users is None:
+        authorized_users = ['repo-owner']
+    
+    # Pre-populate owner info cache
+    store.access_control._owner_info = {
+        'login': 'repo-owner',
+        'type': 'User'
+    }
+    
+    # If we have additional authorized users via CODEOWNERS
+    if len(authorized_users) > 1:
+        # Mock CODEOWNERS content
+        codeowners_content = "* " + " ".join(f"@{user}" for user in authorized_users)
+        mock_content = Mock()
+        mock_content.decoded_content = codeowners_content.encode()
+        store.repo.get_contents = Mock(return_value=mock_content)
+        
+        # Clear codeowners cache to force reload
+        store.access_control._codeowners = None
+
+
+
+
 @pytest.fixture
-def store(mock_github, default_config):
+def store(mock_repo_factory, default_config):
     """Create GitHubStore instance with mocked dependencies."""
-    _, mock_repo = mock_github
-    store = GitHubStore(token="fake-token", repo="owner/repo")
-    store.repo = mock_repo  # Use mock repo
-    store.access_control.repo = mock_repo  # Ensure access control uses same mock
-    store.config = default_config  # Use the fixture's config
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=["stored-object"]
+    )
     
-    def get_object_id(issue) -> str:
-        """Override get_object_id_from_labels for testing."""
-        for label in issue.labels:
-            if hasattr(label, 'name') and label.name.startswith("UID:"):
-                return label.name[4:]  # Strip "UID:" prefix
-        raise ValueError(f"No UID label found for issue {issue.number}")
-    
-    store.issue_handler.get_object_id_from_labels = get_object_id
-    return store
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
+        
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
+        
+        # Set up default authorization
+        setup_mock_auth(store)
+        
+        return store
+
+@pytest.fixture
+def authorized_store(store):
+    """Create store with additional authorized users for testing."""
+    def _authorized_store(authorized_users: Sequence[str]):
+        setup_mock_auth(store, authorized_users=authorized_users)
+        return store
+    return _authorized_store
+
+
 
 @pytest.fixture
 def history_mock_comments(mock_comment):
