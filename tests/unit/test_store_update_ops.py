@@ -116,21 +116,24 @@ def test_update_closes_issue(store, mock_issue):
     # Create mock issue with proper authorization
     issue = mock_issue(
         number=123,
-        user_login="repo-owner",  # Set authorized user
-        body=test_data,  # Pass raw data - mock_issue will handle JSON encoding
-        comments=[],  # Explicitly set empty comments
-        labels=["stored-object", f"UID:foo"],
+        user_login="repo-owner",  # Important: Match authorized user
+        body=test_data,
+        comments=[],
+        labels=["stored-object", "UID:test-123"]
     )
+    
+    # Set up mock repository methods
     store.repo.get_issue.return_value = issue
+    store.repo.get_issues.return_value = [issue]  # Return list for iteration
     
-    store.process_updates(123)
+    # Process updates
+    obj = store.process_updates(123)
     
-    # Verify issue closed with formatted body
+    # Verify issue closed
     issue.edit.assert_called_with(
         body=json.dumps(test_data, indent=2),
         state="closed"
     )
-
 
 def test_update_preserves_metadata(store, mock_issue, mock_comment):
     """Test that updates preserve existing metadata"""
@@ -141,6 +144,7 @@ def test_update_preserves_metadata(store, mock_issue, mock_comment):
         }
     }
     
+    # Create update with new metadata
     update = mock_comment(
         user_login="repo-owner",  # Match authorized user
         body={
@@ -158,15 +162,22 @@ def test_update_preserves_metadata(store, mock_issue, mock_comment):
         }
     )
     
+    # Create issue with proper authorization
     issue = mock_issue(
-        user_login="repo-owner",  # Match authorized user
+        number=123,
+        user_login="repo-owner",  # Important: Match authorized user
         body=existing_data,
-        comments=[update],  # List for proper iteration
+        comments=[update],
         labels=["stored-object", "UID:test-123"]
     )
-    store.repo.get_issue.return_value = issue
     
+    # Set up mock repository methods
+    store.repo.get_issue.return_value = issue
+    store.repo.get_issues.return_value = [issue]  # Return list for iteration
+    
+    # Process updates
     obj = store.process_updates(123)
     
+    # Verify metadata preserved and merged
     assert obj.data["_meta"]["preserved"] == "data"
     assert obj.data["_meta"]["new"] == "metadata"
