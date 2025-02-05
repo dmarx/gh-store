@@ -83,37 +83,9 @@ def test_update_metadata_structure(store):
     assert "timestamp" in comment_data["_meta"]
 
 
-# def test_update_closes_issue(store, mock_issue):
-#     """Test that process_updates closes the issue when complete"""
-#     test_data = {"initial": "state"}
-    
-#     # Create mock issue with proper authorization
-#     issue = mock_issue(
-#         number=123,
-#         user_login="repo-owner",  # Important: Match authorized user
-#         body=test_data,
-#         comments=[],
-#         labels=["stored-object", "UID:test-123"]
-#     )
-    
-#     # Set up mock repository methods
-#     store.repo.get_issue.return_value = issue
-#     store.repo.get_issues.return_value = [issue]  # Return list for iteration
-    
-#     # Process updates
-#     obj = store.process_updates(123)
-    
-#     # Verify issue closed
-#     issue.edit.assert_called_with(
-#         #body=test_data, #json.dumps(test_data, indent=2),
-#         state="closed"
-#     )
-
 def test_update_nonexistent_object(store):
     """Test updating an object that doesn't exist"""
     store.repo.get_issues.return_value = []
     
     with pytest.raises(ObjectNotFound):
         store.update("nonexistent", {"value": 43})
-
-    
