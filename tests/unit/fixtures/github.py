@@ -3,7 +3,7 @@
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Literal, TypedDict
 import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
@@ -32,14 +32,6 @@ def mock_label_factory():
         return label
     
     return create_label
-
-# tests/unit/fixtures/github.py - Enhanced mock_comment_factory
-
-from datetime import datetime, timezone
-from typing import Any, Literal, TypedDict
-from unittest.mock import Mock
-import pytest
-import json
 
 class CommentMetadata(TypedDict, total=False):
     """Metadata for comment creation."""
@@ -159,7 +151,7 @@ def mock_comment_factory():
     
     return create_comment
 
-# Keep backward compatibility
+
 mock_comment = mock_comment_factory
 
 
@@ -263,7 +255,6 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
 # Keep backward compatibility
 mock_issue = mock_issue_factory
 
-# tests/unit/fixtures/github.py - Add mock_repo_factory
 
 @pytest.fixture
 def mock_repo_factory(mock_label_factory):
