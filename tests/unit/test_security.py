@@ -120,14 +120,9 @@ def test_unauthorized_issue_creator_denied(store, mock_issue):
     with pytest.raises(AccessDeniedError):
         store.process_updates(456)
 
-def test_authorized_codeowners_updates(store, mock_issue, mock_comment, mock_github):
+def test_authorized_codeowners_updates(authorized_store, mock_comment):
     """Test that CODEOWNERS team members can make updates"""
-    _, mock_repo = mock_github
-    
-    # Set up CODEOWNERS authorization
-    mock_content = Mock()
-    mock_content.decoded_content = b"* @team-member"
-    mock_repo.get_contents = Mock(return_value=mock_content)
+    store = authorized_store(['repo-owner', 'team-member'])
     
     team_update = mock_comment(
         user_login="team-member",
@@ -142,10 +137,11 @@ def test_authorized_codeowners_updates(store, mock_issue, mock_comment, mock_git
     )
     
     # Mock issue with team member's update
-    issue = mock_issue(
-        user_login="repo-owner",
-        comments=[team_update]
-    )
+    mock_comments = [team_update]
+    issue = Mock()
+    issue.get_comments = Mock(return_value=mock_comments)
+    issue.user = Mock(login="repo-owner")  # Important: Authorized creator
+    issue.number = 123
     store.repo.get_issue.return_value = issue
     
     # Process updates
