@@ -86,18 +86,17 @@ def test_update_closes_issue(store, mock_issue):
     """Test that process_updates closes the issue when complete"""
     test_data = {"initial": "state"}
     
-    # Create mock issue with proper authorization
     issue = mock_issue(
-        user_login="repo-owner",  # Set authorized user
-        body=json.dumps(test_data),
-        number=123
+        number=123,
+        user_login="repo-owner",  # Match authorized user from store fixture
+        body=test_data,
+        comments=[],  # Empty list for proper iteration
+        labels=["stored-object", "UID:test-123"]
     )
     store.repo.get_issue.return_value = issue
     
-    # Process updates
     store.process_updates(123)
     
-    # Verify issue closed
     issue.edit.assert_called_with(
         body=json.dumps(test_data, indent=2),
         state="closed"
@@ -132,6 +131,7 @@ def test_update_closes_issue(store, mock_issue):
         state="closed"
     )
 
+
 def test_update_preserves_metadata(store, mock_issue, mock_comment):
     """Test that updates preserve existing metadata"""
     existing_data = {
@@ -142,6 +142,7 @@ def test_update_preserves_metadata(store, mock_issue, mock_comment):
     }
     
     update = mock_comment(
+        user_login="repo-owner",  # Match authorized user
         body={
             "_data": {
                 "value": 43,
@@ -158,14 +159,14 @@ def test_update_preserves_metadata(store, mock_issue, mock_comment):
     )
     
     issue = mock_issue(
+        user_login="repo-owner",  # Match authorized user
         body=existing_data,
-        comments=[update],
-        labels=["stored-object", f"UID:foo"],
+        comments=[update],  # List for proper iteration
+        labels=["stored-object", "UID:test-123"]
     )
-    
     store.repo.get_issue.return_value = issue
+    
     obj = store.process_updates(123)
     
-    # Verify metadata preserved and merged
     assert obj.data["_meta"]["preserved"] == "data"
     assert obj.data["_meta"]["new"] == "metadata"
