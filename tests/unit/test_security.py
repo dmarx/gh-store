@@ -71,10 +71,10 @@ def test_codeowners_file_locations(mock_github):
         
         assert ac._is_authorized("authorized-user") is True
 
-# Update Authorization Tests
-
 def test_unauthorized_update_rejection(store, mock_comment):
     """Test that updates from unauthorized users are rejected"""
+    # Default store already has repo-owner authorized
+    
     unauthorized_update = mock_comment(
         user_login="attacker",
         body={
@@ -98,15 +98,13 @@ def test_unauthorized_update_rejection(store, mock_comment):
         }
     )
     
-    # Mock issue with both comments
+    mock_comments = [unauthorized_update, authorized_update]
     issue = Mock()
-    issue.get_comments = Mock(return_value=[unauthorized_update, authorized_update])
+    issue.get_comments = Mock(return_value=mock_comments)
+    issue.user = Mock(login="repo-owner")  # Authorized creator
     store.repo.get_issue.return_value = issue
     
-    # Process updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Only authorized update should be processed
     assert len(updates) == 1
     assert updates[0].changes == {'valid': 'update'}
 
@@ -136,47 +134,39 @@ def test_authorized_codeowners_updates(authorized_store, mock_comment):
         }
     )
     
-    # Mock issue with team member's update
-    mock_comments = [team_update]
     issue = Mock()
-    issue.get_comments = Mock(return_value=mock_comments)
-    issue.user = Mock(login="repo-owner")  # Important: Authorized creator
-    issue.number = 123
+    issue.get_comments = Mock(return_value=[team_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
     store.repo.get_issue.return_value = issue
     
-    # Process updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Team member's update should be processed
     assert len(updates) == 1
     assert updates[0].changes == {'team': 'update'}
 
-def test_metadata_tampering_protection(store, mock_comment, mock_issue):
+def test_metadata_tampering_protection(store, mock_comment):
     """Test protection against metadata tampering in updates"""
     tampered_update = mock_comment(
-        user_login="repo-owner",
+        user_login="repo-owner",  # Even authorized users can't use invalid metadata
         body={
             '_data': {'update': 'data'},
             '_meta': {
-                # Missing required fields
                 'client_version': CLIENT_VERSION
+                # Missing required fields
             }
         }
     )
     
-    issue = mock_issue(
-        comments=[tampered_update]
-    )
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[tampered_update])
+    issue.user = Mock(login="repo-owner")
     store.repo.get_issue.return_value = issue
     
-    # Process updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Update with invalid metadata should be rejected
-    assert len(updates) == 0
+    assert len(updates) == 0  # Should be rejected due to invalid metadata
 
-def test_reaction_based_processing_protection(store, mock_comment, mock_issue):
+def test_reaction_based_processing_protection(store, mock_comment):
     """Test that processed updates cannot be reprocessed"""
+    # Create a processed update by adding the processed reaction
     processed_update = mock_comment(
         user_login="repo-owner",
         body={
@@ -187,16 +177,13 @@ def test_reaction_based_processing_protection(store, mock_comment, mock_issue):
                 'update_mode': 'append'
             }
         },
-        reactions=[Mock(content="+1")]
+        reactions=[Mock(content="+1")]  # Add processed reaction
     )
     
-    issue = mock_issue(
-        comments=[processed_update]
-    )
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[processed_update])
+    issue.user = Mock(login="repo-owner")
     store.repo.get_issue.return_value = issue
     
-    # Try to process updates
     updates = store.comment_handler.get_unprocessed_updates(123)
-    
-    # Already processed update should be skipped
-    assert len(updates) == 0
+    assert len(updates) == 0  # Should skip processed update
