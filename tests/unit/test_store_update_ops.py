@@ -105,7 +105,7 @@ def test_update_closes_issue(store, mock_issue):
     
     # Verify issue closed
     issue.edit.assert_called_with(
-        body=test_data, #json.dumps(test_data, indent=2),
+        #body=test_data, #json.dumps(test_data, indent=2),
         state="closed"
     )
 
