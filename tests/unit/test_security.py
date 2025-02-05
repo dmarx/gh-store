@@ -73,8 +73,7 @@ def test_codeowners_file_locations(mock_github):
 
 def test_unauthorized_update_rejection(store, mock_comment):
     """Test that updates from unauthorized users are rejected"""
-    # Default store already has repo-owner authorized
-    
+    # Create unauthorized and authorized updates
     unauthorized_update = mock_comment(
         user_login="attacker",
         body={
@@ -98,12 +97,16 @@ def test_unauthorized_update_rejection(store, mock_comment):
         }
     )
     
-    mock_comments = [unauthorized_update, authorized_update]
+    # Setup mock issue
     issue = Mock()
-    issue.get_comments = Mock(return_value=mock_comments)
+    issue.get_comments = Mock(return_value=[unauthorized_update, authorized_update])
     issue.user = Mock(login="repo-owner")  # Authorized creator
-    store.repo.get_issue.return_value = issue
     
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
     updates = store.comment_handler.get_unprocessed_updates(123)
     assert len(updates) == 1
     assert updates[0].changes == {'valid': 'update'}
