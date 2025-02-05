@@ -125,6 +125,7 @@ def test_authorized_codeowners_updates(authorized_store, mock_comment):
     """Test that CODEOWNERS team members can make updates"""
     store = authorized_store(['repo-owner', 'team-member'])
     
+    # Create update from team member
     team_update = mock_comment(
         user_login="team-member",
         body={
@@ -137,17 +138,23 @@ def test_authorized_codeowners_updates(authorized_store, mock_comment):
         }
     )
     
+    # Setup mock issue
     issue = Mock()
     issue.get_comments = Mock(return_value=[team_update])
     issue.user = Mock(login="repo-owner")  # Authorized creator
-    store.repo.get_issue.return_value = issue
     
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
     updates = store.comment_handler.get_unprocessed_updates(123)
     assert len(updates) == 1
     assert updates[0].changes == {'team': 'update'}
 
 def test_metadata_tampering_protection(store, mock_comment):
     """Test protection against metadata tampering in updates"""
+    # Create update with invalid metadata
     tampered_update = mock_comment(
         user_login="repo-owner",  # Even authorized users can't use invalid metadata
         body={
@@ -159,17 +166,22 @@ def test_metadata_tampering_protection(store, mock_comment):
         }
     )
     
+    # Setup mock issue
     issue = Mock()
     issue.get_comments = Mock(return_value=[tampered_update])
     issue.user = Mock(login="repo-owner")
-    store.repo.get_issue.return_value = issue
     
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty due to invalid metadata
     updates = store.comment_handler.get_unprocessed_updates(123)
-    assert len(updates) == 0  # Should be rejected due to invalid metadata
+    assert len(updates) == 0
 
 def test_reaction_based_processing_protection(store, mock_comment):
     """Test that processed updates cannot be reprocessed"""
-    # Create a processed update by adding the processed reaction
+    # Create a processed update with the processed reaction
     processed_update = mock_comment(
         user_login="repo-owner",
         body={
@@ -183,10 +195,15 @@ def test_reaction_based_processing_protection(store, mock_comment):
         reactions=[Mock(content="+1")]  # Add processed reaction
     )
     
+    # Setup mock issue
     issue = Mock()
     issue.get_comments = Mock(return_value=[processed_update])
     issue.user = Mock(login="repo-owner")
-    store.repo.get_issue.return_value = issue
     
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty since update is already processed
     updates = store.comment_handler.get_unprocessed_updates(123)
-    assert len(updates) == 0  # Should skip processed update
+    assert len(updates) == 0
