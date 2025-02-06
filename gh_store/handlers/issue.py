@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
 from ..core.version import CLIENT_VERSION
+from ..core.uid import UIDUtils, UIDConfig
 
 from time import sleep
 from github.GithubException import RateLimitExceededException
@@ -19,36 +20,26 @@ class IssueHandler:
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.base_label = config.store.base_label
-        self.uid_prefix = config.store.uid_prefix
+        self.uid_utils = UIDUtils(UIDConfig(
+            prefix=config.store.uid_prefix,
+            base_label=config.store.base_label
+        ))
     
-    def _add_uid_prefix(self, object_id: str) -> str:
-        """Add UID prefix to object ID if not present"""
-        if object_id.startswith(self.uid_prefix):
-            return object_id
-        return f"{self.uid_prefix}{object_id}"
-    
-    def _remove_uid_prefix(self, label: str) -> str:
-        """Remove UID prefix from label if present"""
-        if label.startswith(self.uid_prefix):
-            return label[len(self.uid_prefix):]
-        return label
-
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
-        # Create uid label with prefix
-        uid_label = self._add_uid_prefix(object_id)
+        # Get label list for issue creation
+        labels = self.uid_utils.format_for_query(object_id)
         
         # Ensure required labels exist
-        self._ensure_labels_exist([self.base_label, uid_label])
+        self._ensure_labels_exist(labels)
         
-        # Create issue with object data and both required labels
+        # Create issue
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
-            labels=[self.base_label, uid_label]
+            labels=labels
         )
         
         # Create initial state comment with metadata
@@ -69,12 +60,12 @@ class IssueHandler:
         comment.create_reaction(self.config.store.reactions.initial_state)
         
         # Create metadata
-        meta = ObjectMeta(
+        meta = ObjectMeta.from_raw(
             object_id=object_id,
-            label=uid_label,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
-            version=1
+            version=1,
+            uid_utils=self.uid_utils
         )
         
         # Close issue immediately to indicate no processing needed
