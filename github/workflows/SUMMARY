@@ -1,0 +1,457 @@
+---
+File: .github/workflows/lint.yml
+---
+name: Lint
+
+on:
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Check formatting with ruff
+      run: ruff format --check .
+        
+    - name: Lint with ruff
+      run: ruff check .
+        
+    - name: Type check with mypy
+      run: mypy github_store
+
+
+
+---
+File: .github/workflows/live-test.yml
+---
+name: Live Test
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  store-data:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Required for creating/updating issues
+      contents: read # Required for checkout
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        
+    - name: Generate and store random data
+      run: |
+        python - <<EOF
+        from gh_store.core.store import GitHubStore
+        import random
+        from datetime import datetime, timezone
+        import os
+
+        # Initialize store with GitHub token
+        store = GitHubStore(
+            token=os.environ["GITHUB_TOKEN"],
+            repo=os.environ["GITHUB_REPOSITORY"]
+        )
+
+        # Generate random data
+        data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "temperature": round(random.uniform(15.0, 25.0), 2),
+                "humidity": round(random.uniform(40.0, 60.0), 2),
+                "pressure": round(random.uniform(980.0, 1020.0), 2),
+            },
+            "counters": {
+                "visitors": random.randint(100, 1000),
+                "actions": random.randint(500, 5000),
+                "errors": random.randint(0, 50)
+            },
+            "status": random.choice(["green", "yellow", "red"])
+        }
+
+        # Create or update the object
+        try:
+            # Try to update if exists
+            store.update("daily-metrics123", data)
+        except:
+            # Create new if doesn't exist
+            store.create("daily-metrics123", data)
+
+        print("Successfully stored random data")
+        EOF
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+---
+File: .github/workflows/llamero-summary.yml
+---
+name: Llamero Summarization
+
+on:
+  #push:
+  workflow_dispatch:
+
+jobs:
+  generate-summaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install llamero
+      run: pip install llamero
+
+    - name: Generate summaries
+      run: llamero summarize all
+
+
+
+---
+File: .github/workflows/process_update.yml
+---
+# .github/workflows/process_update.yml
+
+name: Process Object Updates
+
+on:
+  issues:
+    types: [reopened]
+
+jobs:
+  process-updates:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'stored-object')
+    permissions:
+      issues: write 
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          
+      - name: Process Updates
+        run: |
+          python -m gh_store process-updates \
+            --issue ${{ github.event.issue.number }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }}
+
+
+
+---
+File: .github/workflows/release.yml
+---
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    if: ${{ !startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine tomli
+
+    - name: Verify version sync
+      run: |
+        echo "Checking Python version sync..."
+        pkg_version=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        code_version=$(python -c "from gh_store.core.version import __version__; print(__version__)")
+        
+        if [ "$pkg_version" != "$code_version" ]; then
+          echo "Version mismatch: pyproject.toml ($pkg_version) != version.py ($code_version)"
+          exit 1
+        fi
+
+    - name: Build package
+      run: python -m build
+        
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+
+
+---
+File: .github/workflows/snapshot.yml
+---
+name: Snapshot Management
+
+on:
+  # schedule:
+  #   # Run daily at midnight UTC
+  #   - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+    inputs:
+      force_new:
+        description: 'Force creation of new snapshot'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SNAPSHOT_PATH: data/snapshots/store-snapshot.json
+  CONFIG_PATH: config.yml
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed for pushing snapshot changes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Check for existing snapshot
+        id: check_snapshot
+        run: |
+          if [ -f "${{ env.SNAPSHOT_PATH }}" ] && [ "${{ github.event.inputs.force_new }}" != "true" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create new snapshot
+        if: steps.check_snapshot.outputs.exists == 'false'
+        run: |
+          # Ensure directory exists
+          mkdir -p $(dirname ${{ env.SNAPSHOT_PATH }})
+          
+          # Create snapshot using CLI
+          python -m gh_store snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --output ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+
+      - name: Update existing snapshot
+        if: steps.check_snapshot.outputs.exists == 'true'
+        run: |
+          python -m gh_store update-snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --snapshot-path ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+            
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "${{ steps.check_snapshot.outputs.exists == 'true' && 'chore: Update data store snapshot' || 'chore: Create initial data store snapshot' }}"
+          file_pattern: "${{ env.SNAPSHOT_PATH }}"
+
+
+
+---
+File: .github/workflows/test.yml
+---
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Run tests
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        pytest tests/unit
+
+
+
+---
+File: .github/workflows/typescript.yml
+---
+# .github/workflows/typescript.yml
+name: TypeScript Client
+
+on:
+  push:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main, ts ]
+  pull_request:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main ]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    # Skip this job for non-TypeScript releases
+    if: ${{ !github.event.release || startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    # Initial clean npm install to generate package-lock.json
+    - name: Initialize npm
+      run: |
+        # Force rebuild of package-lock.json if it exists
+        if [ -f "package-lock.json" ]; then
+          rm -f package-lock.json
+        fi
+        npm install --package-lock-only --no-audit
+        git status
+    
+    # Now setup Node with caching
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+        cache-dependency-path: './typescript/package-lock.json'
+        
+    - name: Install dependencies
+      run: npm ci --prefer-offline
+
+    - name: Sync version
+      run: npm run prebuild
+        
+    - name: Type check
+      run: npm run type-check
+        
+    - name: Lint
+      run: npm run lint
+        
+    - name: Test
+      run: npm run test
+        
+    - name: Build
+      run: npm run build
+
+    # Show build outputs for debugging
+    - name: Show dist contents
+      run: |
+        echo "Dist directory contents:"
+        ls -la dist/
+        echo "Package exports:"
+        cat package.json | jq '.exports'
+
+    # Run packaging test after build
+    - name: Test packaging
+      run: |
+        if [ ! -f "scripts/test-packaging.js" ]; then
+          echo "Error: packaging test script not found"
+          exit 1
+        fi
+        # Run packaging tests after build
+        npm run test:packaging
+    
+    # Only run publish step on releases with a tag starting with 'ts-v'
+    - name: Publish to npm
+      if: ${{ github.event.release && startsWith(github.ref_name, 'ts-') }}
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+

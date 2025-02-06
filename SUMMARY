@@ -1,0 +1,5709 @@
+---
+File: .github/workflows/lint.yml
+---
+name: Lint
+
+on:
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Check formatting with ruff
+      run: ruff format --check .
+        
+    - name: Lint with ruff
+      run: ruff check .
+        
+    - name: Type check with mypy
+      run: mypy github_store
+
+
+
+---
+File: .github/workflows/live-test.yml
+---
+name: Live Test
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  store-data:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Required for creating/updating issues
+      contents: read # Required for checkout
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        
+    - name: Generate and store random data
+      run: |
+        python - <<EOF
+        from gh_store.core.store import GitHubStore
+        import random
+        from datetime import datetime, timezone
+        import os
+
+        # Initialize store with GitHub token
+        store = GitHubStore(
+            token=os.environ["GITHUB_TOKEN"],
+            repo=os.environ["GITHUB_REPOSITORY"]
+        )
+
+        # Generate random data
+        data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "temperature": round(random.uniform(15.0, 25.0), 2),
+                "humidity": round(random.uniform(40.0, 60.0), 2),
+                "pressure": round(random.uniform(980.0, 1020.0), 2),
+            },
+            "counters": {
+                "visitors": random.randint(100, 1000),
+                "actions": random.randint(500, 5000),
+                "errors": random.randint(0, 50)
+            },
+            "status": random.choice(["green", "yellow", "red"])
+        }
+
+        # Create or update the object
+        try:
+            # Try to update if exists
+            store.update("daily-metrics123", data)
+        except:
+            # Create new if doesn't exist
+            store.create("daily-metrics123", data)
+
+        print("Successfully stored random data")
+        EOF
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+---
+File: .github/workflows/llamero-summary.yml
+---
+name: Llamero Summarization
+
+on:
+  #push:
+  workflow_dispatch:
+
+jobs:
+  generate-summaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install llamero
+      run: pip install llamero
+
+    - name: Generate summaries
+      run: llamero summarize all
+
+
+
+---
+File: .github/workflows/process_update.yml
+---
+# .github/workflows/process_update.yml
+
+name: Process Object Updates
+
+on:
+  issues:
+    types: [reopened]
+
+jobs:
+  process-updates:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'stored-object')
+    permissions:
+      issues: write 
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          
+      - name: Process Updates
+        run: |
+          python -m gh_store process-updates \
+            --issue ${{ github.event.issue.number }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }}
+
+
+
+---
+File: .github/workflows/release.yml
+---
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    if: ${{ !startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine tomli
+
+    - name: Verify version sync
+      run: |
+        echo "Checking Python version sync..."
+        pkg_version=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        code_version=$(python -c "from gh_store.core.version import __version__; print(__version__)")
+        
+        if [ "$pkg_version" != "$code_version" ]; then
+          echo "Version mismatch: pyproject.toml ($pkg_version) != version.py ($code_version)"
+          exit 1
+        fi
+
+    - name: Build package
+      run: python -m build
+        
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+
+
+---
+File: .github/workflows/snapshot.yml
+---
+name: Snapshot Management
+
+on:
+  # schedule:
+  #   # Run daily at midnight UTC
+  #   - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+    inputs:
+      force_new:
+        description: 'Force creation of new snapshot'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SNAPSHOT_PATH: data/snapshots/store-snapshot.json
+  CONFIG_PATH: config.yml
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed for pushing snapshot changes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Check for existing snapshot
+        id: check_snapshot
+        run: |
+          if [ -f "${{ env.SNAPSHOT_PATH }}" ] && [ "${{ github.event.inputs.force_new }}" != "true" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create new snapshot
+        if: steps.check_snapshot.outputs.exists == 'false'
+        run: |
+          # Ensure directory exists
+          mkdir -p $(dirname ${{ env.SNAPSHOT_PATH }})
+          
+          # Create snapshot using CLI
+          python -m gh_store snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --output ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+
+      - name: Update existing snapshot
+        if: steps.check_snapshot.outputs.exists == 'true'
+        run: |
+          python -m gh_store update-snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --snapshot-path ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+            
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "${{ steps.check_snapshot.outputs.exists == 'true' && 'chore: Update data store snapshot' || 'chore: Create initial data store snapshot' }}"
+          file_pattern: "${{ env.SNAPSHOT_PATH }}"
+
+
+
+---
+File: .github/workflows/test.yml
+---
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Run tests
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        pytest tests/unit
+
+
+
+---
+File: .github/workflows/typescript.yml
+---
+# .github/workflows/typescript.yml
+name: TypeScript Client
+
+on:
+  push:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main, ts ]
+  pull_request:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main ]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    # Skip this job for non-TypeScript releases
+    if: ${{ !github.event.release || startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    # Initial clean npm install to generate package-lock.json
+    - name: Initialize npm
+      run: |
+        # Force rebuild of package-lock.json if it exists
+        if [ -f "package-lock.json" ]; then
+          rm -f package-lock.json
+        fi
+        npm install --package-lock-only --no-audit
+        git status
+    
+    # Now setup Node with caching
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+        cache-dependency-path: './typescript/package-lock.json'
+        
+    - name: Install dependencies
+      run: npm ci --prefer-offline
+
+    - name: Sync version
+      run: npm run prebuild
+        
+    - name: Type check
+      run: npm run type-check
+        
+    - name: Lint
+      run: npm run lint
+        
+    - name: Test
+      run: npm run test
+        
+    - name: Build
+      run: npm run build
+
+    # Show build outputs for debugging
+    - name: Show dist contents
+      run: |
+        echo "Dist directory contents:"
+        ls -la dist/
+        echo "Package exports:"
+        cat package.json | jq '.exports'
+
+    # Run packaging test after build
+    - name: Test packaging
+      run: |
+        if [ ! -f "scripts/test-packaging.js" ]; then
+          echo "Error: packaging test script not found"
+          exit 1
+        fi
+        # Run packaging tests after build
+        npm run test:packaging
+    
+    # Only run publish step on releases with a tag starting with 'ts-v'
+    - name: Publish to npm
+      if: ${{ github.event.release && startsWith(github.ref_name, 'ts-') }}
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+
+
+---
+File: README.md
+---
+![An octocat poorly disguised as a database](static/shitty-logo.png)
+
+# Github Issues as a Data Store
+
+The `gh-store` package provides a data store implementation that uses GitHub Issues as a backend. The primary intended use case is for "github native"  applications which are constrained to Github Actions as the only available runtime, and free-tier github resources.
+
+The data storage pattern presented here is inspired by https://github.com/utterance/utterances
+
+## Key Features
+- Store and version JSON objects using GitHub Issues
+- Atomic updates through a comment-based event system
+- Point-in-time snapshots for static site generation
+- Built-in GitHub Actions integration
+
+## Installation
+
+```bash
+pip install gh-store  # Requires Python 3.12+
+```
+
+## Prerequisites
+- GitHub repository with Issues enabled
+- GitHub token with `repo` scope
+- For GitHub Actions: `issues` write permission
+
+## Basic Usage
+
+```python
+from gh_store.core.store import GitHubStore
+
+store = GitHubStore(
+    token="github-token",
+    repo="username/repository"
+)
+
+# Create object
+store.create("metrics", {
+    "count": 0,
+    "last_updated": "2025-01-16T00:00:00Z"
+})
+
+# Update object
+store.update("metrics", {"count": 1})
+
+# Get current state
+obj = store.get("metrics")
+print(f"Current count: {obj.data['count']}")
+```
+
+## System Architecture
+
+gh-store uses GitHub Issues as a versioned data store. Here's how the components work together:
+
+### 1. Object Storage Model
+
+Each stored object is represented by a GitHub Issue:
+```
+Issue #123
+├── Labels: ["stored-object", "UID:metrics"]
+├── Body: Current object state (JSON)
+└── Comments: Update history
+    ├── Comment 1: Update {"count": 1}
+    ├── Comment 2: Update {"field": "value"}
+    └── Each comment includes the 👍 reaction when processed
+```
+
+Key components:
+- **Base Label** ("stored-object"): Identifies issues managed by gh-store
+- **UID Label** ("UID:{object-id}"): Uniquely identifies each stored object
+- **Issue Body**: Contains the current state as JSON
+- **Comments**: Store update history
+- **Reactions**: Track processed updates (👍)
+
+### 2. Update Process
+
+When updating an object:
+1. New update is added as a comment with JSON changes
+2. Issue is reopened to trigger processing
+3. GitHub Actions workflow processes updates:
+   - Gets all unprocessed comments (no 👍 reaction)
+   - Applies updates in chronological order
+   - Adds 👍 reaction to mark comments as processed
+   - Updates issue body with new state
+   - Closes issue when complete
+
+### 3. Core Components
+
+- **GitHubStore**: Main interface for CRUD operations
+- **IssueHandler**: Manages GitHub Issue operations
+- **CommentHandler**: Processes update comments
+
+## GitHub Actions Integration
+
+### Process Updates
+
+```yaml
+# .github/workflows/process_update.yml
+name: Process Updates
+
+on:
+  issues:
+    types: [reopened]
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'stored-object')
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Process Updates
+        run: |
+          gh-store process-updates \
+            --issue ${{ github.event.issue.number }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }}
+```
+
+### Create Snapshots
+
+```yaml
+# .github/workflows/snapshot.yml
+name: Snapshot
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Snapshot
+        run: |
+          gh-store snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --output data/store-snapshot.json
+```
+
+## CLI Commands
+
+```bash
+# Process updates for an issue
+gh-store process-updates \
+  --issue <issue-number> \
+  --token <github-token> \
+  --repo <owner/repo>
+
+# Create snapshot
+gh-store snapshot \
+  --token <github-token> \
+  --repo <owner/repo> \
+  --output <path>
+
+# Update existing snapshot
+gh-store update-snapshot \
+  --token <github-token> \
+  --repo <owner/repo> \
+  --snapshot-path <path>
+```
+
+# Configuration
+
+A default configuration is automatically created at `~/.config/gh-store/config.yml` when first using the tool. You can customize this file or specify a different config location:
+
+```python
+store = GitHubStore(
+    token="github-token",
+    repo="username/repository",
+    config_path=Path("custom_config.yml")
+)
+```
+
+Default configuration:
+
+```yaml
+# gh_store/default_config.yml
+
+store:
+  # Base label for all stored objects
+  base_label: "stored-object"
+  
+  # Prefix for unique identifier labels
+  uid_prefix: "UID:"
+  
+  # Reaction settings
+  # Limited to: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"]
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  
+  # Retry settings for GitHub API calls
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+    
+  # Rate limiting
+  rate_limit:
+    max_requests_per_hour: 1000
+    
+  # Logging
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+```
+
+## Object History
+
+Each object maintains a complete history from its initial state through all updates:
+
+```python
+# Get object history
+history = store.issue_handler.get_object_history("metrics")
+
+# History includes initial state and all updates
+for entry in history:
+    print(f"[{entry['timestamp']}] {entry['type']}")
+    print(f"Data: {entry['data']}")
+```
+
+The history includes:
+- Initial state with timestamp and data
+- All updates in chronological order
+- Each entry's comment ID for reference
+
+History is tracked through:
+- Initial state comment marked with 🚀
+- Update comments marked with 👍 when processed
+- All changes preserved in chronological order
+
+## Limitations
+
+- Not suitable for high volume or high velocity (GitHub API limits)
+  - Unique objects per store is limited only by the number of unique issues and labels
+  - Per experimentation by SO users, github supports at least 10k+ unique labels within a single repo
+  - Even if this is theoretically unbounded, it is inadvisable to use this system if you plan to store more than 10k+ items
+  - As concrete examples of undocumented github api limitations:
+    - There is no limit to the number of repos a single user may star, but above 7k stars the native github frontend breaks
+    - There is no limit to the number of stars that can be added to a single star list, but above 3k stars the number of pages exceeds 100, and newly added stars after the 3000th member of the list will not be retrievable via the star list endpoint.
+- Objects limited to Issue size (~65KB)
+  - Github supports 10MB attachments to issues/comments, so limited future blob support is feasible
+- Updates processed asynchronously via GitHub Actions
+- Sensitive data that should not be publicly visible
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Type checking & linting
+mypy .
+ruff check .
+```
+
+## License
+
+MIT License - see [LICENSE](LICENSE)
+
+
+
+---
+File: gh_store/__init__.py
+---
+
+
+
+
+---
+File: gh_store/__main__.py
+---
+# gh_store/__main__.py
+import os
+from pathlib import Path
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import importlib.resources
+import shutil
+import fire
+from loguru import logger
+
+from .core.store import GitHubStore
+from .core.exceptions import GitHubStoreError, ConfigurationError
+
+def ensure_config_exists(config_path: Path) -> None:
+    """Create default config file if it doesn't exist"""
+    if not config_path.exists():
+        logger.info(f"Creating default configuration at {config_path}")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Copy default config from package
+        with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as src:
+            with open(config_path, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+        
+        logger.info("Default configuration created. You can modify it at any time.")
+
+class CLI:
+    """GitHub Issue Store CLI"""
+    
+    def __init__(self):
+        """Initialize CLI with default config path"""
+        self.default_config_path = Path.home() / ".config" / "gh-store" / "config.yml"
+    
+    def process_updates(
+        self,
+        issue: int,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Process pending updates for a stored object"""
+        try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
+            logger.info(f"Processing updates for issue #{issue}")
+            
+            store = GitHubStore(token=token, repo=repo, config_path=config_path)
+            obj = store.process_updates(issue)
+            
+            logger.info(f"Successfully processed updates for {obj.meta.object_id}")
+            
+        except GitHubStoreError as e:
+            logger.error(f"Failed to process updates: {e}")
+            raise SystemExit(1)
+        except Exception as e:
+            logger.exception("Unexpected error occurred")
+            raise SystemExit(1)
+
+    def snapshot(
+        self,
+        token: str | None = None,
+        repo: str | None = None,
+        output: str = "snapshot.json",
+        config: str | None = None,
+    ) -> None:
+        """Create a full snapshot of all objects in the store"""
+        try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
+            store = GitHubStore(token=token, repo=repo, config_path=config_path)
+            
+            # Get all stored objects
+            objects = store.list_all()
+            
+            # Create snapshot data
+            snapshot_data = {
+                "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
+                "repository": repo,
+                "objects": {
+                    obj_id: {
+                        "data": obj.data,
+                        "meta": {
+                            "created_at": obj.meta.created_at.isoformat(),
+                            "updated_at": obj.meta.updated_at.isoformat(),
+                            "version": obj.meta.version
+                        }
+                    }
+                    for obj_id, obj in objects.items()
+                }
+            }
+            
+            # Write to file
+            output_path = Path(output)
+            output_path.write_text(json.dumps(snapshot_data, indent=2))
+            logger.info(f"Snapshot written to {output_path}")
+            logger.info(f"Captured {len(objects)} objects")
+            
+        except GitHubStoreError as e:
+            logger.error(f"Failed to create snapshot: {e}")
+            raise SystemExit(1)
+        except Exception as e:
+            logger.exception("Unexpected error occurred")
+            raise SystemExit(1)
+
+    def update_snapshot(
+        self,
+        snapshot_path: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Update an existing snapshot with changes since its creation"""
+        try:
+            token = token or os.environ["GITHUB_TOKEN"]
+            repo = repo or os.environ["GITHUB_REPOSITORY"]
+            
+            # Use provided config path or default
+            config_path = Path(config) if config else self.default_config_path
+            
+            # Ensure config exists
+            ensure_config_exists(config_path)
+            
+            # Read existing snapshot
+            snapshot_path = Path(snapshot_path)
+            if not snapshot_path.exists():
+                raise FileNotFoundError(f"Snapshot file not found: {snapshot_path}")
+            
+            with open(snapshot_path) as f:
+                snapshot_data = json.load(f)
+            
+            # Parse snapshot timestamp
+            last_snapshot = datetime.fromisoformat(snapshot_data["snapshot_time"])
+            logger.info(f"Updating snapshot from {last_snapshot}")
+            
+            # Get updated objects
+            store = GitHubStore(token=token, repo=repo, config_path=config_path)
+            updated_objects = store.list_updated_since(last_snapshot)
+            
+            if not updated_objects:
+                logger.info("No updates found since last snapshot")
+                return
+            
+            # Update snapshot data
+            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat() # should probably use latest object updated time here
+            for obj_id, obj in updated_objects.items():
+                snapshot_data["objects"][obj_id] = {
+                    "data": obj.data,
+                    "meta": {
+                        "created_at": obj.meta.created_at.isoformat(),
+                        "updated_at": obj.meta.updated_at.isoformat(),
+                        "version": obj.meta.version
+                    }
+                }
+            
+            # Write updated snapshot
+            snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+            logger.info(f"Updated {len(updated_objects)} objects in snapshot")
+            
+        except GitHubStoreError as e:
+            logger.error(f"Failed to update snapshot: {e}")
+            raise SystemExit(1)
+        except Exception as e:
+            logger.exception("Unexpected error occurred")
+            raise SystemExit(1)
+
+    def init(self, config: str | None = None) -> None:
+        """Initialize a new configuration file"""
+        try:
+            config_path = Path(config) if config else self.default_config_path
+            
+            if config_path.exists():
+                logger.warning(f"Configuration file already exists at {config_path}")
+                return
+            
+            ensure_config_exists(config_path)
+            logger.info(f"Configuration initialized at {config_path}")
+            
+        except Exception as e:
+            logger.exception("Failed to initialize configuration")
+            raise SystemExit(1)
+
+def main():
+    fire.Fire(CLI)
+
+if __name__ == "__main__":
+    main()
+
+
+
+---
+File: gh_store/core/access.py
+---
+# gh_store/core/access.py
+
+from typing import TypedDict, Set
+from pathlib import Path
+import re
+from github import Repository, Issue, IssueComment, GithubException
+from loguru import logger
+
+class UserInfo(TypedDict):
+    login: str
+    type: str
+
+class AccessControl:
+    """Handles access control validation for GitHub store operations"""
+    
+    CODEOWNERS_PATHS = [
+        '.github/CODEOWNERS',
+        'docs/CODEOWNERS',
+        'CODEOWNERS'
+    ]
+    
+    def __init__(self, repo: Repository.Repository):
+        self.repo = repo
+        self._owner_info: UserInfo | None = None
+        self._codeowners: Set[str] | None = None
+
+    def _get_owner_info(self) -> UserInfo:
+        """Get repository owner information, caching the result"""
+        if not self._owner_info:
+            #owner = self.repo._owner
+            owner = self.repo.owner
+            # PyGithub returns ValuedAttribute objects, so we need to get their values
+            self._owner_info = {
+                'login': str(owner.login),  # Convert to string to ensure we have a plain value
+                'type': str(owner.type)
+            }
+        return self._owner_info
+
+    def _get_codeowners(self) -> Set[str]:
+        """Parse CODEOWNERS file and extract authorized users"""
+        if self._codeowners is not None:
+            return self._codeowners
+
+        content = self._find_codeowners_file()
+        if not content:
+            return set()
+
+        self._codeowners = self._parse_codeowners_content(content)
+        return self._codeowners
+    
+    def _find_codeowners_file(self) -> str | None:
+        """Find and read the CODEOWNERS file content"""
+        for path in self.CODEOWNERS_PATHS:
+            try:
+                content = self.repo.get_contents(path)
+                if content:
+                    return content.decoded_content.decode('utf-8')
+            except GithubException:
+                logger.debug(f"No CODEOWNERS found at {path}")
+        return None
+    
+    def _parse_codeowners_content(self, content: str) -> Set[str]:
+        """Parse CODEOWNERS content and extract authorized users"""
+        codeowners = set()
+        
+        for line in content.splitlines():
+            if self._should_skip_line(line):
+                continue
+                
+            codeowners.update(self._extract_users_from_line(line))
+                
+        return codeowners
+    
+    def _should_skip_line(self, line: str) -> bool:
+        """Check if line should be skipped (empty or comment)"""
+        line = line.strip()
+        return not line or line.startswith('#')
+    
+    def _extract_users_from_line(self, line: str) -> Set[str]:
+        """Extract user and team names from a CODEOWNERS line"""
+        users = set()
+        parts = line.split()
+        
+        # Skip the path (first element)
+        for part in parts[1:]:
+            if part.startswith('@'):
+                owner = part[1:]  # Remove @ prefix
+                if '/' in owner:
+                    # Handle team syntax (@org/team)
+                    users.update(self._get_team_members(owner))
+                else:
+                    users.add(owner)
+                    
+        return users
+    
+    def _get_team_members(self, team_spec: str) -> Set[str]:
+        """Get members of a team from GitHub API"""
+        try:
+            org, team = team_spec.split('/')
+            team_obj = self.repo.organization.get_team_by_slug(team)
+            return {member.login for member in team_obj.get_members()}
+        except Exception as e:
+            logger.warning(f"Failed to fetch team members for {team_spec}: {e}")
+            return set()
+
+    def _is_authorized(self, username: str | None) -> bool:
+        """Check if a user is authorized (owner or in CODEOWNERS)"""
+        if not username:
+            return False
+            
+        # Repository owner is always authorized
+        owner = self._get_owner_info()
+        if username == owner['login']:
+            return True
+            
+        # Check CODEOWNERS
+        codeowners = self._get_codeowners()
+        return username in codeowners
+
+    def validate_issue_creator(self, issue: Issue.Issue) -> bool:
+        """Check if issue was created by authorized user"""
+        creator = issue.user.login if issue.user else None
+        
+        if not self._is_authorized(creator):
+            logger.warning(
+                f"Unauthorized creator for issue #{issue.number}: {creator}"
+            )
+            return False
+            
+        return True
+
+    def validate_comment_author(self, comment: IssueComment.IssueComment) -> bool:
+        """Check if comment was created by authorized user"""
+        author = comment.user.login if comment.user else None
+        
+        if not self._is_authorized(author):
+            logger.warning(
+                f"Unauthorized author for comment {comment.id}: {author}"
+            )
+            return False
+            
+        return True
+
+    def clear_cache(self) -> None:
+        """Clear cached owner and CODEOWNERS information"""
+        self._owner_info = None
+        self._codeowners = None
+
+
+
+---
+File: gh_store/core/exceptions.py
+---
+# gh_store/core/exceptions.py
+
+class GitHubStoreError(Exception):
+    """Base exception for GitHub store errors"""
+    pass
+
+class ObjectNotFound(GitHubStoreError):
+    """Raised when attempting to access a non-existent object"""
+    pass
+
+class InvalidUpdate(GitHubStoreError):
+    """Raised when an update comment contains invalid JSON or schema"""
+    pass
+
+class ConcurrentUpdateError(GitHubStoreError):
+    """Raised when concurrent updates are detected"""
+    pass
+
+class ConfigurationError(GitHubStoreError):
+    """Raised when there's an error in the store configuration"""
+    pass
+
+class DuplicateUIDError(GitHubStoreError):
+    """Raised when multiple issues have the same UID label"""
+    pass
+
+class AccessDeniedError(GitHubStoreError):
+    pass
+
+
+
+---
+File: gh_store/core/store.py
+---
+# gh_store/core/store.py
+
+from datetime import datetime
+from pathlib import Path
+import importlib.resources
+
+from loguru import logger
+from github import Github
+from omegaconf import OmegaConf
+
+from ..core.access import AccessControl
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
+from .types import StoredObject, Update, Json
+from ..handlers.issue import IssueHandler
+from ..handlers.comment import CommentHandler
+
+
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
+
+class GitHubStore:
+    """Interface for storing and retrieving objects using GitHub Issues"""
+    
+    def __init__(self, token: str, repo: str, config_path: Path | None = None):
+        """Initialize the store with GitHub credentials and optional config"""
+        self.gh = Github(token)
+        self.repo = self.gh.get_repo(repo)
+        self.access_control = AccessControl(self.repo)
+        
+        config_path = config_path or DEFAULT_CONFIG_PATH
+        if not config_path.exists():
+            # If default config doesn't exist, but we have a packaged default, use that
+            if config_path == DEFAULT_CONFIG_PATH:
+                with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as f:
+                    self.config = OmegaConf.load(f)
+            else:
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+        else:
+            self.config = OmegaConf.load(config_path)
+        
+        self.issue_handler = IssueHandler(self.repo, self.config)
+        self.comment_handler = CommentHandler(self.repo, self.config)
+        
+        logger.info(f"Initialized GitHub store for repository: {repo}")
+
+    def create(self, object_id: str, data: Json) -> StoredObject:
+        """Create a new object in the store"""
+        return self.issue_handler.create_object(object_id, data)
+
+    def get(self, object_id: str) -> StoredObject:
+        """Retrieve an object from the store"""
+        return self.issue_handler.get_object(object_id)
+
+    def update(self, object_id: str, changes: Json) -> StoredObject:
+        # Check if object is already being processed
+        issues = list(self.repo.get_issues(
+            labels=[self.config.store.base_label, object_id],
+            state="open"
+        ))
+        
+        if issues:
+            raise ConcurrentUpdateError(f"Object {object_id} is currently being processed")
+        """Update an existing object"""
+        return self.issue_handler.update_object(object_id, changes)
+
+    def delete(self, object_id: str) -> None:
+        """Delete an object from the store"""
+        self.issue_handler.delete_object(object_id)
+        
+    def process_updates(self, issue_number: int) -> StoredObject:
+        """Process any unhandled updates on an issue"""
+        logger.info(f"Processing updates for issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        if not self.access_control.validate_issue_creator(issue):
+            raise AccessDeniedError(
+                "Updates can only be processed for issues created by "  # Updated message
+                "repository owner or authorized CODEOWNERS"
+            )
+        
+        # Get all unprocessed comments - this handles comment-level auth
+        updates = self.comment_handler.get_unprocessed_updates(issue_number)
+        
+        # Apply updates in sequence
+        obj = self.issue_handler.get_object_by_number(issue_number)
+        for update in updates:
+            obj = self.comment_handler.apply_update(obj, update)
+        
+        # Persist final state and mark comments as processed
+        self.issue_handler.update_issue_body(issue_number, obj)
+        self.comment_handler.mark_processed(issue_number, updates)
+        
+        return obj
+    
+    def list_all(self) -> dict[str, StoredObject]:
+        """List all objects in the store, indexed by object ID"""
+        logger.info("Fetching all stored objects")
+        
+        # Get all closed issues with base label
+        issues = list(self.repo.get_issues(
+            state="closed",
+            labels=[self.config.store.base_label]
+        ))
+        
+        objects = {}
+        for issue in issues:
+            # Skip archived objects
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+                
+            try:
+                # Get object ID from labels
+                object_id = self.issue_handler.get_object_id_from_labels(issue)
+                
+                # Load object
+                obj = self.issue_handler.get_object_by_number(issue.number)
+                objects[object_id] = obj
+                
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {len(objects)} stored objects")
+        return objects
+    
+    def list_updated_since(self, timestamp: datetime) -> dict[str, StoredObject]:
+        """List objects updated since given timestamp"""
+        logger.info(f"Fetching objects updated since {timestamp}")
+        
+        # Get all objects with base label that are closed
+        issues = list(self.repo.get_issues(
+            state="closed",
+            labels=[self.config.store.base_label],
+            since=timestamp  # GitHub API's since parameter
+        ))
+        
+        objects = {}
+        for issue in issues:
+            # Skip archived objects
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+                
+            try:
+                # Get object ID from labels - strip prefix to get bare ID
+                object_id = self.issue_handler.get_object_id_from_labels(issue)
+                
+                # Load object
+                obj = self.issue_handler.get_object_by_number(issue.number)
+                
+                # Double check the timestamp (since GitHub's since parameter includes issue comments)
+                if obj.meta.updated_at > timestamp:
+                    objects[object_id] = obj
+                
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {len(objects)} updated objects")
+        return objects
+
+
+
+---
+File: gh_store/core/types.py
+---
+# gh_store/core/types.py
+
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import TypeAlias
+
+Json: TypeAlias = dict[str, "Json"] | list["Json"] | str | int | float | bool | None
+
+@dataclass
+class ObjectMeta:
+    """Metadata for a stored object"""
+    object_id: str
+    label: str
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+@dataclass
+class StoredObject:
+    """An object stored in the GitHub Issues store"""
+    meta: ObjectMeta
+    data: Json
+
+@dataclass
+class Update:
+    """An update to be applied to a stored object"""
+    comment_id: int
+    timestamp: datetime
+    changes: Json
+
+@dataclass
+class CommentMeta:
+    """Metadata included with each comment"""
+    client_version: str
+    timestamp: str
+    update_mode: str
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
+
+@dataclass
+class CommentPayload:
+    """Full comment payload structure"""
+    _data: Json
+    _meta: CommentMeta
+    type: str | None = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "_data": self._data,
+            "_meta": self._meta.to_dict(),
+            **({"type": self.type} if self.type is not None else {})
+        }
+
+
+
+---
+File: gh_store/core/version.py
+---
+# gh_store/core/version.py
+import importlib.metadata
+import os
+from pathlib import Path
+
+def get_version() -> str:
+    """Get version from pyproject.toml metadata or fallback to manual version"""
+    try:
+        return importlib.metadata.version("gh-store")
+    except importlib.metadata.PackageNotFoundError:
+        # During development, read directly from pyproject.toml
+        root_dir = Path(__file__).parent.parent.parent
+        pyproject_path = root_dir / "pyproject.toml"
+        
+        if pyproject_path.exists():
+            import tomli
+            with open(pyproject_path, "rb") as f:
+                pyproject = tomli.load(f)
+                return pyproject["project"]["version"]
+        
+        return "0.5.1"  # Fallback version
+
+__version__ = get_version()
+CLIENT_VERSION = __version__
+
+
+
+---
+File: gh_store/default_config.yml
+---
+# gh_store/default_config.yml
+
+store:
+  # Base label for all stored objects
+  base_label: "stored-object"
+  
+  # Prefix for unique identifier labels
+  uid_prefix: "UID:"
+  
+  # Reaction settings
+  # Limited to: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"]
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  
+  # Retry settings for GitHub API calls
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+    
+  # Rate limiting
+  rate_limit:
+    max_requests_per_hour: 1000
+    
+  # Logging
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+
+
+
+---
+File: gh_store/handlers/comment.py
+---
+# gh_store/handlers/comment.py
+
+import json
+from typing import Sequence
+from datetime import datetime, timezone
+from loguru import logger
+from github import Repository, IssueComment
+from omegaconf import DictConfig
+
+from ..core.types import StoredObject, Update, CommentPayload, CommentMeta
+from ..core.exceptions import InvalidUpdate
+from ..core.access import AccessControl
+from ..core.version import CLIENT_VERSION
+
+class CommentHandler:
+    """Handles processing of update comments"""
+    
+    def __init__(self, repo: Repository.Repository, config: DictConfig):
+        self.repo = repo
+        self.config = config
+        self.processed_reaction = config.store.reactions.processed
+        self.initial_state_reaction = config.store.reactions.initial_state
+        self.access_control = AccessControl(repo)
+
+    def _validate_metadata(self, metadata: dict) -> bool:
+        """Validate that metadata contains all required fields"""
+        return all(
+            key in metadata and metadata[key] is not None
+            for key in ['client_version', 'timestamp', 'update_mode']
+        )
+
+    def get_unprocessed_updates(self, issue_number: int) -> list[Update]:
+        """Get all unprocessed updates from issue comments"""
+        logger.info(f"Fetching unprocessed updates for issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        updates = []
+        
+        for comment in issue.get_comments():
+            if self._is_processed(comment):
+                continue
+                
+            try:
+                comment_payload = json.loads(comment.body)
+                
+                # Handle old format comments (backwards compatibility)
+                if not isinstance(comment_payload, dict) or ('_data' not in comment_payload):
+                    comment_payload = {
+                        '_data': comment_payload,
+                        '_meta': {
+                            'client_version': 'legacy',
+                            'timestamp': comment.created_at.isoformat(),
+                            'update_mode': 'append'
+                        }
+                    }
+                elif not self._validate_metadata(comment_payload.get('_meta', {})):
+                    logger.warning(f"Skipping comment {comment.id} due to invalid metadata")
+                    continue
+
+                # Skip initial state comments
+                if comment_payload.get('type') == 'initial_state':
+                    logger.debug(f"Skipping initial state comment {comment.id}")
+                    continue
+                    
+                # Skip comments from unauthorized users
+                if not self.access_control.validate_comment_author(comment):
+                    logger.debug(f"Skipping unauthorized comment {comment.id}")
+                    continue
+                    
+                updates.append(Update(
+                    comment_id=comment.id,
+                    timestamp=comment.created_at,
+                    changes=comment_payload['_data']
+                ))
+            except json.JSONDecodeError:
+                # Not JSON, skip it
+                logger.debug(f"Skipping non-JSON comment {comment.id}")
+                continue
+            except KeyError as e:
+                logger.warning(f"Malformed comment payload in {comment.id}: {e}")
+                continue
+        
+        return sorted(updates, key=lambda u: u.timestamp)
+
+    def apply_update(self, obj: StoredObject, update: Update) -> StoredObject:
+        """Apply an update to an object"""
+        logger.info(f"Applying update {update.comment_id} to {obj.meta.object_id}")
+        
+        # Deep merge the changes into the existing data
+        updated_data = self._deep_merge(obj.data, update.changes)
+        
+        # Create new object with updated data and incremented version
+        return StoredObject(
+            meta=obj.meta,
+            data=updated_data
+        )
+
+    def mark_processed(
+        self, 
+        issue_number: int,
+        updates: Sequence[Update]
+    ) -> None:
+        """Mark comments as processed by adding reactions"""
+        logger.info(f"Marking {len(updates)} comments as processed")
+        
+        issue = self.repo.get_issue(issue_number)
+        
+        for update in updates:
+            for comment in issue.get_comments():
+                if comment.id == update.comment_id:
+                    comment.create_reaction(self.processed_reaction)
+                    break
+
+    def create_comment_payload(self, data: dict, comment_type: str | None = None) -> CommentPayload:
+        """Create a properly structured comment payload"""
+        meta = CommentMeta(
+            client_version=CLIENT_VERSION,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            update_mode="append"
+        )
+        
+        return CommentPayload(
+            _data=data,
+            _meta=meta,
+            type=comment_type
+        )
+
+    def _is_processed(self, comment: IssueComment.IssueComment) -> bool:
+        """Check if a comment has been processed"""
+        for reaction in comment.get_reactions():
+            if reaction.content == self.processed_reaction:
+                return True
+        return False
+
+    def _deep_merge(self, base: dict, update: dict) -> dict:
+        """Deep merge two dictionaries"""
+        result = base.copy()
+        
+        for key, value in update.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+                
+        return result
+
+
+
+---
+File: gh_store/handlers/issue.py
+---
+# gh_store/handlers/issue.py
+
+import json
+from datetime import datetime, timezone
+from loguru import logger
+from github import Repository
+from omegaconf import DictConfig
+
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
+from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.version import CLIENT_VERSION
+
+from time import sleep
+from github.GithubException import RateLimitExceededException
+
+class IssueHandler:
+    """Handles GitHub Issue operations for stored objects"""
+    
+    def __init__(self, repo: Repository.Repository, config: DictConfig):
+        self.repo = repo
+        self.config = config
+        self.base_label = config.store.base_label
+        self.uid_prefix = config.store.uid_prefix
+    
+    def create_object(self, object_id: str, data: Json) -> StoredObject:
+        """Create a new issue to store an object"""
+        logger.info(f"Creating new object: {object_id}")
+        
+        # Create uid label with prefix
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
+        # Ensure required labels exist
+        self._ensure_labels_exist([self.base_label, uid_label])
+        
+        # Create issue with object data and both required labels
+        issue = self.repo.create_issue(
+            title=f"Stored Object: {object_id}",
+            body=json.dumps(data, indent=2),
+            labels=[self.base_label, uid_label]
+        )
+        
+        # Create initial state comment with metadata
+        initial_state_comment = CommentPayload(
+            _data=data,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
+            type='initial_state'
+        )
+        
+        comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
+        
+        # Mark as processed to prevent update processing
+        comment.create_reaction(self.config.store.reactions.processed)
+        comment.create_reaction(self.config.store.reactions.initial_state)
+        
+        # Create metadata
+        meta = ObjectMeta(
+            object_id=object_id,
+            label=uid_label,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            version=1
+        )
+        
+        # Close issue immediately to indicate no processing needed
+        issue.edit(state="closed")
+        
+        return StoredObject(meta=meta, data=data)
+
+    def _ensure_labels_exist(self, labels: list[str]) -> None:
+        """Create labels if they don't exist"""
+        existing_labels = {label.name for label in self.repo.get_labels()}
+        
+        for label in labels:
+            if label not in existing_labels:
+                logger.info(f"Creating label: {label}")
+                self.repo.create_label(
+                    name=label,
+                    color="0366d6"  # GitHub's default blue
+                )
+
+    def _with_retry(self, func, *args, **kwargs):
+        """Execute a function with retries on rate limit"""
+        max_attempts = self.config.store.retries.max_attempts
+        backoff = self.config.store.retries.backoff_factor
+        
+        for attempt in range(max_attempts):
+            try:
+                return func(*args, **kwargs)
+            except RateLimitExceededException:
+                if attempt == max_attempts - 1:
+                    raise
+                sleep(backoff ** attempt)
+        
+        raise RuntimeError("Should not reach here")
+
+    def get_object(self, object_id: str) -> StoredObject:
+        """Retrieve an object by its ID"""
+        logger.info(f"Retrieving object: {object_id}")
+        
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
+        # Query for issue with matching labels
+        issues = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[self.base_label, uid_label],
+            state="closed"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        elif len(issues) > 1:
+            issue_numbers = [i.number for i in issues]
+            raise DuplicateUIDError(
+                f"Found multiple issues ({issue_numbers}) with label: {uid_label}"
+            )
+        
+        issue = issues[0]
+        data = json.loads(issue.body)
+        
+        meta = ObjectMeta(
+            object_id=object_id,
+            label=uid_label,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            version=self._get_version(issue)
+        )
+        
+        return StoredObject(meta=meta, data=data)
+
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object, including initial state"""
+        logger.info(f"Retrieving history for object: {object_id}")
+        
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
+        # Query for issue with matching labels
+        issues = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[self.base_label, uid_label],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+            
+        issue = issues[0]
+        history = []
+        
+        # Process all comments chronologically
+        for comment in issue.get_comments():
+            try:
+                comment_data = json.loads(comment.body)
+                
+                # Handle old format comments (backwards compatibility)
+                if isinstance(comment_data, dict) and 'type' in comment_data and comment_data['type'] == 'initial_state':
+                    # Old initial state format
+                    comment_type = 'initial_state'
+                    data = comment_data['data']
+                elif isinstance(comment_data, dict) and '_data' in comment_data:
+                    # New format
+                    comment_type = comment_data.get('type', 'update')
+                    data = comment_data['_data']
+                else:
+                    # Legacy update format (raw data)
+                    comment_type = 'update'
+                    data = comment_data
+
+                # Build metadata
+                if isinstance(comment_data, dict) and '_meta' in comment_data:
+                    metadata = comment_data['_meta']
+                else:
+                    metadata = {
+                        'client_version': 'legacy',
+                        'timestamp': comment.created_at.isoformat(),
+                        'update_mode': 'append'
+                    }
+                
+                history.append({
+                    "timestamp": comment.created_at.isoformat(),
+                    "type": comment_type,
+                    "data": data,
+                    "comment_id": comment.id,
+                    "metadata": metadata
+                })
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Skipping comment {comment.id}: {e}")
+                
+        return history
+    
+    def get_object_id_from_labels(self, issue) -> str:
+        """
+        Extract bare object ID from issue labels, removing any prefix.
+        
+        Args:
+            issue: GitHub issue object with labels attribute
+            
+        Returns:
+            str: Object ID without prefix
+            
+        Raises:
+            ValueError: If no matching label is found
+        """
+        for label in issue.labels:
+            # Get the actual label name, handling both string and Mock objects
+            label_name = getattr(label, 'name', label)
+            
+            if (label_name != self.base_label and 
+                isinstance(label_name, str) and 
+                label_name.startswith(self.uid_prefix)):
+                return label_name[len(self.uid_prefix):]
+                
+        raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
+        
+    def get_object_by_number(self, issue_number: int) -> StoredObject:
+        """Retrieve an object by issue number"""
+        logger.info(f"Retrieving object by issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        object_id = self.get_object_id_from_labels(issue)
+        data = json.loads(issue.body)
+        
+        meta = ObjectMeta(
+            object_id=object_id,
+            label=object_id,
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            version=self._get_version(issue)
+        )
+        
+        return StoredObject(meta=meta, data=data)
+
+    def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
+        """Update the issue body with new object state"""
+        logger.info(f"Updating issue #{issue_number} with new state")
+        
+        issue = self.repo.get_issue(issue_number)
+        issue.edit(
+            body=json.dumps(obj.data, indent=2),
+            state="closed"
+        )
+
+    def update_object(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an object by adding a comment and reopening the issue"""
+        logger.info(f"Updating object: {object_id}")
+        
+        # Get the object's issue
+        issues = list(self.repo.get_issues(
+            labels=[self.base_label, object_id],
+            state="closed"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        issue = issues[0]
+        
+        # Create update payload with metadata
+        update_payload = CommentPayload(
+            _data=changes,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            ),
+            type=None
+        )
+        
+        # Add update comment
+        issue.create_comment(json.dumps(update_payload.to_dict(), indent=2))
+        
+        # Reopen issue to trigger processing
+        issue.edit(state="open")
+        
+        # Return current state
+        return self.get_object(object_id)
+    
+    def delete_object(self, object_id: str) -> None:
+        """Delete an object by closing and archiving its issue"""
+        logger.info(f"Deleting object: {object_id}")
+        
+        issues = list(self.repo.get_issues(
+            labels=[self.base_label, object_id],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        issue = issues[0]
+        issue.edit(
+            state="closed",
+            labels=["archived", self.base_label, object_id]
+        )
+
+    def _get_version(self, issue) -> int:
+        """Extract version number from issue"""
+        comments = list(issue.get_comments())
+        return len(comments) + 1
+
+
+
+---
+File: pyproject.toml
+---
+[project]
+name = "gh-store"
+version = "0.6.2"
+description = "A lightweight data store using GitHub Issues as a backend"
+authors = [
+    {name = "David Marx", email = "david.marx84@gmail.com"},
+]
+dependencies = [
+    "PyGithub>=2.1.1",
+    "fire>=0.5.0",
+    "loguru>=0.7.2",
+    "omegaconf>=2.3.0",
+    "pyyaml>=6.0.1",
+]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.scripts]
+gh-store = "gh_store.__main__:main"
+
+# [tool.hatch.build]
+# include = [
+#     "gh_store/default_config.yml",
+# ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.8.0",
+    "ruff>=0.1.9",
+    "black>=23.12.0",
+    "isort>=5.13.0",
+    "fastapi>=0.109.0",  # For mock GitHub API
+    "uvicorn>=0.27.0",   # For mock GitHub API
+    "httpx>=0.26.0",     # For async HTTP client
+]
+
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=gh_store --cov-report=term-missing -vvv"
+asyncio_mode = "auto"
+markers = [
+    "integration: marks tests as integration tests",
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+
+[tool.ruff]
+select = ["E", "F", "B", "I"]
+ignore = ["E501"]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["F841"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+##########
+
+# llamero stuff
+
+[tool.summary]
+max_file_size_kb = 500
+
+exclude_patterns = [
+    '.git',
+    '.gitignore',
+    '.pytest_cache',
+    '__pycache__',
+    'SUMMARY',
+    '.coverage',
+    '.env',
+    '.venv',
+    '.idea',
+    '.vscode',
+    '.bundle.js',
+    '.bundle.ts'
+]
+
+include_extensions = [
+    '.py',
+    '.md',
+    '.txt',
+    '.yml',
+    '.yaml',
+    '.toml',
+    '.json',
+    '.html',
+    '.css',
+    '.js',
+    '.ts',
+    '.tsx',
+    '.j2'
+]
+
+exclude_directories = [
+    '.git',
+    '__pycache__',
+    '.pytest_cache',
+    '.venv',
+    '.idea',
+    '.vscode',
+    'data'
+]
+
+
+
+---
+File: requirements.txt
+---
+PyGithub>=2.1.1
+fire>=0.5.0
+loguru>=0.7.2
+omegaconf>=2.3.0
+pyyaml>=6.0.1
+
+
+
+---
+File: tests/unit/conftest.py
+---
+# tests/unit/conftest.py
+"""Pytest configuration and shared fixtures for gh-store unit tests."""
+
+# Re-export all fixtures to make them available to tests
+from tests.unit.fixtures.config import *
+from tests.unit.fixtures.github import *
+from tests.unit.fixtures.cli import *
+from tests.unit.fixtures.store import *
+
+
+
+---
+File: tests/unit/fixtures/__init__.py
+---
+
+
+
+
+---
+File: tests/unit/fixtures/cli.py
+---
+# tests/unit/fixtures/cli.py
+"""CLI-specific fixtures for gh-store unit tests."""
+
+import os
+import sys
+import logging
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+import pytest
+from unittest.mock import Mock, patch
+from loguru import logger
+
+from gh_store.__main__ import CLI
+
+@pytest.fixture(autouse=True)
+def cli_env_vars(monkeypatch):
+    """Setup environment variables for CLI testing."""
+    monkeypatch.setenv('GITHUB_TOKEN', 'test-token')
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
+    yield
+
+@pytest.fixture
+def mock_config(tmp_path):
+    """Create a mock config file for testing."""
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "config.yml"
+    
+    # Create default config
+    default_config = """
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+  rate_limit:
+    max_requests_per_hour: 1000
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+"""
+    config_path.write_text(default_config)
+    return config_path
+
+@pytest.fixture
+def mock_gh_repo():
+    """Create a mocked GitHub repo for testing."""
+    mock_repo = Mock()
+    with patch('gh_store.core.store.Github') as MockGithub:
+        # Setup mock repo
+        mock_repo = Mock()
+        mock_repo.get_issue.return_value = Mock(state="closed")
+        mock_repo.get_issues.return_value = []
+        mock_repo.owner = Mock(login="owner", type="User")
+        
+        # Set up mock Github client
+        MockGithub.return_value.get_repo.return_value = mock_repo
+        yield mock_repo
+
+
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        # Try to find caller's module path
+        try:
+            frame = logging.currentframe()
+            depth = 6  # Adjust if needed to find the correct caller
+            while frame and depth > 0:
+                frame = frame.f_back
+                depth -= 1
+            module_path = frame.f_code.co_filename if frame else ""
+            function_name = frame.f_code.co_name if frame else ""
+        except (AttributeError, ValueError):
+            module_path = ""
+            function_name = ""
+
+        # Safely format the message
+        try:
+            msg = self.format(record)
+        except Exception:
+            msg = record.getMessage()
+
+        # Write directly to caplog's handler instead of going through loguru
+        logging.getLogger(record.name).handle(
+            logging.LogRecord(
+                name=record.name,
+                level=record.levelno,
+                pathname=module_path,
+                lineno=record.lineno,
+                msg=msg,
+                args=(),
+                exc_info=record.exc_info,
+                func=function_name
+            )
+        )
+
+# tests/unit/fixtures/cli.py - Update logging setup
+
+@pytest.fixture(autouse=True)
+def setup_loguru(caplog):
+    """Configure loguru for testing with pytest caplog."""
+    # Remove any existing handlers
+    logger.remove()
+    
+    # Set up caplog
+    caplog.set_level(logging.INFO)
+    
+    # Add a test handler that writes directly to caplog
+    def log_to_caplog(message):
+        logging.getLogger().info(message)
+    
+    handler_id = logger.add(log_to_caplog, format="{message}")
+    
+    yield
+    
+    # Cleanup
+    logger.remove(handler_id)
+
+@pytest.fixture
+def mock_cli(mock_config, mock_gh_repo):
+    """Create a CLI instance with mocked dependencies."""
+    with patch('gh_store.__main__.ensure_config_exists') as mock_ensure:
+        cli = CLI()
+        # Mock HOME to point to our test config
+        with patch.dict(os.environ, {'HOME': str(mock_config.parent.parent.parent)}):
+            yield cli
+
+@pytest.fixture
+def mock_store_response():
+    """Mock common GitHubStore responses."""
+    mock_obj = Mock()
+    mock_obj.meta = Mock(
+        object_id="test-123",
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        version=1
+    )
+    mock_obj.data = {"name": "test", "value": 42}
+    return mock_obj
+
+@pytest.fixture
+def mock_stored_objects():
+    """Create mock stored objects for testing."""
+    objects = {}
+    for i in range(1, 3):
+        mock_obj = Mock()
+        mock_obj.meta = Mock(
+            object_id=f"test-obj-{i}",
+            created_at=datetime(2025, 1, i, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, i+1, tzinfo=timezone.utc),
+            version=1
+        )
+        mock_obj.data = {
+            "name": f"test{i}",
+            "value": i * 42
+        }
+        objects[f"test-obj-{i}"] = mock_obj
+    return objects
+
+@pytest.fixture
+def mock_snapshot_file(tmp_path, mock_stored_objects):
+    """Create a mock snapshot file for testing."""
+    snapshot_path = tmp_path / "test_snapshot.json"
+    
+    # Convert objects to serializable format
+    snapshot_data = {
+        "snapshot_time": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
+        "repository": "owner/repo",
+        "objects": {
+            obj_id: {
+                "data": obj.data,
+                "meta": {
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version
+                }
+            }
+            for obj_id, obj in mock_stored_objects.items()
+        }
+    }
+    
+    snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+    return snapshot_path
+
+
+
+---
+File: tests/unit/fixtures/config.py
+---
+# tests/unit/fixtures/config.py
+"""Configuration fixtures for gh-store unit tests."""
+
+from datetime import datetime, timezone
+from pathlib import Path
+import pytest
+from unittest.mock import patch, mock_open
+from omegaconf import OmegaConf
+
+@pytest.fixture
+def default_config():
+    """Create a consistent default config for testing."""
+    return OmegaConf.create({
+        "store": {
+            "base_label": "stored-object",
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",
+                "initial_state": "rocket"
+            },
+            "retries": {
+                "max_attempts": 3,
+                "backoff_factor": 2
+            },
+            "rate_limit": {
+                "max_requests_per_hour": 1000
+            },
+            "log": {
+                "level": "INFO",
+                "format": "{time} | {level} | {message}"
+            }
+        }
+    })
+
+@pytest.fixture(autouse=True)
+def mock_config_file(default_config):
+    """Mock OmegaConf config loading."""
+    with patch('omegaconf.OmegaConf.load', return_value=default_config) as mock_load:
+        yield mock_load
+
+@pytest.fixture
+def test_config_dir(tmp_path: Path) -> Path:
+    """Provide a temporary directory for config files during testing."""
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True)
+    return config_dir
+
+@pytest.fixture
+def test_config_file(test_config_dir: Path, default_config: OmegaConf) -> Path:
+    """Create a test config file with minimal valid content."""
+    config_path = test_config_dir / "config.yml"
+    config_path.write_text(OmegaConf.to_yaml(default_config))
+    return config_path
+
+
+
+---
+File: tests/unit/fixtures/github.py
+---
+# tests/unit/fixtures/github.py
+"""GitHub API mocks for gh-store unit tests."""
+
+from datetime import datetime, timezone
+import json
+from typing import Any, Callable, Literal, TypedDict
+import pytest
+from unittest.mock import Mock, patch
+from github import GithubException
+
+
+@pytest.fixture
+def mock_label_factory():
+    """
+    Create GitHub-style label objects.
+    
+    Example:
+        label = mock_label_factory("enhancement")
+        label = mock_label_factory("bug", "fc2929")
+    """
+    def create_label(name: str, color: str = "0366d6") -> Mock:
+        """
+        Create a mock label with GitHub-like structure.
+        
+        Args:
+            name: Name of the label
+            color: Color hex code without #
+        """
+        label = Mock()
+        label.name = name
+        label.color = color
+        return label
+    
+    return create_label
+
+class CommentMetadata(TypedDict, total=False):
+    """Metadata for comment creation."""
+    client_version: str
+    timestamp: str
+    update_mode: Literal['append', 'replace']
+
+class CommentBody(TypedDict, total=False):
+    """Structure for comment body data."""
+    _data: dict[str, Any]
+    _meta: CommentMetadata
+    type: Literal['initial_state'] | None
+
+@pytest.fixture
+def mock_comment_factory():
+    """
+    Create GitHub comment mocks with standard structure.
+
+    This factory creates mock comment objects that mirror GitHub's API structure,
+    with proper typing and validation for reactions and metadata.
+
+    Args in create_comment:
+        body: Comment body (dict will be JSON serialized)
+        user_login: GitHub username of comment author
+        comment_id: Unique comment ID (auto-generated if None)
+        reactions: List of reaction types or mock reactions
+        created_at: Comment creation timestamp
+        **kwargs: Additional attributes to set on the comment
+
+    Examples:
+        # Basic comment with data
+        comment = mock_comment_factory(
+            body={"value": 42},
+            user_login="owner"
+        )
+
+        # Comment with metadata
+        comment = mock_comment_factory(
+            body={
+                "_data": {"value": 42},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Initial state comment
+        comment = mock_comment_factory(
+            body={
+                "type": "initial_state",
+                "_data": {"initial": "state"},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Comment with reactions
+        comment = mock_comment_factory(
+            body={"value": 42},
+            reactions=["+1", "rocket"]
+        )
+    """
+    def create_comment(
+        body: dict[str, Any] | CommentBody,
+        user_login: str = "repo-owner",
+        comment_id: int | None = None,
+        reactions: list[str | Mock] | None = None,
+        created_at: datetime | None = None,
+        **kwargs
+    ) -> Mock:
+        """Create a mock comment with GitHub-like structure."""
+        # Validate body structure if it's meant to be a CommentBody
+        if isinstance(body, dict) and "_meta" in body:
+            if "update_mode" in body["_meta"] and body["_meta"]["update_mode"] not in ["append", "replace"]:
+                raise ValueError("update_mode must be 'append' or 'replace'")
+            if "type" in body and body["type"] not in [None, "initial_state"]:
+                raise ValueError("type must be None or 'initial_state'")
+
+        comment = Mock()
+        
+        # Set basic attributes
+        comment.id = comment_id or 1
+        comment.body = json.dumps(body)
+        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        
+        # Set up user
+        user = Mock()
+        user.login = user_login
+        comment.user = user
+        
+        # Set up reactions with validation
+        mock_reactions = []
+        if reactions:
+            for reaction in reactions:
+                if isinstance(reaction, Mock):
+                    if not hasattr(reaction, 'content'):
+                        raise ValueError("Mock reaction must have 'content' attribute")
+                    mock_reactions.append(reaction)
+                else:
+                    mock_reaction = Mock()
+                    mock_reaction.content = str(reaction)
+                    mock_reactions.append(mock_reaction)
+        
+        comment.get_reactions = Mock(return_value=mock_reactions)
+        comment.create_reaction = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(comment, key, value)
+        
+        return comment
+    
+    return create_comment
+
+
+mock_comment = mock_comment_factory
+
+
+@pytest.fixture
+def mock_issue_factory(mock_comment_factory, mock_label_factory):
+    """
+    Create GitHub issue mocks with standard structure.
+
+    Examples:
+        # Basic issue
+        issue = mock_issue_factory(
+            body={"test": "data"}
+        )
+
+        # Issue with explicit number
+        issue = mock_issue_factory(
+            number=123,
+            labels=["stored-object", "UID:test-123"]
+        )
+
+        # Issue with comments
+        issue = mock_issue_factory(
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=1
+                )
+            ]
+        )
+    """
+    def create_issue(
+        number: int | None = None,
+        body: dict[str, Any] | str | None = None,
+        labels: list[str] | None = None,
+        comments: list[Mock] | None = None,
+        state: str = "closed",
+        user_login: str = "repo-owner",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock issue with GitHub-like structure.
+
+        Args:
+            number: Issue number (defaults to 1 if not provided)
+            body: Issue body content (dict will be JSON serialized)
+            labels: List of label names to add
+            comments: List of mock comments
+            state: Issue state (open/closed)
+            user_login: GitHub username of issue creator
+            created_at: Issue creation timestamp
+            updated_at: Issue last update timestamp
+            **kwargs: Additional attributes to set
+        """
+        issue = Mock()
+        
+        # Set basic attributes
+        issue.number = number or 1  # Default to 1 if not provided
+        issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
+        issue.state = state
+        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
+        
+        # Set up user
+        user = Mock()
+        user.login = user_login
+        issue.user = user
+        
+        # Set up labels
+        issue_labels = []
+        if labels:
+            for label_name in labels:
+                issue_labels.append(mock_label_factory(label_name))
+        issue.labels = issue_labels
+        
+        # Set up comments
+        mock_comments = list(comments) if comments is not None else []
+        issue.get_comments = Mock(return_value=mock_comments)
+        issue.create_comment = Mock()
+
+        # Set up proper owner permissions
+        repo = Mock()
+        owner = Mock()
+        owner.login = user_login
+        owner.type = "User"
+        repo.owner = owner
+        issue.repository = repo  # Needed for access control checks
+        
+        # Set up issue editing
+        issue.edit = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(issue, key, value)
+        
+        return issue
+    
+    return create_issue
+
+# Keep backward compatibility
+mock_issue = mock_issue_factory
+
+
+@pytest.fixture
+def mock_repo_factory(mock_label_factory):
+    """
+    Create GitHub repository mocks with standard structure.
+    	
+    Note: Creates basic repository structure. Labels, issues, and permissions
+    should be explicitly set up in tests where they matter.
+    """
+    def create_repo(
+        name: str = "owner/repo",
+        owner_login: str = "repo-owner",
+        owner_type: str = "User",
+        labels: list[str] | None = None,
+        issues: list[Mock] | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock repository with GitHub-like structure.
+        Args:
+            name: Repository name in owner/repo format
+            owner_login: Repository owner's login
+            owner_type: Owner type ("User" or "Organization")
+            labels: Initial repository labels
+            issues: Initial repository issues
+            **kwargs: Additional attributes to set
+        """
+        repo = Mock()
+        
+        # Set basic attributes
+        repo.full_name = name
+        
+        # Set up owner - making it more explicit
+        owner = Mock(spec=['login', 'type'])  # Specify expected attributes
+        owner.login = owner_login
+        owner.type = owner_type
+        repo.owner = owner
+        
+        # Set up labels
+        repo_labels = []
+        if labels:
+            repo_labels = [mock_label_factory(name) for name in labels]
+        repo.get_labels = Mock(return_value=repo_labels)
+        
+        # Set up label creation
+        def create_label(name: str, color: str = "0366d6") -> Mock:
+            label = mock_label_factory(name, color)
+            repo_labels.append(label)
+            return label
+        repo.create_label = Mock(side_effect=create_label)
+        
+        # Set up issues
+        repo_issues = issues or []
+        def get_issue(number):
+            matching = [i for i in repo_issues if i.number == number]
+            if matching:
+                return matching[0]
+            mock_issue = Mock()
+            mock_issue.state = "closed"
+            return mock_issue
+        repo.get_issue = Mock(side_effect=get_issue)
+        repo.get_issues = Mock(return_value=repo_issues)
+        
+        # Set up CODEOWNERS handling
+        def get_contents(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                content = Mock()
+                content.decoded_content = f"* @{owner_login}".encode()
+                return content
+            raise GithubException(404, "Not found")
+        repo.get_contents = Mock(side_effect=get_contents)
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(repo, key, value)
+        
+        return repo
+    
+    return create_repo
+
+@pytest.fixture
+def mock_github():
+    """Create a mock Github instance with proper repository structure."""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        # Setup mock repo
+        mock_repo = Mock()
+        
+        # Setup owner
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.owner = owner
+        
+        # Setup labels
+        mock_labels = [Mock(name="stored-object")]
+        mock_repo.get_labels = Mock(return_value=mock_labels)
+        
+        def create_label(name: str, color: str = "0366d6") -> Mock:
+            new_label = Mock(name=name)
+            mock_labels.append(new_label)
+            return new_label
+        mock_repo.create_label = Mock(side_effect=create_label)
+        
+        # Mock CODEOWNERS access
+        mock_content = Mock()
+        mock_content.decoded_content = b"* @repo-owner"
+        def get_contents_side_effect(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                return mock_content
+            raise GithubException(404, "Not found")
+        mock_repo.get_contents = Mock(side_effect=get_contents_side_effect)
+        
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo
+
+
+
+---
+File: tests/unit/fixtures/store.py
+---
+# tests/unit/fixtures/store.py
+"""Store-related fixtures for gh-store unit tests."""
+
+from datetime import datetime, timezone
+import pytest
+from gh_store.core.store import GitHubStore
+from gh_store.core.version import CLIENT_VERSION
+from gh_store.core.exceptions import ObjectNotFound
+
+from unittest.mock import patch
+
+
+from typing import Sequence
+from unittest.mock import Mock
+
+def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
+    """Set up mocked authorization for testing.
+    
+    Args:
+        store: GitHubStore instance to configure
+        authorized_users: List of usernames to authorize (defaults to ['repo-owner'])
+    """
+    if authorized_users is None:
+        authorized_users = ['repo-owner']
+    
+    # Pre-populate owner info cache
+    store.access_control._owner_info = {
+        'login': 'repo-owner',
+        'type': 'User'
+    }
+    
+    # If we have additional authorized users via CODEOWNERS
+    if len(authorized_users) > 1:
+        # Mock CODEOWNERS content
+        codeowners_content = "* " + " ".join(f"@{user}" for user in authorized_users)
+        mock_content = Mock()
+        mock_content.decoded_content = codeowners_content.encode()
+        store.repo.get_contents = Mock(return_value=mock_content)
+        
+        # Clear codeowners cache to force reload
+        store.access_control._codeowners = None
+
+
+
+
+@pytest.fixture
+def store(mock_repo_factory, default_config):
+    """Create GitHubStore instance with mocked dependencies."""
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=["stored-object"]
+    )
+    
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
+        
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
+        
+        # Set up default authorization
+        setup_mock_auth(store)
+        
+        return store
+
+@pytest.fixture
+def authorized_store(store):
+    """Create store with additional authorized users for testing."""
+    def _authorized_store(authorized_users: Sequence[str]):
+        setup_mock_auth(store, authorized_users=authorized_users)
+        return store
+    return _authorized_store
+
+
+
+@pytest.fixture
+def history_mock_comments(mock_comment):
+    """Create series of comments representing object history."""
+    comments = []
+    
+    # Initial state
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "type": "initial_state",
+            "_data": {"name": "test", "value": 42},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-01T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    ))
+    
+    # First update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 43},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-02T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=2,
+        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+    ))
+    
+    # Second update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 44},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-03T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=3,
+        created_at=datetime(2025, 1, 3, tzinfo=timezone.utc)
+    ))
+    
+    return comments
+
+
+
+---
+File: tests/unit/test_cli.py
+---
+# tests/unit/test_cli.py
+"""Command-line interface tests for gh-store."""
+
+import os
+from pathlib import Path
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch
+from loguru import logger
+
+from gh_store.__main__ import CLI
+from gh_store.core.exceptions import GitHubStoreError
+
+def test_process_updates_success(mock_cli, mock_store_response):
+    """Test successful processing of updates."""
+    with patch('gh_store.core.store.GitHubStore.process_updates', return_value=mock_store_response):
+        mock_cli.process_updates(
+            issue=123,
+            token="test-token",
+            repo="owner/repo"
+        )
+
+def test_process_updates_error(mock_cli, mock_config, caplog):
+    """Test handling of errors during update processing."""
+    with patch('gh_store.core.store.GitHubStore.process_updates') as mock_process:
+        # Mock error
+        mock_process.side_effect = GitHubStoreError("Test error")
+        
+        # Run command
+        with pytest.raises(SystemExit) as exc_info:
+            mock_cli.process_updates(
+                issue=123,
+                token="test-token",
+                repo="owner/repo",
+                config=str(mock_config)
+            )
+        
+        assert exc_info.value.code == 1
+        assert "Failed to process updates: Test error" in caplog.text
+
+def test_snapshot_success(mock_cli, mock_stored_objects, tmp_path):
+    """Test successful creation of snapshot."""
+    output_path = tmp_path / "test_snapshot.json"
+    
+    with patch('gh_store.core.store.GitHubStore.list_all', return_value=mock_stored_objects):
+        # Run command
+        mock_cli.snapshot(
+            token="test-token",
+            repo="owner/repo",
+            output=str(output_path)
+        )
+        
+        # Verify snapshot
+        assert output_path.exists()
+        snapshot = json.loads(output_path.read_text())
+        assert "snapshot_time" in snapshot
+        assert snapshot["repository"] == "owner/repo"
+        assert "test-obj-1" in snapshot["objects"]
+        assert "test-obj-2" in snapshot["objects"]
+
+def test_update_snapshot_success(mock_cli, mock_stored_objects, mock_snapshot_file):
+    """Test successful update of existing snapshot."""
+    current_time = datetime(2025, 2, 1, tzinfo=timezone.utc)
+    
+    with patch('gh_store.core.store.GitHubStore.list_updated_since') as mock_list, \
+         patch('gh_store.__main__.datetime') as mock_datetime:
+        # Mock list_updated_since
+        mock_list.return_value = {"test-obj-1": mock_stored_objects["test-obj-1"]}
+        
+        # Mock datetime
+        mock_datetime.now.return_value = current_time
+        mock_datetime.fromisoformat = datetime.fromisoformat
+        mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        
+        # Run command
+        mock_cli.update_snapshot(
+            token="test-token",
+            repo="owner/repo",
+            snapshot_path=str(mock_snapshot_file)
+        )
+        
+        # Verify snapshot
+        updated_snapshot = json.loads(mock_snapshot_file.read_text())
+        assert updated_snapshot["snapshot_time"] == current_time.isoformat()
+        assert "test-obj-1" in updated_snapshot["objects"]
+
+def test_init_creates_config(mock_cli, tmp_path, caplog):
+    """Test initialization of new config file."""
+    config_path = tmp_path / "new_config.yml"
+    
+    # Run command
+    mock_cli.init(config=str(config_path))
+    
+    # Verify config creation was attempted
+    from gh_store.__main__ import ensure_config_exists
+    ensure_config_exists.assert_called_once_with(config_path)
+
+def test_init_existing_config(mock_cli, tmp_path, caplog):
+    """Test init command with existing config."""
+    config_path = tmp_path / "existing_config.yml"
+    config_path.touch()
+    
+    with patch('gh_store.__main__.logger.warning') as mock_warning:
+        # Run command
+        mock_cli.init(config=str(config_path))
+        
+        # Verify warning was logged
+        mock_warning.assert_called_once_with(f"Configuration file already exists at {config_path}")
+
+def test_cli_environment_variables(monkeypatch, mock_config, mock_store_response):
+    """Test CLI uses environment variables correctly."""
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("HOME", str(mock_config.parent.parent.parent))
+    
+    with patch('gh_store.core.store.Github') as MockGithub, \
+         patch('gh_store.core.store.GitHubStore.process_updates', return_value=mock_store_response):
+        # Mock Github instance
+        mock_repo = Mock()
+        MockGithub.return_value.get_repo.return_value = mock_repo
+        
+        cli = CLI()
+        cli.process_updates(issue=123)
+        
+        # Verify Github initialization
+        MockGithub.assert_called_once_with("test-token")
+        MockGithub.return_value.get_repo.assert_called_once_with("owner/repo")
+
+def test_cli_custom_config_path(mock_cli, mock_config, mock_store_response):
+    """Test CLI respects custom config path."""
+    with patch('gh_store.core.store.Github') as MockGithub, \
+         patch('gh_store.core.store.GitHubStore.process_updates', return_value=mock_store_response):
+        # Mock Github instance
+        mock_repo = Mock()
+        MockGithub.return_value.get_repo.return_value = mock_repo
+        
+        # Run command
+        mock_cli.process_updates(
+            issue=123,
+            token="test-token",
+            repo="owner/repo",
+            config=str(mock_config)
+        )
+        
+        # Verify Github initialization
+        MockGithub.assert_called_once_with("test-token")
+        MockGithub.return_value.get_repo.assert_called_once_with("owner/repo")
+
+
+
+---
+File: tests/unit/test_comment_handler.py
+---
+# tests/unit/test_comment_handler.py
+
+import json
+from datetime import datetime, timezone
+from unittest.mock import Mock, patch
+
+import pytest
+from gh_store.handlers.comment import CommentHandler
+from gh_store.core.version import CLIENT_VERSION
+
+@pytest.fixture
+def mock_repo():
+    return Mock()
+
+@pytest.fixture
+def mock_config():
+    return Mock(
+        store=Mock(
+            reactions=Mock(
+                processed="+1",
+                initial_state="rocket"
+            )
+        )
+    )
+
+@pytest.fixture
+def comment_handler(mock_repo, mock_config):
+    return CommentHandler(mock_repo, mock_config)
+
+def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
+    """Test processing a mix of valid and invalid comments"""
+    
+    # Setup mock issue with various types of comments
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    
+    # Create a variety of comments to test filtering
+    comments = [
+        # Valid update with metadata from authorized user
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'valid'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])  # No reactions = unprocessed
+        ),
+        
+        # Already processed update (should be skipped)
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'update': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        ),
+        
+        # Legacy format comment (should be handled with generated metadata)
+        Mock(
+            id=3,
+            body='{"legacy": "update"}',
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Initial state comment (should be skipped)
+        Mock(
+            id=4,
+            body=json.dumps({
+                'type': 'initial_state',
+                '_data': {'initial': 'state'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Invalid JSON comment (should be skipped)
+        Mock(
+            id=5,
+            body='not json',
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Valid JSON but unauthorized user (should be skipped)
+        Mock(
+            id=6,
+            body=json.dumps({
+                '_data': {'update': 'unauthorized'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-02T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Regular discussion comment (should be skipped)
+        Mock(
+            id=7,
+            body='Just a regular comment',
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    # Mock the access control to only authorize "owner"
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    # Get unprocessed updates
+    updates = comment_handler.get_unprocessed_updates(123)
+    
+    # Should get two valid updates (new format and legacy format)
+    assert len(updates) == 2
+    assert updates[0].comment_id == 1
+    assert updates[0].changes == {'update': 'valid'}
+    assert updates[1].comment_id == 3
+    assert updates[1].changes == {'legacy': 'update'}
+
+def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
+    """Test that valid JSON updates from unauthorized users are skipped"""
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    
+    # Create an unauthorized but valid JSON update
+    comment = Mock(
+        id=1,
+        body=json.dumps({
+            '_data': {'malicious': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        user=Mock(login="attacker"),
+        get_reactions=Mock(return_value=[])
+    )
+    
+    issue.get_comments.return_value = [comment]
+    
+    # Mock access control to reject the user
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
+    """Test processing updates with CODEOWNERS authorization"""
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    
+    # Create comments from different users
+    comments = [
+        # From CODEOWNERS team member
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'from-team'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="team-member"),
+            get_reactions=Mock(return_value=[])
+        ),
+        # From unauthorized user
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'update': 'unauthorized'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-02T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    # Mock CODEOWNERS to include team-member
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    # Set up CODEOWNERS content
+    codeowners_content = "* @team-member"
+    comment_handler.access_control._find_codeowners_file = Mock(
+        return_value=codeowners_content
+    )
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    
+    # Should only get update from team member
+    assert len(updates) == 1
+    assert updates[0].comment_id == 1
+    assert updates[0].changes == {'update': 'from-team'}
+
+def test_get_unprocessed_updates_empty(comment_handler, mock_repo):
+    """Test behavior with no comments"""
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    issue.get_comments.return_value = []
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
+    """Test behavior when all comments are already processed"""
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    
+    # Create some processed comments
+    comments = [
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        ),
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'another': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append'
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_create_comment_payload(comment_handler):
+    """Test creation of properly structured comment payloads"""
+    data = {'test': 'data'}
+    
+    # Test regular update payload
+    update_payload = comment_handler.create_comment_payload(data)
+    assert update_payload._data == data
+    assert update_payload._meta.client_version == CLIENT_VERSION
+    assert update_payload._meta.update_mode == 'append'
+    assert update_payload.type is None
+    
+    # Test initial state payload
+    initial_payload = comment_handler.create_comment_payload(data, 'initial_state')
+    assert initial_payload._data == data
+    assert initial_payload._meta.client_version == CLIENT_VERSION
+    assert initial_payload._meta.update_mode == 'append'
+    assert initial_payload.type == 'initial_state'
+
+def test_get_unprocessed_updates_malformed_metadata(comment_handler, mock_repo):
+    """Test handling of malformed metadata in comments"""
+    issue = Mock()
+    mock_repo.get_issue.return_value = issue
+    
+    # Create comment with malformed metadata
+    malformed_comment = Mock(
+        id=1,
+        body=json.dumps({
+            '_data': {'test': 'data'},
+            '_meta': {
+                # Missing required fields
+                'client_version': CLIENT_VERSION
+            }
+        }),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        user=Mock(login="owner"),
+        get_reactions=Mock(return_value=[])
+    )
+    
+    issue.get_comments.return_value = [malformed_comment]
+    
+    # Mock access control
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    # Should skip malformed comment
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_apply_update_preserves_metadata(comment_handler):
+    """Test that applying updates preserves any existing metadata"""
+    # Create mock object with existing metadata
+    obj = Mock()
+    obj.meta = Mock(object_id='test-123')
+    obj.data = {
+        'value': 1,
+        '_meta': {
+            'some': 'metadata'
+        }
+    }
+    
+    # Create update that includes metadata
+    update = Mock(
+        comment_id=1,
+        timestamp=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        changes={
+            'value': 2,
+            '_meta': {
+                'new': 'metadata'
+            }
+        }
+    )
+    
+    # Apply update
+    result = comment_handler.apply_update(obj, update)
+    
+    # Verify metadata was updated correctly
+    assert result.data['value'] == 2
+    assert result.data['_meta']['some'] == 'metadata'
+    assert result.data['_meta']['new'] == 'metadata'
+
+
+
+---
+File: tests/unit/test_config.py
+---
+# tests/unit/test_config.py
+
+from pathlib import Path
+import pytest
+from unittest.mock import patch, mock_open
+import yaml
+
+from gh_store.core.store import GitHubStore, DEFAULT_CONFIG_PATH
+
+def test_store_uses_default_config_when_no_path_provided(mock_github, mock_config_file):
+    """Test that store uses packaged default config when no config exists"""
+    _, mock_repo = mock_github
+    
+    # Mock the default config path to not exist
+    with patch('pathlib.Path.exists', return_value=False):
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        
+        # Updated assertions to match fixture config
+        assert store.config.store.base_label == "stored-object"
+        assert store.config.store.reactions.processed == "+1"
+
+def test_store_uses_provided_config_path(mock_github, tmp_path):
+    """Test that store uses provided config path when it exists"""
+    _, mock_repo = mock_github
+    
+    # Create a test config file
+    config_path = tmp_path / "test_config.yml"
+    test_config = {
+        "store": {
+            "base_label": "stored-object",  # Matches fixture
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",  # Matches fixture
+                "initial_state": "rocket"  # Matches fixture
+            }
+        }
+    }
+    config_path.write_text(yaml.dump(test_config))
+    
+    store = GitHubStore(token="fake-token", repo="owner/repo", config_path=config_path)
+    
+    assert store.config.store.base_label == "stored-object"
+    assert store.config.store.reactions.processed == "+1"
+
+def test_store_raises_error_for_nonexistent_custom_config(mock_github):
+    """Test that store raises error when custom config path doesn't exist"""
+    _, mock_repo = mock_github
+    
+    with pytest.raises(FileNotFoundError):
+        GitHubStore(
+            token="fake-token",
+            repo="owner/repo",
+            config_path=Path("/nonexistent/config.yml")
+        )
+
+def test_default_config_path_is_in_user_config_dir():
+    """Test that default config path is in user's config directory"""
+    expected_path = Path.home() / ".config" / "gh-store" / "config.yml"
+    assert DEFAULT_CONFIG_PATH == expected_path
+
+
+
+---
+File: tests/unit/test_object_history.py
+---
+# tests/unit/test_object_history.py
+
+from datetime import datetime, timezone
+import json
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.exceptions import ObjectNotFound
+
+@pytest.fixture
+def history_mock_comments(mock_comment):
+    """Create series of comments representing object history"""
+    comments = []
+    
+    # Initial state
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "type": "initial_state",
+            "data": {"name": "test", "value": 42},
+            "timestamp": "2025-01-01T00:00:00Z"
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    ))
+    
+    # First update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 43},
+            "_meta": {
+                "client_version": "0.5.1",
+                "timestamp": "2025-01-02T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=2,
+        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+    ))
+    
+    # Second update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 44},
+            "_meta": {
+                "client_version": "0.5.1",
+                "timestamp": "2025-01-03T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=3,
+        created_at=datetime(2025, 1, 3, tzinfo=timezone.utc)
+    ))
+    
+    return comments
+
+def test_get_object_history_initial_state(store, mock_issue, history_mock_comments):
+    """Test that initial state is correctly extracted from history"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    initial_state = history[0]
+    assert initial_state["type"] == "initial_state"
+    assert initial_state["data"] == {"name": "test", "value": 42}
+    assert initial_state["comment_id"] == 1
+
+def test_get_object_history_updates_sequence(store, mock_issue, history_mock_comments):
+    """Test that updates are returned in correct chronological order"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Verify updates sequence
+    assert len(history) == 3
+    assert [entry["data"].get("value") for entry in history if "value" in entry["data"]] == [42, 43, 44]
+    assert [entry["comment_id"] for entry in history] == [1, 2, 3]
+
+def test_get_object_history_metadata_handling(store, mock_issue, history_mock_comments):
+    """Test that metadata is correctly preserved in history"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Check metadata for updates
+    update = history[1]
+    assert "metadata" in update
+    assert update["metadata"]["client_version"] == "0.5.1"
+    assert update["metadata"]["update_mode"] == "append"
+
+def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
+    """Test handling of legacy format comments in history"""
+    legacy_comment = mock_comment(
+        user_login="repo-owner",
+        body={"value": 43},  # Legacy format without metadata
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    )
+    
+    issue = mock_issue(
+        number=1,
+        comments=[legacy_comment]
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    assert len(history) == 1
+    assert history[0]["type"] == "update"
+    assert history[0]["data"] == {"value": 43}
+    assert history[0]["metadata"]["client_version"] == "legacy"
+
+def test_comment_history_json_handling(store, mock_issue, mock_comment):
+    """Test processing of valid JSON comments in history"""
+    comments = [
+        # First comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 42},
+            comment_id=1
+        ),
+        # Second comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 43},
+            comment_id=2
+        ),
+        # Third comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 44},
+            comment_id=3
+        )
+    ]
+    
+    issue = mock_issue(
+        number=1,
+        comments=comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Verify all valid comments are processed
+    assert len(history) == 3
+    assert [entry["data"]["value"] for entry in history] == [42, 43, 44]
+    assert [entry["comment_id"] for entry in history] == [1, 2, 3]
+
+def test_get_object_history_nonexistent(store):
+    """Test retrieving history for nonexistent object"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.issue_handler.get_object_history("nonexistent")
+
+
+
+---
+File: tests/unit/test_security.py
+---
+# tests/unit/test_security.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch
+from github import GithubException
+
+from gh_store.core.access import AccessControl
+from gh_store.core.exceptions import AccessDeniedError
+from gh_store.core.version import CLIENT_VERSION
+
+# Authorization Tests
+
+def test_owner_always_authorized(mock_github):
+    """Test that repository owner is always authorized regardless of CODEOWNERS"""
+    _, mock_repo = mock_github
+    
+    # Override get_contents to return no CODEOWNERS
+    mock_repo.get_contents = Mock(side_effect=GithubException(404, "Not found"))
+    
+    ac = AccessControl(mock_repo)
+    assert ac._is_authorized("repo-owner") is True
+
+def test_codeowners_authorization(mock_github):
+    """Test authorization via CODEOWNERS file"""
+    _, mock_repo = mock_github
+    
+    # Override CODEOWNERS content
+    mock_content = Mock()
+    mock_content.decoded_content = b"* @maintainer @contributor"
+    mock_repo.get_contents = Mock(return_value=mock_content)
+    
+    ac = AccessControl(mock_repo)
+    assert ac._is_authorized("maintainer") is True
+    assert ac._is_authorized("contributor") is True
+    assert ac._is_authorized("random-user") is False
+
+def test_organization_ownership(mock_github):
+    """Test authorization with organization ownership"""
+    _, mock_repo = mock_github
+    
+    # Override owner type
+    owner = Mock()
+    owner.login = "org-name"
+    owner.type = "Organization"
+    mock_repo.owner = owner
+    
+    ac = AccessControl(mock_repo)
+    owner_info = ac._get_owner_info()
+    
+    assert owner_info["login"] == "org-name"
+    assert owner_info["type"] == "Organization"
+    assert ac._is_authorized("org-name") is True
+
+def test_codeowners_file_locations(mock_github):
+    """Test CODEOWNERS file location precedence"""
+    _, mock_repo = mock_github
+    
+    for test_path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+        mock_content = Mock()
+        mock_content.decoded_content = b"* @authorized-user"
+        
+        def get_contents_side_effect(path):
+            if path == test_path:
+                return mock_content
+            raise GithubException(404, "Not found")
+        
+        mock_repo.get_contents = Mock(side_effect=get_contents_side_effect)
+        ac = AccessControl(mock_repo)
+        
+        assert ac._is_authorized("authorized-user") is True
+
+def test_unauthorized_update_rejection(store, mock_comment):
+    """Test that updates from unauthorized users are rejected"""
+    # Create unauthorized and authorized updates
+    unauthorized_update = mock_comment(
+        user_login="attacker",
+        body={
+            '_data': {'malicious': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    authorized_update = mock_comment(
+        user_login="repo-owner",
+        body={
+            '_data': {'valid': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[unauthorized_update, authorized_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 1
+    assert updates[0].changes == {'valid': 'update'}
+
+def test_unauthorized_issue_creator_denied(store, mock_issue):
+    """Test that updates are blocked for issues created by unauthorized users"""
+    issue = mock_issue(
+        user_login="infiltrator"
+    )
+    store.repo.get_issue.return_value = issue
+    
+    with pytest.raises(AccessDeniedError):
+        store.process_updates(456)
+
+def test_authorized_codeowners_updates(authorized_store, mock_comment):
+    """Test that CODEOWNERS team members can make updates"""
+    store = authorized_store(['repo-owner', 'team-member'])
+    
+    # Create update from team member
+    team_update = mock_comment(
+        user_login="team-member",
+        body={
+            '_data': {'team': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[team_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 1
+    assert updates[0].changes == {'team': 'update'}
+
+def test_metadata_tampering_protection(store, mock_comment):
+    """Test protection against metadata tampering in updates"""
+    # Create update with invalid metadata
+    tampered_update = mock_comment(
+        user_login="repo-owner",  # Even authorized users can't use invalid metadata
+        body={
+            '_data': {'update': 'data'},
+            '_meta': {
+                'client_version': CLIENT_VERSION
+                # Missing required fields
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[tampered_update])
+    issue.user = Mock(login="repo-owner")
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty due to invalid metadata
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_reaction_based_processing_protection(store, mock_comment):
+    """Test that processed updates cannot be reprocessed"""
+    # Create a processed update with the processed reaction
+    processed_update = mock_comment(
+        user_login="repo-owner",
+        body={
+            '_data': {'already': 'processed'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        },
+        reactions=[Mock(content="+1")]  # Add processed reaction
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[processed_update])
+    issue.user = Mock(login="repo-owner")
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty since update is already processed
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+
+
+---
+File: tests/unit/test_store_basic_ops.py
+---
+# tests/unit/test_store_basic_ops.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.exceptions import ObjectNotFound
+
+def test_create_object_with_initial_state(store):
+    """Test that creating an object stores the initial state in a comment"""
+    object_id = "test-123"
+    test_data = {"name": "test", "value": 42}
+    
+    # Mock existing labels
+    mock_base_label = Mock()
+    mock_base_label.name = "stored-object"
+    store.repo.get_labels.return_value = [mock_base_label]
+    
+    # Mock issue creation
+    mock_issue = Mock()
+    mock_comment = Mock()
+    store.repo.create_issue.return_value = mock_issue
+    mock_issue.create_comment.return_value = mock_comment
+    
+    # Set up required attributes
+    mock_issue.created_at = datetime.now(timezone.utc)
+    mock_issue.updated_at = datetime.now(timezone.utc)
+    mock_issue.get_comments = Mock(return_value=[])
+    
+    # Create object
+    obj = store.create(object_id, test_data)
+    
+    # Verify initial state comment
+    mock_issue.create_comment.assert_called_once()
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    assert comment_data["type"] == "initial_state"
+    assert comment_data["_data"] == test_data
+    assert "_meta" in comment_data
+
+def test_get_object(store):
+    """Test retrieving an object"""
+    test_data = {"name": "test", "value": 42}
+    
+    # Mock labels
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    store.repo.get_labels.return_value = [stored_label]
+    
+    mock_issue = Mock()
+    mock_issue.body = json.dumps(test_data)
+    mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.created_at = datetime.now(timezone.utc)
+    mock_issue.updated_at = datetime.now(timezone.utc)
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    obj = store.get("test-obj")
+    assert obj.data == test_data
+
+def test_get_nonexistent_object(store):
+    """Test getting an object that doesn't exist"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.get("nonexistent")
+
+def test_create_object_ensures_labels_exist(store):
+    """Test that create_object creates any missing labels"""
+    object_id = "test-123"
+    test_data = {"name": "test", "value": 42}
+    uid_label = f"{store.config.store.uid_prefix}{object_id}"
+    
+    # Mock existing labels
+    mock_label = Mock()
+    mock_label.name = "stored-object"
+    store.repo.get_labels.return_value = [mock_label]
+    
+    mock_issue = Mock()
+    mock_issue.created_at = datetime.now(timezone.utc)
+    mock_issue.updated_at = datetime.now(timezone.utc)
+    mock_issue.get_comments = Mock(return_value=[])
+    store.repo.create_issue.return_value = mock_issue
+    
+    store.create(object_id, test_data)
+    
+    # Verify label creation
+    store.repo.create_label.assert_called_once_with(
+        name=uid_label,
+        color="0366d6"
+    )
+    
+    # Verify issue creation with both labels
+    store.repo.create_issue.assert_called_once()
+    call_kwargs = store.repo.create_issue.call_args[1]
+    assert call_kwargs["labels"] == ["stored-object", uid_label]
+
+
+
+---
+File: tests/unit/test_store_list_ops.py
+---
+# tests/unit/test_store_list_ops.py
+
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import pytest
+from unittest.mock import Mock
+
+def test_list_updated_since(store, mock_issue):
+    """Test fetching objects updated since timestamp"""
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    
+    # Create mock issue updated after timestamp
+    issue = mock_issue(
+        created_at=timestamp - timedelta(minutes=30),
+        updated_at=timestamp + timedelta(minutes=30),
+        labels=["stored-object", f"UID:{object_id}"],
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    # Mock object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test listing
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify
+    store.repo.get_issues.assert_called_once()
+    call_kwargs = store.repo.get_issues.call_args[1]
+    assert call_kwargs["since"] == timestamp
+    assert len(updated) == 1
+    assert mock_obj in updated.values()
+
+def test_list_updated_since_no_updates(store, mock_issue):
+    """Test when no updates since timestamp"""
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    
+    # Create mock issue updated before timestamp
+    issue = mock_issue(
+        created_at=timestamp - timedelta(minutes=30),
+        updated_at=timestamp - timedelta(minutes=30),
+        labels=["stored-object", f"UID:foo"],
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    # Mock object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test listing
+    updated = store.list_updated_since(timestamp)
+    
+    # Verify no updates found
+    assert len(updated) == 0
+
+def test_list_all_objects(store, mock_issue, mock_label_factory):
+    """Test listing all objects in store"""
+    # Create mock issues with proper labels
+    issues = [
+        mock_issue(
+            number=1,
+            labels=["stored-object", f"UID:test-1"],
+        ),
+        mock_issue(
+            number=2,
+            labels=["stored-object", f"UID:test-2"],
+        )
+    ]
+    store.repo.get_issues.return_value = issues
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing all
+    objects = store.list_all()
+    
+    # Verify
+    assert len(objects) == 2
+    assert "test-1" in objects
+    assert "test-2" in objects
+
+def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
+    """Test that archived objects are skipped in listing"""
+    # Create archived and active issues
+    archived_issue = mock_issue(
+        number=1,
+        labels=[
+            "stored-object",
+            "UID:test-1",
+            "archived",
+        ]
+    )
+    active_issue = mock_issue(
+        number=2,
+        labels=["stored-object", "UID:test-2"]
+    )
+    
+    store.repo.get_issues.return_value = [archived_issue, active_issue]
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing
+    objects = store.list_all()
+    
+    # Verify only active object listed
+    assert len(objects) == 1
+    assert "test-2" in objects
+    assert "test-1" not in objects
+
+def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
+    """Test handling of issues with invalid label structure"""
+    # Create issue missing UID label
+    invalid_issue = mock_issue(
+        number=1,
+        labels=["stored-object"]  # Missing UID label
+    )
+    
+    # Create valid issue with explicit labels including UID
+    valid_issue = mock_issue(
+        number=2,
+        labels=["stored-object","UID:test-2"]  # Explicitly set UID label
+    )
+    
+    store.repo.get_issues.return_value = [invalid_issue, valid_issue]
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        mock_obj.meta.label = f"UID:test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing
+    objects = store.list_all()
+    
+    # Verify only valid object listed
+    assert len(objects) == 1
+    assert "test-2" in objects
+
+
+
+---
+File: tests/unit/test_store_update_ops.py
+---
+# tests/unit/test_store_update_ops.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
+from gh_store.core.version import CLIENT_VERSION
+
+def test_process_update(store):
+    """Test processing an update"""
+    test_data = {"name": "test", "value": 42}
+    mock_issue = Mock()
+    mock_issue.body = json.dumps(test_data)
+    mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.number = 123
+    
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No issues being processed
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
+    
+    # Test update
+    update_data = {"value": 43}
+    store.update("test-obj", update_data)
+    
+    # Verify update comment
+    mock_issue.create_comment.assert_called_once()
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    assert comment_data["_data"] == update_data
+    assert "_meta" in comment_data
+    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
+    
+    # Verify issue reopened
+    mock_issue.edit.assert_called_with(state="open")
+
+def test_concurrent_update_prevention(store):
+    """Test that concurrent updates are prevented"""
+    mock_issue = Mock()
+    
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return [mock_issue]  # Return open issue to simulate processing
+        return []
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    
+    with pytest.raises(ConcurrentUpdateError):
+        store.update("test-obj", {"value": 43})
+
+def test_update_metadata_structure(store):
+    """Test that updates include properly structured metadata"""
+    mock_issue = Mock()
+    mock_issue.body = json.dumps({"initial": "data"})
+    mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.number = 123
+    mock_issue.user = Mock()
+    mock_issue.user.login = "repo-owner"  # Set authorized user
+    
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No concurrent processing
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
+    
+    update_data = {"new": "value"}
+    store.update("test-obj", update_data)
+    
+    # Verify comment structure
+    mock_issue.create_comment.assert_called_once()
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    
+    assert "_data" in comment_data
+    assert "_meta" in comment_data
+    assert comment_data["_meta"]["client_version"] == CLIENT_VERSION
+    assert comment_data["_meta"]["update_mode"] == "append"
+    assert "timestamp" in comment_data["_meta"]
+
+
+def test_update_nonexistent_object(store):
+    """Test updating an object that doesn't exist"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.update("nonexistent", {"value": 43})
+
+
+
+---
+File: typescript/.eslintrc.json
+---
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "env": {
+    "browser": true,
+    "es2020": true,
+    "node": true
+  },
+  "rules": {
+    "@typescript-eslint/explicit-module-boundary-types": "error",
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "no-console": ["error", { "allow": ["warn", "error"] }]
+  }
+}
+
+
+
+---
+File: typescript/README.md
+---
+
+
+
+
+---
+File: typescript/jest.config.ts
+---
+// typescript/jest.config.ts
+import type { JestConfigWithTsJest } from 'ts-jest';
+
+const config: JestConfigWithTsJest = {
+  preset: 'ts-jest',
+  testEnvironment: 'jsdom',
+  setupFiles: ['./jest.setup.ts'],
+  testMatch: ['<rootDir>/src/**/*.test.ts'],
+  collectCoverage: true,
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov'],
+  coverageThreshold: {
+    global: {
+      branches: 70,    // Lowered from 80%
+      functions: 80,
+      lines: 80,
+      statements: 80
+    }
+  },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', {
+      useESM: true,
+    }]
+  },
+  extensionsToTreatAsEsm: ['.ts']
+};
+
+export default config;
+
+
+
+---
+File: typescript/jest.setup.ts
+---
+// typescript/jest.setup.ts
+import fetchMock from 'jest-fetch-mock';
+fetchMock.enableMocks();
+
+
+
+---
+File: typescript/package.json
+---
+{
+  "name": "gh-store-client",
+  "version": "0.3.2",
+  "description": "TypeScript client for GitHub Issue Store",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint src --ext .ts",
+    "prebuild": "tsx scripts/update-version.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:packaging": "node scripts/test-packaging.js",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test:packaging"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "github",
+    "storage",
+    "typescript",
+    "client"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmarx/gh-store.git",
+    "directory": "typescript"
+  },
+  "author": "David Marx <david.marx84@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jest-fetch-mock": "^3.0.3",
+    "prettier": "^3.1.1",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "@types/chrome": ">=0.0.246"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
+
+
+
+---
+File: typescript/scripts/test-packaging.js
+---
+// typescript/scripts/test-packaging.js
+import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(__dirname, '..');
+
+// Verify dist directory exists
+function checkDist() {
+    const distDir = resolve(rootDir, 'dist');
+    if (!existsSync(distDir)) {
+        console.error('✗ dist directory not found - run build first');
+        process.exit(1);
+    }
+
+    const requiredFiles = ['index.mjs', 'index.cjs', 'index.d.ts'];
+    for (const file of requiredFiles) {
+        if (!existsSync(resolve(distDir, file))) {
+            console.error(`✗ Missing required build output: ${file}`);
+            process.exit(1);
+        }
+    }
+    console.log('✓ dist directory contains required files');
+}
+
+// Test ESM import
+async function testESMImport() {
+    try {
+        const { GitHubStoreClient } = await import('../dist/index.mjs');
+        if (!GitHubStoreClient) {
+            throw new Error('GitHubStoreClient not exported from ESM build');
+        }
+        console.log('✓ ESM import successful');
+    } catch (error) {
+        console.error('✗ ESM import failed:', error);
+        process.exit(1);
+    }
+}
+
+// Test package.json exports
+function testPackageExports() {
+    const pkg = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8'));
+    
+    // Check required fields
+    const requiredFields = ['exports', 'main', 'module', 'types'];
+    for (const field of requiredFields) {
+        if (!pkg[field]) {
+            console.error(`✗ Missing required field: ${field}`);
+            process.exit(1);
+        }
+    }
+    
+    // Check exports configuration
+    const { exports } = pkg;
+    if (!exports['.'].import || !exports['.'].require || !exports['.'].types) {
+        console.error('✗ Exports must specify import, require, and types');
+        process.exit(1);
+    }
+
+    // Verify paths in exports match files that should exist
+    const paths = [
+        exports['.'].import,
+        exports['.'].require,
+        exports['.'].types
+    ].map(p => p.replace(/^\.\//, ''));
+
+    for (const path of paths) {
+        if (!existsSync(resolve(rootDir, path))) {
+            console.error(`✗ Export path does not exist: ${path}`);
+            process.exit(1);
+        }
+    }
+    
+    console.log('✓ package.json exports verified');
+}
+
+// Run tests
+async function main() {
+    console.log('Testing package configuration...');
+    // First verify the build files exist
+    checkDist();
+    // Then test the configuration and imports
+    testPackageExports();
+    await testESMImport();
+    console.log('All packaging tests passed!');
+}
+
+main().catch(error => {
+    console.error('Test failed:', error);
+    process.exit(1);
+});
+
+
+
+---
+File: typescript/scripts/update-version.ts
+---
+// typescript/scripts/update-version.ts
+import { readFileSync, writeFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Read package.json
+const pkgPath = resolve(__dirname, '../package.json');
+const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+
+// Read version.ts
+const versionPath = resolve(__dirname, '../src/version.ts');
+const versionContent = readFileSync(versionPath, 'utf8');
+
+// Update version
+const updatedContent = versionContent.replace(
+  /export const CLIENT_VERSION = '.*'/,
+  `export const CLIENT_VERSION = '${pkg.version}'`
+);
+
+// Write back
+writeFileSync(versionPath, updatedContent);
+
+console.log(`Updated CLIENT_VERSION to ${pkg.version}`);
+
+
+
+---
+File: typescript/src/__tests__/cache.test.ts
+---
+// src/__tests__/cache.test.ts
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { IssueCache } from '../cache';
+
+describe('IssueCache', () => {
+  let cache: IssueCache;
+  
+  beforeEach(() => {
+    cache = new IssueCache();
+  });
+
+  it('should store and retrieve issue numbers', () => {
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    cache.set('test-1', 123, metadata);
+    expect(cache.get('test-1')).toBe(123);
+  });
+
+  it('should respect maxSize limit', () => {
+    const cache = new IssueCache({ maxSize: 2 });
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+    cache.set('test-3', 789, metadata); // Should evict oldest
+
+    expect(cache.get('test-1')).toBeUndefined();
+    expect(cache.get('test-2')).toBe(456);
+    expect(cache.get('test-3')).toBe(789);
+  });
+
+  it('should respect TTL', () => {
+    jest.useFakeTimers();
+    const cache = new IssueCache({ ttl: 1000 }); // 1 second TTL
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    expect(cache.get('test-1')).toBe(123);
+
+    // Advance time past TTL
+    jest.advanceTimersByTime(1001);
+    expect(cache.get('test-1')).toBeUndefined();
+
+    jest.useRealTimers();
+  });
+
+  it('should clear all entries', () => {
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+    
+    cache.clear();
+    
+    expect(cache.get('test-1')).toBeUndefined();
+    expect(cache.get('test-2')).toBeUndefined();
+    expect(cache.getStats().size).toBe(0);
+  });
+
+  it('should report correct stats', () => {
+    const cache = new IssueCache({ maxSize: 100, ttl: 3600000 });
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+
+    const stats = cache.getStats();
+    expect(stats.size).toBe(2);
+    expect(stats.maxSize).toBe(100);
+    expect(stats.ttl).toBe(3600000);
+  });
+
+  it('should correctly determine if refresh is needed', () => {
+    const createdAt = new Date('2025-01-01');
+    const updatedAt = new Date('2025-01-02');
+    const metadata = { createdAt, updatedAt };
+
+    cache.set('test-1', 123, metadata);
+
+    // No refresh needed for same or older update time
+    expect(cache.shouldRefresh('test-1', updatedAt)).toBe(false);
+    expect(cache.shouldRefresh('test-1', new Date('2025-01-01'))).toBe(false);
+
+    // Refresh needed for newer update time
+    expect(cache.shouldRefresh('test-1', new Date('2025-01-03'))).toBe(true);
+
+    // Always refresh for non-existent entries
+    expect(cache.shouldRefresh('nonexistent', new Date())).toBe(true);
+  });
+});
+
+
+
+---
+File: typescript/src/__tests__/client.test.ts
+---
+// typescript/src/__tests__/client.test.ts
+
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { GitHubStoreClient } from '../client';
+import { CLIENT_VERSION } from '../version';
+import fetchMock from 'jest-fetch-mock';
+
+describe('GitHubStoreClient', () => {
+  const token = 'test-token';
+  const repo = 'owner/repo';
+  let client: GitHubStoreClient;
+
+  beforeEach(() => {
+    fetchMock.resetMocks();
+    client = new GitHubStoreClient(token, repo, {
+      cache: {
+        maxSize: 100,
+        ttl: 3600000
+      }
+    });
+  });
+
+  describe('getObject with cache', () => {
+    const mockIssue = {
+      number: 123,
+      body: JSON.stringify({ key: 'value' }),
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-02T00:00:00Z',
+      labels: [
+        { name: 'stored-object' },
+        { name: 'UID:test-object' }
+      ]
+    };
+
+    it('should use cached issue number on subsequent requests', async () => {
+      // First request - should query by labels
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Initial labels query
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues?labels=');
+
+      // Reset mock to verify cache hit
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssue)) // Direct issue fetch
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      
+      // Should use direct issue number fetch instead of labels query
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+    });
+
+    it('should fall back to label query if cached issue is not found', async () => {
+      // First request succeeds
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify([]));
+
+      await client.getObject('test-object');
+
+      // Reset mock to simulate deleted issue
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce('', { status: 404 }) // Cached issue not found
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Fallback label query
+        .mockResponseOnce(JSON.stringify([])); // Comments query
+
+      await client.getObject('test-object');
+
+      // Should have attempted direct fetch, then fallen back to labels
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+      expect(fetchMock.mock.calls[1][0]).toContain('/issues?labels=');
+    });
+
+    it('should fetch and parse object correctly', async () => {
+      const mockComments = [{ id: 1 }, { id: 2 }];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const obj = await client.getObject('test-object');
+
+      expect(obj.meta.objectId).toBe('test-object');
+      expect(obj.meta.version).toBe(3);
+      expect(obj.data).toEqual({ key: 'value' });
+    });
+  });
+
+  describe('createObject', () => {
+    it('should create new object with initial state and metadata', async () => {
+      const mockIssue = {
+        number: 456,
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-01T00:00:00Z',
+        html_url: 'https://github.com/owner/repo/issues/456',
+        body: JSON.stringify({ test: 'data' }),
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComment = { id: 123 };
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssue)) // Create issue
+        .mockResponseOnce(JSON.stringify(mockComment)) // Create comment
+        .mockResponseOnce(JSON.stringify({ id: 1 })) // Add processed reaction
+        .mockResponseOnce(JSON.stringify({ id: 2 })) // Add initial state reaction
+        .mockResponseOnce(JSON.stringify({ state: 'closed' })); // Close issue
+
+      const data = { test: 'data' };
+      const obj = await client.createObject('test-object', data);
+
+      expect(obj.meta.objectId).toBe('test-object');
+      expect(obj.meta.version).toBe(1);
+      expect(obj.data).toEqual(data);
+
+      // Verify issue creation
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"stored-object"');
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"UID:test-object"');
+
+      // Verify initial state comment with metadata
+      const commentBody = JSON.parse(JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body);
+      expect(commentBody.type).toBe('initial_state');
+      expect(commentBody._data).toEqual(data);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
+    });
+  });
+
+  describe('updateObject', () => {
+    it('should add update comment with metadata', async () => {
+      const mockIssue = {
+        number: 1,
+        state: 'closed',
+        body: JSON.stringify({ key: 'value' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Get issue
+        .mockResponseOnce(JSON.stringify({ id: 123 })) // Add comment
+        .mockResponseOnce(JSON.stringify({ state: 'open' })) // Reopen issue
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Get updated object
+        .mockResponseOnce(JSON.stringify([])); // Get comments for version
+
+      const changes = { key: 'updated' };
+      await client.updateObject('test-object', changes);
+
+      // Verify update comment with metadata
+      const commentPayload = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
+      const commentBody = JSON.parse(commentPayload.body);
+      expect(commentBody._data).toEqual(changes);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
+    });
+  });
+
+  describe('getObjectHistory', () => {
+    it('should return full object history with metadata', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: JSON.stringify({
+            type: 'initial_state',
+            _data: { status: 'new' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-01T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        },
+        {
+          id: 2,
+          created_at: '2025-01-02T00:00:00Z',
+          body: JSON.stringify({
+            _data: { status: 'updated' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(2);
+      expect(history[0].type).toBe('initial_state');
+      expect(history[0].data).toEqual({ status: 'new' });
+      expect(history[1].type).toBe('update');
+      expect(history[1].data).toEqual({ status: 'updated' });
+    });
+  });
+
+  describe('API Error Handling', () => {
+    it('should throw error on API failure', async () => {
+      fetchMock.mockResponseOnce('', { 
+        status: 500,
+        statusText: 'Internal Server Error'
+      });
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow('GitHub API error: 500');
+    });
+
+    it('should handle malformed JSON responses', async () => {
+      fetchMock.mockResponseOnce('invalid json');
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow();
+    });
+  });
+
+  describe('listAll', () => {
+    it('should handle empty repository', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should handle invalid issue data', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: 'invalid json',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should skip issues without proper labels', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        labels: [
+          { name: 'stored-object' }  // Missing UID label
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('listUpdatedSince', () => {
+    it('should handle no updates', async () => {
+      const timestamp = new Date('2025-01-01T00:00:00Z');
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should ignore updates before timestamp', async () => {
+      const timestamp = new Date('2025-01-02T00:00:00Z');
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-01T12:00:00Z',  // Before timestamp
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ]
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('getObjectHistory', () => {
+    it('should handle missing object', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      await expect(client.getObjectHistory('nonexistent'))
+        .rejects
+        .toThrow('No object found with ID: nonexistent');
+    });
+
+    it('should handle invalid comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: 'invalid json'  // Invalid comment
+        },
+        {
+          id: 2,
+          created_at: '2025-01-02T00:00:00Z',
+          body: JSON.stringify({
+            _data: { status: 'valid' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);  // Only valid comment included
+      expect(history[0].data).toEqual({ status: 'valid' });
+    });
+
+    it('should process legacy format comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: JSON.stringify({ status: 'legacy' })  // Legacy format
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);
+      expect(history[0].type).toBe('update');
+      expect(history[0].data).toEqual({ status: 'legacy' });
+    });
+  });
+});
+
+
+
+---
+File: typescript/src/cache.ts
+---
+// src/cache.ts
+export interface CacheEntry {
+  issueNumber: number;
+  lastAccessed: number; // Using timestamp instead of Date for easier comparison
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CacheConfig {
+  maxSize?: number;
+  ttl?: number; // Time-to-live in milliseconds
+}
+
+export class IssueCache {
+  private cache: Map<string, CacheEntry>;
+  private maxSize: number;
+  private ttl: number;
+  private accessOrder: string[]; // Track order of access
+
+  constructor(config: CacheConfig = {}) {
+    this.cache = new Map();
+    this.maxSize = config.maxSize ?? 1000;
+    this.ttl = config.ttl ?? 1000 * 60 * 60; // Default 1 hour TTL
+    this.accessOrder = [];
+  }
+
+  get(objectId: string): number | undefined {
+    const entry = this.cache.get(objectId);
+    
+    if (!entry) {
+      return undefined;
+    }
+
+    // Check if entry has expired
+    if (Date.now() - entry.lastAccessed > this.ttl) {
+      this.cache.delete(objectId);
+      this.removeFromAccessOrder(objectId);
+      return undefined;
+    }
+
+    // Update last accessed time and move to front of access order
+    entry.lastAccessed = Date.now();
+    this.updateAccessOrder(objectId);
+    return entry.issueNumber;
+  }
+
+  set(objectId: string, issueNumber: number, metadata: { createdAt: Date; updatedAt: Date }): void {
+    // Evict least recently used entry if cache is full
+    if (this.cache.size >= this.maxSize && !this.cache.has(objectId)) {
+      const lru = this.accessOrder[this.accessOrder.length - 1];
+      if (lru) {
+        this.cache.delete(lru);
+        this.removeFromAccessOrder(lru);
+      }
+    }
+
+    // Add/update entry
+    this.cache.set(objectId, {
+      issueNumber,
+      lastAccessed: Date.now(),
+      createdAt: metadata.createdAt,
+      updatedAt: metadata.updatedAt
+    });
+
+    this.updateAccessOrder(objectId);
+  }
+
+  remove(objectId: string): void {
+    this.cache.delete(objectId);
+    this.removeFromAccessOrder(objectId);
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.accessOrder = [];
+  }
+
+  getStats(): { size: number; maxSize: number; ttl: number } {
+    return {
+      size: this.cache.size,
+      maxSize: this.maxSize,
+      ttl: this.ttl
+    };
+  }
+
+  shouldRefresh(objectId: string, latestUpdate: Date): boolean {
+    const entry = this.cache.get(objectId);
+    if (!entry) return true;
+
+    return latestUpdate > entry.updatedAt;
+  }
+
+  private updateAccessOrder(objectId: string): void {
+    this.removeFromAccessOrder(objectId);
+    this.accessOrder.unshift(objectId); // Add to front
+  }
+
+  private removeFromAccessOrder(objectId: string): void {
+    const index = this.accessOrder.indexOf(objectId);
+    if (index > -1) {
+      this.accessOrder.splice(index, 1);
+    }
+  }
+}
+
+
+
+---
+File: typescript/src/client.ts
+---
+// typescript/src/client.ts
+import { StoredObject, ObjectMeta, GitHubStoreConfig, Json, CommentPayload } from './types';
+import { IssueCache, CacheConfig } from './cache';
+import { CLIENT_VERSION } from './version';
+
+interface GitHubIssue {
+  number: number;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  labels: Array<{ name: string }>;
+  state?: string;
+}
+
+export class GitHubStoreClient {
+  private token: string;
+  private repo: string;
+  private config: Required<GitHubStoreConfig>;
+  private cache: IssueCache;
+
+  constructor(
+    token: string,
+    repo: string,
+    config: GitHubStoreConfig & { cache?: CacheConfig } = {}
+  ) {
+    this.token = token;
+    this.repo = repo;
+    this.config = {
+      baseLabel: config.baseLabel ?? "stored-object",
+      uidPrefix: config.uidPrefix ?? "UID:",
+      reactions: {
+        processed: config.reactions?.processed ?? "+1",
+        initialState: config.reactions?.initialState ?? "rocket",
+      },
+    };
+    this.cache = new IssueCache(config.cache);
+  }
+
+  private async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+    const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
+    
+    if (options.params) {
+      Object.entries(options.params).forEach(([key, value]) => {
+        url.searchParams.append(key, value);
+      });
+      delete options.params;
+    }
+
+    const response = await fetch(url.toString(), {
+      ...options,
+      headers: {
+        "Authorization": `token ${this.token}`,
+        "Accept": "application/vnd.github.v3+json",
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+
+    return response.json() as Promise<T>;
+  }
+
+  private createCommentPayload(data: Json, type?: string): CommentPayload {
+    const payload: CommentPayload = {
+      _data: data,
+      _meta: {
+        client_version: CLIENT_VERSION,
+        timestamp: new Date().toISOString(),
+        update_mode: "append"
+      }
+    };
+    
+    if (type) {
+      payload.type = type;
+    }
+    
+    return payload;
+  }
+
+  async getObject(objectId: string): Promise<StoredObject> {
+    // Try to get issue number from cache
+    const cachedIssueNumber = this.cache.get(objectId);
+    let issue: GitHubIssue | undefined;
+
+    if (cachedIssueNumber) {
+      // Try to fetch directly using cached issue number
+      try {
+        issue = await this.fetchFromGitHub<GitHubIssue>(`/issues/${cachedIssueNumber}`);
+
+        // Verify it's the correct issue
+        if (!this._verifyIssueLabels(issue, objectId)) {
+          this.cache.remove(objectId);
+          issue = undefined;
+        }
+      } catch (error) {
+        // If issue not found, remove from cache
+        this.cache.remove(objectId);
+      }
+    }
+
+    if (!issue) {
+      // Fall back to searching by labels
+      const issues = await this.fetchFromGitHub<GitHubIssue[]>("/issues", {
+        method: "GET",
+        params: {
+          labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+          state: "closed",
+        },
+      });
+
+      if (!issues || issues.length === 0) {
+        throw new Error(`No object found with ID: ${objectId}`);
+      }
+
+      issue = issues[0];
+    }
+
+    if (!issue?.body) {
+      throw new Error(`Invalid issue data received for ID: ${objectId}`);
+    }
+
+    const data = JSON.parse(issue.body) as Json;
+    const createdAt = new Date(issue.created_at);
+    const updatedAt = new Date(issue.updated_at);
+
+    // Update cache
+    this.cache.set(objectId, issue.number, { createdAt, updatedAt });
+
+    const meta: ObjectMeta = {
+      objectId,
+      label: `${this.config.uidPrefix}${objectId}`,
+      createdAt,
+      updatedAt,
+      version: await this._getVersion(issue.number),
+    };
+
+    return { meta, data };
+  }
+
+  async createObject(objectId: string, data: Json): Promise<StoredObject> {
+    const uidLabel = `${this.config.uidPrefix}${objectId}`;
+    
+    const issue = await this.fetchFromGitHub<{
+      number: number;
+      created_at: string;
+      updated_at: string;
+      html_url: string;
+    }>("/issues", {
+      method: "POST",
+      body: JSON.stringify({
+        title: `Stored Object: ${objectId}`,
+        body: JSON.stringify(data, null, 2),
+        labels: [this.config.baseLabel, uidLabel]
+      })
+    });
+
+    // Add to cache immediately
+    this.cache.set(objectId, issue.number, {
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at)
+    });
+
+    // Create and add initial state comment
+    const initialState = this.createCommentPayload(data, "initial_state");
+    
+    const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(initialState, null, 2)
+      })
+    });
+
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.processed })
+    });
+
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.initialState })
+    });
+
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "closed" })
+    });
+
+    const meta: ObjectMeta = {
+      objectId,
+      label: uidLabel,
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at),
+      version: 1
+    };
+
+    return { meta, data };
+  }
+  
+  private _verifyIssueLabels(issue: { labels: Array<{ name: string }> }, objectId: string): boolean {
+    const expectedLabels = new Set([
+      this.config.baseLabel,
+      `${this.config.uidPrefix}${objectId}`
+    ]);
+
+    return issue.labels.some(label => expectedLabels.has(label.name));
+  }
+  
+  async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
+    // Get the object's issue first
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      state: string;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+        state: "all",
+      },
+    });
+
+    if (!issues || issues.length === 0) {
+      throw new Error(`No object found with ID: ${objectId}`);
+    }
+
+    const issue = issues[0];
+    
+    // Create update payload with metadata
+    const updatePayload = this.createCommentPayload(changes);
+
+    // Add update comment
+    await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(updatePayload, null, 2)
+      })
+    });
+
+    // Reopen issue to trigger processing
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "open" })
+    });
+
+    // Return current state (before update is processed)
+    return this.getObject(objectId);
+  }
+
+  async listAll(): Promise<Record<string, StoredObject>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: this.config.baseLabel,
+        state: "closed",
+      },
+    });
+
+    const objects: Record<string, StoredObject> = {};
+
+    for (const issue of issues) {
+      // Skip archived objects
+      if (issue.labels.some((label) => label.name === "archived")) {
+        continue;
+      }
+
+      try {
+        const objectId = this._getObjectIdFromLabels(issue);
+        const data = JSON.parse(issue.body) as Json;
+
+        const meta: ObjectMeta = {
+          objectId,
+          label: objectId,
+          createdAt: new Date(issue.created_at),
+          updatedAt: new Date(issue.updated_at),
+          version: await this._getVersion(issue.number),
+        };
+
+        objects[objectId] = { meta, data };
+      } catch (error) {
+        // Skip issues that can't be processed
+        continue;
+      }
+    }
+
+    return objects;
+  }
+
+  async listUpdatedSince(timestamp: Date): Promise<Record<string, StoredObject>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: this.config.baseLabel,
+        state: "closed",
+        since: timestamp.toISOString(),
+      },
+    });
+
+    const objects: Record<string, StoredObject> = {};
+
+    for (const issue of issues) {
+      if (issue.labels.some((label) => label.name === "archived")) {
+        continue;
+      }
+
+      try {
+        const objectId = this._getObjectIdFromLabels(issue);
+        const data = JSON.parse(issue.body) as Json;
+        const updatedAt = new Date(issue.updated_at);
+
+        if (updatedAt > timestamp) {
+          const meta: ObjectMeta = {
+            objectId,
+            label: objectId,
+            createdAt: new Date(issue.created_at),
+            updatedAt,
+            version: await this._getVersion(issue.number),
+          };
+
+          objects[objectId] = { meta, data };
+        }
+      } catch (error) {
+        // Skip issues that can't be processed
+        continue;
+      }
+    }
+
+    return objects;
+  }
+
+  async getObjectHistory(objectId: string): Promise<Array<{
+    timestamp: string;
+    type: string;
+    data: Json;
+    commentId: number;
+  }>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+        state: "all",
+      },
+    });
+
+    if (!issues || issues.length === 0) {
+      throw new Error(`No object found with ID: ${objectId}`);
+    }
+
+    const issue = issues[0];
+    const comments = await this.fetchFromGitHub<Array<{
+      id: number;
+      created_at: string;
+      body: string;
+    }>>(`/issues/${issue.number}/comments`);
+    
+    const history = [];
+
+    for (const comment of comments) {
+      try {
+        const payload = JSON.parse(comment.body);
+        let commentType = 'update';
+        let commentData: Json;
+        let metadata = {
+          client_version: 'legacy',
+          timestamp: comment.created_at,
+          update_mode: 'append'
+        };
+
+        if (typeof payload === 'object') {
+          if ('_data' in payload) {
+            // New format with metadata
+            commentType = payload.type || 'update';
+            commentData = payload._data;
+            metadata = payload._meta || metadata;
+          } else if ('type' in payload && payload.type === 'initial_state') {
+            // Old initial state format
+            commentType = 'initial_state';
+            commentData = payload.data;
+          } else {
+            // Legacy format
+            commentData = payload;
+          }
+        } else {
+          commentData = payload;
+        }
+
+        history.push({
+          timestamp: comment.created_at,
+          type: commentType,
+          data: commentData,
+          commentId: comment.id,
+        });
+      } catch (error) {
+        // Skip comments with invalid JSON
+        continue;
+      }
+    }
+
+    return history;
+  }
+
+  private async _getVersion(issueNumber: number): Promise<number> {
+    const comments = await this.fetchFromGitHub<Array<unknown>>(`/issues/${issueNumber}/comments`);
+    return comments.length + 1;
+  }
+
+  private _getObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+      for (const label of issue.labels) {
+        if (label.name !== this.config.baseLabel && label.name.startsWith(this.config.uidPrefix)) {
+          return label.name.slice(this.config.uidPrefix.length);
+        }
+      }
+      throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
+    }
+  }
+
+
+
+---
+File: typescript/src/config.ts
+---
+// typescript/src/config.ts
+export interface StoreConfig {
+  // Base configuration
+  baseLabel: string;
+  uidPrefix: string;
+  
+  // Reaction settings
+  reactions: {
+    processed: string;
+    initialState: string;
+  };
+  
+  // API retry settings
+  retries: {
+    maxAttempts: number;
+    backoffFactor: number;
+  };
+  
+  // Rate limiting
+  rateLimit: {
+    maxRequestsPerHour: number;
+  };
+}
+
+export const DEFAULT_CONFIG: StoreConfig = {
+  baseLabel: "stored-object",
+  uidPrefix: "UID:",
+  reactions: {
+    processed: "+1",
+    initialState: "rocket"
+  },
+  retries: {
+    maxAttempts: 3,
+    backoffFactor: 2
+  },
+  rateLimit: {
+    maxRequestsPerHour: 1000
+  }
+};
+
+export function mergeConfig(userConfig: Partial<StoreConfig>): StoreConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    ...userConfig,
+    reactions: {
+      ...DEFAULT_CONFIG.reactions,
+      ...userConfig.reactions
+    },
+    retries: {
+      ...DEFAULT_CONFIG.retries,
+      ...userConfig.retries
+    },
+    rateLimit: {
+      ...DEFAULT_CONFIG.rateLimit,
+      ...userConfig.rateLimit
+    }
+  };
+}
+
+// Helper to validate token format
+export function validateToken(token: string): boolean {
+  // Check if it's a valid GitHub token format
+  return /^gh[ps]_[a-zA-Z0-9]{36}$/.test(token);
+}
+
+// Helper to validate repository format
+export function validateRepo(repo: string): boolean {
+  return /^[\w-]+\/[\w-]+$/.test(repo);
+}
+
+// Error types for configuration issues
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
+export class TokenError extends ConfigError {
+  constructor(message = 'Invalid GitHub token format') {
+    super(message);
+    this.name = 'TokenError';
+  }
+}
+
+export class RepoError extends ConfigError {
+  constructor(message = 'Invalid repository format. Use owner/repo') {
+    super(message);
+    this.name = 'RepoError';
+  }
+}
+
+
+
+---
+File: typescript/src/index.ts
+---
+// typescript/src/index.ts
+export * from './client';
+export * from './types';
+export * from './config';
+
+
+
+---
+File: typescript/src/types.ts
+---
+// typescript/src/types.ts
+export type Json = { [key: string]: Json } | Json[] | string | number | boolean | null;
+
+export interface ObjectMeta {
+  objectId: string;
+  label: string;
+  createdAt: Date;
+  updatedAt: Date;
+  version: number;
+}
+
+export interface StoredObject {
+  meta: ObjectMeta;
+  data: Json;
+}
+
+export interface GitHubStoreConfig {
+  baseLabel?: string;
+  uidPrefix?: string;
+  reactions?: {
+    processed?: string;
+    initialState?: string;
+  };
+}
+
+export interface CommentMeta {
+  client_version: string;
+  timestamp: string;
+  update_mode: string;
+}
+
+export interface CommentPayload {
+  _data: Json;
+  _meta: CommentMeta;
+  type?: string;
+}
+
+
+
+---
+File: typescript/src/version.ts
+---
+// typescript/src/version.ts
+// Version is updated by build process
+export const CLIENT_VERSION = '0.3.1';
+
+
+
+---
+File: typescript/tsconfig.json
+---
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}
+
+
+
+---
+File: typescript/tsup.config.ts
+---
+// tsup.config.ts
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['cjs', 'esm'],
+  dts: true,
+  splitting: false,
+  sourcemap: true,
+  clean: true,
+  minify: true,
+  outDir: 'dist',
+  outExtension: ({ format }) => ({
+    js: format === 'esm' ? '.mjs' : '.cjs'
+  })
+});
+
+
