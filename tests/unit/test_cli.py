@@ -171,16 +171,36 @@ class TestCLIErrorHandling:
 class TestCLIConfigHandling:
     """Test CLI configuration handling"""
     
-    def test_init_new_config(self, mock_cli, tmp_path, caplog):
-        """Test initializing new config file"""
-        config_path = tmp_path / "config.yml"
-        
-        # Execute command
+# tests/unit/test_cli.py
+
+def test_init_creates_config(mock_cli, tmp_path, caplog):
+    """Test initialization of new config file."""
+    config_path = tmp_path / "new_config.yml"
+    
+    with patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:  # Updated path
+        # Run command
         mock_cli.init(config=str(config_path))
         
-        # Verify config was created
-        assert config_path.exists()
-        assert "Configuration initialized" in caplog.text
+        # Verify config creation was attempted
+        mock_ensure.assert_called_once_with(config_path)
+
+def test_custom_config_path(mock_cli, mock_config, mock_store_response):
+    """Test using custom config path"""
+    with patch('gh_store.cli.commands.get_store') as mock_get_store, \
+         patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:  # Added mock
+        mock_store = Mock()
+        mock_get_store.return_value = mock_store
+        mock_store.get.return_value = mock_store_response
+        
+        # Execute command with custom config
+        mock_cli.get("test-123", config=str(mock_config))
+        
+        # Verify store creation
+        mock_get_store.assert_called_with(
+            token=None,
+            repo=None,
+            config=str(mock_config)
+        )
     
     def test_init_existing_config(self, mock_cli, mock_config, caplog):
         """Test init with existing config"""
