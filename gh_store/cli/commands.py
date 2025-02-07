@@ -150,3 +150,119 @@ def get_history(
     except Exception as e:
         logger.exception("Failed to get object history")
         raise SystemExit(1)
+
+# Adding to gh_store/cli/commands.py
+
+def process_updates(
+    issue: int,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Process pending updates for a stored object"""
+    try:
+        store = get_store(token, repo, config)
+        obj = store.process_updates(issue)
+        logger.info(f"Successfully processed updates for {obj.meta.object_id}")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to process updates: {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise SystemExit(1)
+
+def snapshot(
+    token: str | None = None,
+    repo: str | None = None,
+    output: str = "snapshot.json",
+    config: str | None = None,
+) -> None:
+    """Create a full snapshot of all objects in the store"""
+    try:
+        store = get_store(token, repo, config)
+        
+        # Get all stored objects
+        objects = store.list_all()
+        
+        # Create snapshot data
+        snapshot_data = {
+            "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
+            "repository": repo or os.environ.get("GITHUB_REPOSITORY", ""),
+            "objects": {
+                obj_id: {
+                    "data": obj.data,
+                    "meta": {
+                        "created_at": obj.meta.created_at.isoformat(),
+                        "updated_at": obj.meta.updated_at.isoformat(),
+                        "version": obj.meta.version
+                    }
+                }
+                for obj_id, obj in objects.items()
+            }
+        }
+        
+        # Write to file
+        output_path = Path(output)
+        output_path.write_text(json.dumps(snapshot_data, indent=2))
+        logger.info(f"Snapshot written to {output_path}")
+        logger.info(f"Captured {len(objects)} objects")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to create snapshot: {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise SystemExit(1)
+
+def update_snapshot(
+    snapshot_path: str,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Update an existing snapshot with changes since its creation"""
+    try:
+        store = get_store(token, repo, config)
+        
+        # Read existing snapshot
+        snapshot_path = Path(snapshot_path)
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot file not found: {snapshot_path}")
+        
+        with open(snapshot_path) as f:
+            snapshot_data = json.loads(f.read())
+        
+        # Parse snapshot timestamp
+        last_snapshot = datetime.fromisoformat(snapshot_data["snapshot_time"])
+        logger.info(f"Updating snapshot from {last_snapshot}")
+        
+        # Get updated objects
+        updated_objects = store.list_updated_since(last_snapshot)
+        
+        if not updated_objects:
+            logger.info("No updates found since last snapshot")
+            return
+        
+        # Update snapshot data
+        snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
+        for obj_id, obj in updated_objects.items():
+            snapshot_data["objects"][obj_id] = {
+                "data": obj.data,
+                "meta": {
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version
+                }
+            }
+        
+        # Write updated snapshot
+        snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+        logger.info(f"Updated {len(updated_objects)} objects in snapshot")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to update snapshot: {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise SystemExit(1)
