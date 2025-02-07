@@ -123,7 +123,7 @@ def setup_loguru(caplog):
 @pytest.fixture
 def mock_cli(mock_config, mock_gh_repo):
     """Create a CLI instance with mocked dependencies."""
-    with patch('gh_store.__main__.ensure_config_exists') as mock_ensure:
+    with patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:  # Updated path
         cli = CLI()
         # Mock HOME to point to our test config
         with patch.dict(os.environ, {'HOME': str(mock_config.parent.parent.parent)}):

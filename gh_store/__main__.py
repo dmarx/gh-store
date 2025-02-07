@@ -1,29 +1,10 @@
 # gh_store/__main__.py
-import os
-from pathlib import Path
-import json
-from datetime import datetime
-from zoneinfo import ZoneInfo
-import importlib.resources
-import shutil
+
 import fire
+from pathlib import Path
 from loguru import logger
 
-from .core.store import GitHubStore
-from .core.exceptions import GitHubStoreError, ConfigurationError
-
-def ensure_config_exists(config_path: Path) -> None:
-    """Create default config file if it doesn't exist"""
-    if not config_path.exists():
-        logger.info(f"Creating default configuration at {config_path}")
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Copy default config from package
-        with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as src:
-            with open(config_path, 'wb') as dst:
-                shutil.copyfileobj(src, dst)
-        
-        logger.info("Default configuration created. You can modify it at any time.")
+from .cli import commands
 
 class CLI:
     """GitHub Issue Store CLI"""
@@ -40,29 +21,7 @@ class CLI:
         config: str | None = None,
     ) -> None:
         """Process pending updates for a stored object"""
-        try:
-            token = token or os.environ["GITHUB_TOKEN"]
-            repo = repo or os.environ["GITHUB_REPOSITORY"]
-            
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
-            logger.info(f"Processing updates for issue #{issue}")
-            
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            obj = store.process_updates(issue)
-            
-            logger.info(f"Successfully processed updates for {obj.meta.object_id}")
-            
-        except GitHubStoreError as e:
-            logger.error(f"Failed to process updates: {e}")
-            raise SystemExit(1)
-        except Exception as e:
-            logger.exception("Unexpected error occurred")
-            raise SystemExit(1)
+        return commands.process_updates(issue, token, repo, config)
 
     def snapshot(
         self,
@@ -72,50 +31,7 @@ class CLI:
         config: str | None = None,
     ) -> None:
         """Create a full snapshot of all objects in the store"""
-        try:
-            token = token or os.environ["GITHUB_TOKEN"]
-            repo = repo or os.environ["GITHUB_REPOSITORY"]
-            
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            
-            # Get all stored objects
-            objects = store.list_all()
-            
-            # Create snapshot data
-            snapshot_data = {
-                "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
-                "repository": repo,
-                "objects": {
-                    obj_id: {
-                        "data": obj.data,
-                        "meta": {
-                            "created_at": obj.meta.created_at.isoformat(),
-                            "updated_at": obj.meta.updated_at.isoformat(),
-                            "version": obj.meta.version
-                        }
-                    }
-                    for obj_id, obj in objects.items()
-                }
-            }
-            
-            # Write to file
-            output_path = Path(output)
-            output_path.write_text(json.dumps(snapshot_data, indent=2))
-            logger.info(f"Snapshot written to {output_path}")
-            logger.info(f"Captured {len(objects)} objects")
-            
-        except GitHubStoreError as e:
-            logger.error(f"Failed to create snapshot: {e}")
-            raise SystemExit(1)
-        except Exception as e:
-            logger.exception("Unexpected error occurred")
-            raise SystemExit(1)
+        return commands.snapshot(token, repo, output, config)
 
     def update_snapshot(
         self,
@@ -125,74 +41,109 @@ class CLI:
         config: str | None = None,
     ) -> None:
         """Update an existing snapshot with changes since its creation"""
-        try:
-            token = token or os.environ["GITHUB_TOKEN"]
-            repo = repo or os.environ["GITHUB_REPOSITORY"]
-            
-            # Use provided config path or default
-            config_path = Path(config) if config else self.default_config_path
-            
-            # Ensure config exists
-            ensure_config_exists(config_path)
-            
-            # Read existing snapshot
-            snapshot_path = Path(snapshot_path)
-            if not snapshot_path.exists():
-                raise FileNotFoundError(f"Snapshot file not found: {snapshot_path}")
-            
-            with open(snapshot_path) as f:
-                snapshot_data = json.load(f)
-            
-            # Parse snapshot timestamp
-            last_snapshot = datetime.fromisoformat(snapshot_data["snapshot_time"])
-            logger.info(f"Updating snapshot from {last_snapshot}")
-            
-            # Get updated objects
-            store = GitHubStore(token=token, repo=repo, config_path=config_path)
-            updated_objects = store.list_updated_since(last_snapshot)
-            
-            if not updated_objects:
-                logger.info("No updates found since last snapshot")
-                return
-            
-            # Update snapshot data
-            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat() # should probably use latest object updated time here
-            for obj_id, obj in updated_objects.items():
-                snapshot_data["objects"][obj_id] = {
-                    "data": obj.data,
-                    "meta": {
-                        "created_at": obj.meta.created_at.isoformat(),
-                        "updated_at": obj.meta.updated_at.isoformat(),
-                        "version": obj.meta.version
-                    }
-                }
-            
-            # Write updated snapshot
-            snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
-            logger.info(f"Updated {len(updated_objects)} objects in snapshot")
-            
-        except GitHubStoreError as e:
-            logger.error(f"Failed to update snapshot: {e}")
-            raise SystemExit(1)
-        except Exception as e:
-            logger.exception("Unexpected error occurred")
-            raise SystemExit(1)
+        return commands.update_snapshot(snapshot_path, token, repo, config)
 
-    def init(self, config: str | None = None) -> None:
+    def init(
+        self,
+        config: str | None = None
+    ) -> None:
         """Initialize a new configuration file"""
-        try:
-            config_path = Path(config) if config else self.default_config_path
-            
-            if config_path.exists():
-                logger.warning(f"Configuration file already exists at {config_path}")
-                return
-            
-            ensure_config_exists(config_path)
-            logger.info(f"Configuration initialized at {config_path}")
-            
-        except Exception as e:
-            logger.exception("Failed to initialize configuration")
-            raise SystemExit(1)
+        config_path = Path(config) if config else self.default_config_path
+        commands.ensure_config_exists(config_path)
+        logger.info(f"Configuration initialized at {config_path}")
+
+    def create(
+        self,
+        object_id: str,
+        data: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Create a new object in the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            data: JSON string containing object data
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.create(object_id, data, token, repo, config)
+
+    def get(
+        self,
+        object_id: str,
+        output: str | None = None,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Retrieve an object from the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            output: Path to write output (optional)
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.get(object_id, output, token, repo, config)
+
+    def update(
+        self,
+        object_id: str,
+        changes: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Update an existing object
+        
+        Args:
+            object_id: Unique identifier for the object
+            changes: JSON string containing update data
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.update(object_id, changes, token, repo, config)
+
+    def delete(
+        self,
+        object_id: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Delete an object from the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.delete(object_id, token, repo, config)
+
+    def history(
+        self,
+        object_id: str,
+        output: str | None = None,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Get complete history of an object
+        
+        Args:
+            object_id: Unique identifier for the object
+            output: Path to write output (optional)
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.get_history(object_id, output, token, repo, config)
 
 def main():
     fire.Fire(CLI)
