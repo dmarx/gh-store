@@ -14,6 +14,7 @@ from ..core.store import GitHubStore
 from ..core.exceptions import GitHubStoreError, ConfigurationError
 from ..core.types import Json
 
+
 def ensure_config_exists(config_path: Path) -> None:
     """Create default config file if it doesn't exist"""
     if not config_path.exists():
@@ -28,7 +29,7 @@ def ensure_config_exists(config_path: Path) -> None:
         logger.info("Default configuration created. You can modify it at any time.")
 
 def get_store(token: str | None = None, repo: str | None = None, config: str | None = None) -> GitHubStore:
-    """Helper to create GitHubStore instance with CLI parameters"""
+    """Helper to create GitHubStore instance with CLI parameters using keyword arguments"""
     token = token or os.environ["GITHUB_TOKEN"]
     repo = repo or os.environ["GITHUB_REPOSITORY"]
     config_path = Path(config) if config else None
@@ -37,6 +38,37 @@ def get_store(token: str | None = None, repo: str | None = None, config: str | N
         ensure_config_exists(config_path)
         
     return GitHubStore(token=token, repo=repo, config_path=config_path)
+
+def get(
+    object_id: str,
+    output: str | None = None,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Retrieve an object from the store"""
+    try:
+        store = get_store(token=token, repo=repo, config=config)
+        obj = store.get(object_id)
+        
+        # Format output
+        result = {
+            "object_id": obj.meta.object_id,
+            "created_at": obj.meta.created_at.isoformat(),
+            "updated_at": obj.meta.updated_at.isoformat(),
+            "version": obj.meta.version,
+            "data": obj.data
+        }
+        
+        if output:
+            Path(output).write_text(json.dumps(result, indent=2))
+            logger.info(f"Object written to {output}")
+        else:
+            print(json.dumps(result, indent=2))
+            
+    except Exception as e:
+        logger.exception("Failed to get object")
+        raise SystemExit(1)
 
 def create(
     object_id: str,
@@ -58,37 +90,6 @@ def create(
         raise SystemExit(1)
     except Exception as e:
         logger.exception("Failed to create object")
-        raise SystemExit(1)
-
-def get(
-    object_id: str,
-    output: str | None = None,
-    token: str | None = None,
-    repo: str | None = None,
-    config: str | None = None,
-) -> None:
-    """Retrieve an object from the store"""
-    try:
-        store = get_store(token, repo, config)
-        obj = store.get(object_id)
-        
-        # Format output
-        result = {
-            "object_id": obj.meta.object_id,
-            "created_at": obj.meta.created_at.isoformat(),
-            "updated_at": obj.meta.updated_at.isoformat(),
-            "version": obj.meta.version,
-            "data": obj.data
-        }
-        
-        if output:
-            Path(output).write_text(json.dumps(result, indent=2))
-            logger.info(f"Object written to {output}")
-        else:
-            print(json.dumps(result, indent=2))
-            
-    except Exception as e:
-        logger.exception("Failed to get object")
         raise SystemExit(1)
 
 def update(
