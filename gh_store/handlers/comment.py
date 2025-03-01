@@ -62,14 +62,32 @@ class CommentHandler:
                     logger.debug(f"Skipping initial state comment {comment.id}")
                     continue
                     
+                # Skip system comments
+                if comment_payload.get('type', '').startswith('system_'):
+                    logger.debug(f"Skipping system comment {comment.id}")
+                    continue
+                    
                 # Skip comments from unauthorized users
                 if not self.access_control.validate_comment_author(comment):
                     logger.debug(f"Skipping unauthorized comment {comment.id}")
                     continue
                     
+                # Extract timestamp from metadata or fallback to comment creation time
+                try:
+                    meta_timestamp = comment_payload.get('_meta', {}).get('timestamp')
+                    if meta_timestamp:
+                        # Handle various ISO format variations
+                        if meta_timestamp.endswith('Z'):
+                            meta_timestamp = meta_timestamp[:-1] + '+00:00'
+                        timestamp = datetime.fromisoformat(meta_timestamp)
+                    else:
+                        timestamp = comment.created_at
+                except (ValueError, AttributeError):
+                    timestamp = comment.created_at
+                    
                 updates.append(Update(
                     comment_id=comment.id,
-                    timestamp=comment.created_at,
+                    timestamp=timestamp,  # Use metadata timestamp instead of comment creation time
                     changes=comment_payload['_data']
                 ))
             except json.JSONDecodeError:
@@ -80,6 +98,7 @@ class CommentHandler:
                 logger.warning(f"Malformed comment payload in {comment.id}: {e}")
                 continue
         
+        # Sort updates by timestamp (metadata timestamp if available, otherwise comment creation)
         return sorted(updates, key=lambda u: u.timestamp)
 
     def apply_update(self, obj: StoredObject, update: Update) -> StoredObject:
