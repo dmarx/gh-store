@@ -7,8 +7,9 @@ on:
   # Run daily at 2:00 UTC
   schedule:
     - cron: '0 2 * * *'
-  pull_request:
+  push:
     branches: [ canonicalizer ]
+    paths: [ ".github/workflows/deduplicate.yml" ]
   # Allow manual triggering
   workflow_dispatch:
     inputs:
