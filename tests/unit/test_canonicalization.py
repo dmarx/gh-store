@@ -136,14 +136,14 @@ class TestCanonicalStoreObjectResolution:
         # Create a circular reference scenario
         circular_alias_1 = Mock()
         circular_alias_1.labels = [
-            Mock(name=f"{LabelNames.UID_PREFIX}object-a"),
-            Mock(name=f"{LabelNames.ALIAS_TO_PREFIX}object-b")
+            mock_label_factory(f"{LabelNames.UID_PREFIX}object-a"),
+            mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}object-b")
         ]
         
         circular_alias_2 = Mock()
         circular_alias_2.labels = [
-            Mock(name=f"{LabelNames.UID_PREFIX}object-b"),
-            Mock(name=f"{LabelNames.ALIAS_TO_PREFIX}object-a")
+            mock_label_factory(f"{LabelNames.UID_PREFIX}object-b"),
+            mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}object-a")
         ]
         
         # Set up repository to simulate circular references
