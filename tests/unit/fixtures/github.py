@@ -43,7 +43,7 @@ class CommentBody(TypedDict, total=False):
     """Structure for comment body data."""
     _data: dict[str, Any]
     _meta: CommentMetadata
-    type: Literal['initial_state'] | None
+    type: Literal['initial_state', 'system_relationship'] | None
 
 @pytest.fixture
 def mock_comment_factory():
@@ -112,8 +112,8 @@ def mock_comment_factory():
         if isinstance(body, dict) and "_meta" in body:
             if "update_mode" in body["_meta"] and body["_meta"]["update_mode"] not in ["append", "replace"]:
                 raise ValueError("update_mode must be 'append' or 'replace'")
-            if "type" in body and body["type"] not in [None, "initial_state"]:
-                raise ValueError("type must be None or 'initial_state'")
+            if "type" in body and body["type"] not in [None, "initial_state", "system_relationship"]:
+                raise ValueError("type must be None, 'initial_state' or 'system_relationship'")
 
         comment = Mock()
         
@@ -150,9 +150,6 @@ def mock_comment_factory():
         return comment
     
     return create_comment
-
-
-mock_comment = mock_comment_factory
 
 
 @pytest.fixture
@@ -243,6 +240,7 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         
         # Set up issue editing
         issue.edit = Mock()
+        issue.add_to_labels = Mock()
         
         # Add any additional attributes
         for key, value in kwargs.items():
