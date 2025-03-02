@@ -378,6 +378,122 @@ class CanonicalStore(GitHubStore):
                 "update_mode": "append",
                 "system": True
             },
+            "type": "system_alias"
+        }
+        source_issue.create_comment(json.dumps(source_comment, indent=2))
+        
+        # Add reference comment to target
+        target_comment = {
+            "_data": {
+                "aliased_by": source_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "system": True
+            },
+            "type": "system_alias_reference"
+        }
+        target_issue.create_comment(json.dumps(target_comment, indent=2))
+        
+        return {
+            "success": True,
+            "source_id": source_id,
+            "target_id": target_id
+        }
+    
+    def deprecate_object(self, object_id: str, target_id: str, reason: str) -> dict:
+        """
+        Deprecate an object by merging it into a target object.
+        
+        Args:
+            object_id: The ID of the object to deprecate
+            target_id: The ID of the canonical object to merge into
+            reason: Reason for deprecation ("duplicate", "merged", "replaced")
+        """
+        # Verify objects exist
+        source_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
+            state="all"
+        ))
+        
+        if not source_issues:
+            raise ObjectNotFound(f"Source object not found: {object_id}")
+            
+        source_issue = source_issues[0]
+        
+        # Verify target object exists
+        target_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{target_id}"],
+            state="all"
+        ))
+        
+        if not target_issues:
+            raise ObjectNotFound(f"Target object not found: {target_id}")
+            
+        target_issue = target_issues[0]
+        
+        # Remove UID label from source
+        source_issue.remove_from_labels(f"{LabelNames.UID_PREFIX}{object_id}")
+        
+        # Add merge and deprecated labels
+        try:
+            # Create labels if they don't exist
+            merge_label = f"{LabelNames.MERGED_INTO_PREFIX}{target_id}"
+            try:
+                self.repo.create_label(merge_label, "d73a49")
+            except:
+                pass  # Label already exists
+                
+            try:
+                self.repo.create_label(LabelNames.DEPRECATED, "999999")
+            except:
+                pass  # Label already exists
+                
+            # Add labels to source issue
+            source_issue.add_to_labels(LabelNames.DEPRECATED, merge_label)
+        except Exception as e:
+            # If we fail, try to restore UID label
+            try:
+                source_issue.add_to_labels(f"{LabelNames.UID_PREFIX}{object_id}")
+            except:
+                pass
+            raise ValueError(f"Failed to deprecate object: {e}")
+        
+        # Add system comments
+        source_comment = {
+            "_data": {
+                "status": "deprecated",
+                "canonical_object_id": target_id,
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "system": True
+            },
+            "type": "system_deprecation"
+        }
+        source_issue.create_comment(json.dumps(source_comment, indent=2))
+        
+        # Add reference comment to target
+        target_comment = {
+            "_data": {
+                "status": "merged_reference",
+                "merged_object_id": object_id,
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "system": True
+            },
             "type": "system_reference"
         }
         target_issue.create_comment(json.dumps(target_comment, indent=2))
@@ -622,120 +738,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-system": True
-            },
-            "type": "system_alias"
-        }
-        source_issue.create_comment(json.dumps(source_comment, indent=2))
-        
-        # Add reference comment to target
-        target_comment = {
-            "_data": {
-                "aliased_by": source_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_alias_reference"
-        }
-        target_issue.create_comment(json.dumps(target_comment, indent=2))
-        
-        return {
-            "success": True,
-            "source_id": source_id,
-            "target_id": target_id
-        }
-    
-    def deprecate_object(self, object_id: str, target_id: str, reason: str) -> dict:
-        """
-        Deprecate an object by merging it into a target object.
-        
-        Args:
-            object_id: The ID of the object to deprecate
-            target_id: The ID of the canonical object to merge into
-            reason: Reason for deprecation ("duplicate", "merged", "replaced")
-        """
-        # Verify objects exist
-        source_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
-            state="all"
-        ))
-        
-        if not source_issues:
-            raise ObjectNotFound(f"Source object not found: {object_id}")
-            
-        source_issue = source_issues[0]
-        
-        # Verify target object exists
-        target_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{target_id}"],
-            state="all"
-        ))
-        
-        if not target_issues:
-            raise ObjectNotFound(f"Target object not found: {target_id}")
-            
-        target_issue = target_issues[0]
-        
-        # Remove UID label from source
-        source_issue.remove_from_labels(f"{LabelNames.UID_PREFIX}{object_id}")
-        
-        # Add merge and deprecated labels
-        try:
-            # Create labels if they don't exist
-            merge_label = f"{LabelNames.MERGED_INTO_PREFIX}{target_id}"
-            try:
-                self.repo.create_label(merge_label, "d73a49")
-            except:
-                pass  # Label already exists
-                
-            try:
-                self.repo.create_label(LabelNames.DEPRECATED, "999999")
-            except:
-                pass  # Label already exists
-                
-            # Add labels to source issue
-            source_issue.add_to_labels(LabelNames.DEPRECATED, merge_label)
-        except Exception as e:
-            # If we fail, try to restore UID label
-            try:
-                source_issue.add_to_labels(f"{LabelNames.UID_PREFIX}{object_id}")
-            except:
-                pass
-            raise ValueError(f"Failed to deprecate object: {e}")
-        
-        # Add system comments
-        source_comment = {
-            "_data": {
-                "status": "deprecated",
-                "canonical_object_id": target_id,
-                "reason": reason,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_deprecation"
-        }
-        source_issue.create_comment(json.dumps(source_comment, indent=2))
-        
-        # Add reference comment to target
-        target_comment = {
-            "_data": {
-                "status": "merged_reference",
-                "merged_object_id": object_id,
-                "reason": reason,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "
