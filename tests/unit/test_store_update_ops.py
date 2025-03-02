@@ -15,6 +15,10 @@ def test_process_update(store):
     mock_issue.body = json.dumps(test_data)
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.number = 123
+    # Set up issue.labels as an iterable list of Mocks
+    mock_issue.labels = [
+        Mock(name="stored-object")
+    ]
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
