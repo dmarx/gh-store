@@ -7,7 +7,8 @@ on:
   # Run daily at 2:00 UTC
   schedule:
     - cron: '0 2 * * *'
-  
+  pull_request:
+    branches: [ canonicalizer ]
   # Allow manual triggering
   workflow_dispatch:
     inputs:
