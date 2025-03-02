@@ -460,3 +460,145 @@ class IssueHandler:
         """Extract version number from issue"""
         comments = list(issue.get_comments())
         return len(comments) + 1
+    
+    def create_alias(self, canonical_id: str, alias_id: str) -> StoredObject:
+        """Create a new alias to a canonical object.
+        
+        Args:
+            canonical_id: ID of the canonical object
+            alias_id: ID for the new alias
+            
+        Returns:
+            The canonical StoredObject
+            
+        Raises:
+            ObjectNotFound: If canonical object doesn't exist
+            DuplicateUIDError: If alias ID already exists
+        """
+        logger.info(f"Creating alias {alias_id} to canonical object {canonical_id}")
+        
+        # Get canonical object to validate it exists
+        canonical_obj = self.get_object(canonical_id)
+        canonical_issue = self._get_issue_by_uid(canonical_id)
+        
+        # Create uid label for alias with prefix
+        alias_uid_label = f"{self.config.store.uid_prefix}{alias_id}"
+        
+        # Ensure required labels exist
+        self._ensure_labels_exist([
+            self.base_label, 
+            alias_uid_label, 
+            "canonical-object", 
+            "alias-object"
+        ])
+        
+        # Create reference label to canonical issue
+        reference_label = f"ALIAS-TO:{canonical_issue.number}"
+        self._ensure_labels_exist([reference_label])
+        
+        # Make sure canonical issue is marked as canonical
+        canonical_issue.add_to_labels("canonical-object")
+        
+        # Create an alias issue
+        issue = self.repo.create_issue(
+            title=f"Alias: {alias_id} -> {canonical_id}",
+            body=json.dumps({"alias_to": canonical_id}),
+            labels=[self.base_label, alias_uid_label]
+        )
+        
+        # Add alias markers
+        issue.add_to_labels("alias-object")
+        issue.add_to_labels(reference_label)
+        
+        # Add relationship comment
+        alias_comment = {
+            "_data": {
+                "duplicate_relationship": "alias",
+                "canonical_issue": canonical_issue.number,
+                "canonical_id": canonical_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "system": True
+            },
+            "type": "system_relationship"
+        }
+        
+        issue.create_comment(json.dumps(alias_comment, indent=2))
+        
+        # Add relationship comment to canonical
+        canonical_comment = {
+            "_data": {
+                "duplicate_relationship": "canonical",
+                "alias_issues": [issue.number],
+                "alias_ids": [alias_id],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "system": True
+            },
+            "type": "system_relationship"
+        }
+        
+        canonical_issue.create_comment(json.dumps(canonical_comment, indent=2))
+        
+        # Close the alias issue (it doesn't need processing)
+        issue.edit(state="closed")
+        
+        return canonical_obj
+    
+    def _get_issue_by_uid(self, object_id: str) -> object:
+        """Get issue by object ID.
+        
+        Args:
+            object_id: Object ID
+            
+        Returns:
+            GitHub Issue object
+            
+        Raises:
+            ObjectNotFound: If no issue found with the given object ID
+        """
+        uid_label = f"{self.uid_prefix}{object_id}"
+        
+        issues = list(self.repo.get_issues(
+            labels=[self.base_label, uid_label],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        # If multiple issues, prefer canonical ones
+        canonical_issues = [i for i in issues if any(
+            l.name == "canonical-object" for l in i.labels
+        )]
+        
+        if canonical_issues:
+            return canonical_issues[0]
+        else:
+            return issues[0]
+    
+    def find_aliases(self, issue_number: int) -> list[int]:
+        """Find all alias issues for a canonical issue.
+        
+        Args:
+            issue_number: Canonical issue number
+            
+        Returns:
+            List of alias issue numbers
+        """
+        alias_label = f"ALIAS-TO:{issue_number}"
+        
+        alias_issues = list(self.repo.get_issues(
+            labels=[alias_label],
+            state="all"
+        ))
+        
+        return [issue.number for issue in alias_issues]
