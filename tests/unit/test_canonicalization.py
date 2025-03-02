@@ -107,7 +107,7 @@ class TestCanonicalStoreObjectResolution:
             state="all"
         )
 
-    def test_resolve_canonical_object_id_alias(self, canonical_store, mock_alias_issue, mock_label_factory):
+    def test_resolve_canonical_object_id_alias(self, canonical_store, mock_alias_issue):
         """Test resolving an alias to find its canonical object ID."""
         # Set up repository to return our alias issue
         canonical_store.repo.get_issues.return_value = [mock_alias_issue]
@@ -119,8 +119,8 @@ class TestCanonicalStoreObjectResolution:
         # Verify correct query was made
         canonical_store.repo.get_issues.assert_called_with(
             labels=[
-                mock_label_factory(f"{LabelNames.UID_PREFIX}daily-metrics"), 
-                mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}*")],
+                f"{LabelNames.UID_PREFIX}daily-metrics", 
+                f"{LabelNames.ALIAS_TO_PREFIX}*"],
             state="all"
         )
 
