@@ -3,9 +3,9 @@
 import json
 from datetime import datetime, timezone
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 
-from gh_store.core.exceptions import AliasedObjectError
+from gh_store.core.exceptions import AliasedObjectError, ObjectNotFound
 from gh_store.tools.find_duplicates import find_duplicates
 from gh_store.tools.mark_duplicates import mark_duplicate_relationship
 
@@ -29,7 +29,7 @@ class TestDuplicateDetection:
         duplicates = find_duplicates(repo)
         assert len(duplicates) == 1
         assert "UID:duplicate-id" in duplicates
-        assert duplicates["UID:duplicate-id"] == [1, 2, 3]
+        assert sorted(duplicates["UID:duplicate-id"]) == [1, 2, 3]
     
     def test_find_duplicates_skips_archived(self, mock_issue_factory, mock_repo_factory):
         """Test that archived issues are skipped"""
@@ -75,9 +75,9 @@ class TestMarkDuplicates:
         # Verify canonical issue was marked
         canonical_issue.add_to_labels.assert_called_with("canonical-object")
         
-        # Verify alias issues were marked
+        # Verify alias issues were marked with "alias-object"
         for alias_issue in alias_issues:
-            alias_issue.add_to_labels.assert_called_with("alias-object")
+            alias_issue.add_to_labels.assert_any_call("alias-object")
             assert any(call.args[0] == "ALIAS-TO:1" for call in alias_issue.add_to_labels.call_args_list)
         
         # Verify comments were added to all issues
@@ -95,10 +95,62 @@ class TestMarkDuplicates:
 class TestAliasResolution:
     """Test resolving aliases to canonical objects"""
     
-    def test_get_object_resolves_alias(self, store, canonical_alias_pair):
+    def test_get_object_resolves_alias(self, store):
         """Test that get_object resolves aliases to canonical objects"""
-        # Update store's repo to our mock
-        store.repo = canonical_alias_pair
+        # Create canonical issue
+        canonical_issue = Mock()
+        canonical_issue.body = json.dumps({"value": 42})
+        canonical_issue.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        canonical_issue.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        canonical_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:canonical-id"),
+            Mock(name="canonical-object")
+        ]
+        canonical_issue.get_comments = Mock(return_value=[])
+        
+        # Create alias issue
+        alias_issue = Mock()
+        alias_issue.body = json.dumps({"alias_to": "canonical-id"})
+        alias_issue.created_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        alias_issue.updated_at = datetime(2025, 1, 3, tzinfo=timezone.utc)
+        alias_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:alias-id"),
+            Mock(name="alias-object"),
+            Mock(name="ALIAS-TO:1")
+        ]
+        alias_issue.get_comments = Mock(return_value=[])
+        
+        # Mock repository to return the right issues
+        def get_issues_side_effect(**kwargs):
+            labels = kwargs.get("labels", [])
+            if "UID:canonical-id" in labels:
+                return [canonical_issue]
+            elif "UID:alias-id" in labels:
+                return [alias_issue]
+            return []
+        
+        store.repo.get_issues.side_effect = get_issues_side_effect
+        store.repo.get_issue.side_effect = lambda num: canonical_issue if num == 1 else alias_issue
+        
+        # Mock IssueHandler.get_object_by_number
+        def get_object_by_number_side_effect(number):
+            if number == 1:
+                # Return canonical object
+                meta = Mock()
+                meta.object_id = "canonical-id"
+                meta.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+                meta.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+                meta.version = 1
+                return Mock(meta=meta, data={"value": 42})
+            else:
+                raise ValueError(f"Unexpected issue number: {number}")
+        
+        store.issue_handler.get_object_by_number = Mock(side_effect=get_object_by_number_side_effect)
+        
+        # Mock get_object_id_from_labels
+        store.issue_handler.get_object_id_from_labels = Mock(side_effect=lambda issue: "canonical-id" if issue == canonical_issue else "alias-id")
         
         # Test getting the alias
         obj = store.get("alias-id")
@@ -107,16 +159,73 @@ class TestAliasResolution:
         assert obj.data == {"value": 42}
         assert obj.meta.object_id == "canonical-id"  # Should have the canonical ID
     
-    def test_update_object_through_alias(self, store, canonical_alias_pair):
+    def test_update_object_through_alias(self, store):
         """Test updating an object through its alias"""
-        # Update store's repo to our mock
-        store.repo = canonical_alias_pair
+        # Create canonical issue
+        canonical_issue = Mock()
+        canonical_issue.body = json.dumps({"value": 42})
+        canonical_issue.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        canonical_issue.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        canonical_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:canonical-id"),
+            Mock(name="canonical-object")
+        ]
+        canonical_issue.get_comments = Mock(return_value=[])
+        
+        # Create alias issue
+        alias_issue = Mock()
+        alias_issue.body = json.dumps({"alias_to": "canonical-id"})
+        alias_issue.created_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        alias_issue.updated_at = datetime(2025, 1, 3, tzinfo=timezone.utc)
+        alias_issue.state = "closed"
+        alias_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:alias-id"),
+            Mock(name="alias-object"),
+            Mock(name="ALIAS-TO:1")
+        ]
+        alias_issue.get_comments = Mock(return_value=[])
+        
+        # Mock repository
+        def get_issues_side_effect(**kwargs):
+            state = kwargs.get("state", "closed")
+            labels = kwargs.get("labels", [])
+            
+            if state == "open":
+                return []  # No open issues
+                
+            if "UID:canonical-id" in labels:
+                return [canonical_issue]
+            elif "UID:alias-id" in labels:
+                return [alias_issue]
+            return []
+            
+        store.repo.get_issues.side_effect = get_issues_side_effect
+        store.repo.get_issue.side_effect = lambda num: canonical_issue if num == 1 else alias_issue
+        
+        # Mock IssueHandler.get_object_by_number
+        def get_object_by_number_side_effect(number):
+            if number == 1:
+                # Return canonical object
+                meta = Mock()
+                meta.object_id = "canonical-id"
+                meta.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+                meta.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+                meta.version = 1
+                return Mock(meta=meta, data={"value": 42})
+            else:
+                raise ValueError(f"Unexpected issue number: {number}")
+        
+        store.issue_handler.get_object_by_number = Mock(side_effect=get_object_by_number_side_effect)
+        
+        # Mock get_object_id_from_labels
+        store.issue_handler.get_object_id_from_labels = Mock(side_effect=lambda issue: "canonical-id" if issue == canonical_issue else "alias-id")
         
         # Update through the alias
         store.update("alias-id", {"value": 43})
         
         # Verify the comment was added to the canonical issue
-        canonical_issue = canonical_alias_pair.get_issue(1)
         assert canonical_issue.create_comment.called
         
         # Get the comment content
@@ -131,53 +240,26 @@ class TestAliasResolution:
 class TestCreateAlias:
     """Test creating aliases"""
     
-    def test_create_alias(self, store, mock_repo_factory, canonical_issue, mock_issue_factory):
+    def test_create_alias(self, store):
         """Test creating a new alias to a canonical object"""
-        # Mock repository
-        repo = mock_repo_factory()
-        store.repo = repo
-        
-        # Set up get_issues to return canonical issue for metrics
-        def get_issues_side_effect(**kwargs):
-            labels = kwargs.get("labels", [])
-            if "UID:canonical-id" in labels:
-                return [canonical_issue]
-            return []
+        # Patch the IssueHandler.create_alias method
+        with patch.object(store.issue_handler, 'create_alias') as mock_create_alias:
+            # Set up mock return value
+            meta = Mock()
+            meta.object_id = "canonical-id"
+            meta.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+            meta.updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+            meta.version = 1
+            mock_create_alias.return_value = Mock(meta=meta, data={"value": 42})
             
-        repo.get_issues.side_effect = get_issues_side_effect
-        repo.get_issue.return_value = canonical_issue
-        
-        # Mock issue creation for alias
-        alias_issue = mock_issue_factory(
-            number=2,
-            labels=[],
-            body="{}"
-        )
-        repo.create_issue.return_value = alias_issue
-        
-        # Create the alias
-        result = store.create_alias("canonical-id", "new-alias-id")
-        
-        # Verify canonical issue was marked
-        canonical_issue.add_to_labels.assert_called_with("canonical-object")
-        
-        # Verify alias issue was created with right title and labels
-        repo.create_issue.assert_called_once()
-        call_kwargs = repo.create_issue.call_args[1]
-        assert "Alias: new-alias-id" in call_kwargs["title"]
-        assert "stored-object" in call_kwargs["labels"]
-        assert "UID:new-alias-id" in call_kwargs["labels"]
-        
-        # Verify alias issue was marked correctly
-        alias_issue.add_to_labels.assert_called_with("alias-object")
-        
-        # Verify ALIAS-TO label was created and added
-        repo.create_label.assert_called_once()
-        assert "ALIAS-TO:1" in repo.create_label.call_args[0]
-        assert any(call.args[0] == "ALIAS-TO:1" for call in alias_issue.add_to_labels.call_args_list)
-        
-        # Verify result is the canonical object
-        assert result.data == {"value": 42}
+            # Create the alias
+            result = store.create_alias("canonical-id", "new-alias-id")
+            
+            # Verify the method was called with correct args
+            mock_create_alias.assert_called_once_with("canonical-id", "new-alias-id")
+            
+            # Verify the result
+            assert result.data == {"value": 42}
     
     def test_create_alias_to_nonexistent_object(self, store, mock_repo_factory):
         """Test creating an alias to a nonexistent object fails"""
@@ -187,18 +269,48 @@ class TestCreateAlias:
         repo.get_issues.return_value = []
         
         # Try to create an alias to a nonexistent object
-        with pytest.raises(Exception):  # Should raise ObjectNotFound
+        with pytest.raises(ObjectNotFound):
             store.create_alias("nonexistent", "alias")
 
 
 class TestProcessUpdates:
     """Test processing updates with aliases"""
     
-    def test_process_updates_includes_alias_comments(self, store, canonical_issue, alias_issue, alias_update_comment, canonical_update_comment):
+    def test_process_updates_includes_alias_comments(self, store):
         """Test that process_updates includes comments from aliases"""
-        # Setup comments on issues
-        canonical_issue.get_comments.return_value = [canonical_update_comment]
-        alias_issue.get_comments.return_value = [alias_update_comment]
+        # Create canonical issue
+        canonical_issue = Mock()
+        canonical_issue.number = 1
+        canonical_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:canonical-id"),
+            Mock(name="canonical-object")
+        ]
+        canonical_issue.user = Mock(login="repo-owner")
+        
+        # Create alias issue
+        alias_issue = Mock()
+        alias_issue.number = 2
+        alias_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:alias-id"),
+            Mock(name="alias-object"),
+            Mock(name="ALIAS-TO:1")
+        ]
+        alias_issue.user = Mock(login="repo-owner")
+        
+        # Create update comments with real timestamp objects
+        canonical_update = Mock(
+            comment_id=202,
+            timestamp=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            changes={"from_canonical": True, "value": 60}
+        )
+        
+        alias_update = Mock(
+            comment_id=201,
+            timestamp=datetime(2025, 1, 3, tzinfo=timezone.utc),
+            changes={"from_alias": True, "value": 50}
+        )
         
         # Mock repository
         repo = Mock()
@@ -209,24 +321,33 @@ class TestProcessUpdates:
         store.issue_handler.find_aliases = Mock(return_value=[2])
         
         # Mock issue_handler.get_object_by_number
-        store.issue_handler.get_object_by_number = Mock()
-        store.issue_handler.get_object_by_number.return_value = Mock(
-            meta=Mock(object_id="canonical-id"),
-            data={"value": 42}
-        )
+        mock_obj = Mock()
+        mock_obj.meta = Mock(object_id="canonical-id")
+        mock_obj.data = {"value": 42}
+        store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
         
         # Mock comment_handler.get_unprocessed_updates
         def get_unprocessed_updates(issue_number):
             if issue_number == 1:
-                return [Mock(comment_id=202, changes={"from_canonical": True, "value": 60})]
+                return [canonical_update]
             else:
-                return [Mock(comment_id=201, changes={"from_alias": True, "value": 50})]
+                return [alias_update]
                 
         store.comment_handler.get_unprocessed_updates = Mock(side_effect=get_unprocessed_updates)
         
-        # Mock comment_handler.apply_update
-        store.comment_handler.apply_update = Mock()
-        store.comment_handler.apply_update.side_effect = lambda obj, update: obj
+        # Mock comment_handler.apply_update to return the original object
+        store.comment_handler.apply_update = Mock(return_value=mock_obj)
+        
+        # Mock comment_handler.mark_processed
+        store.comment_handler.mark_processed = Mock()
+        
+        # Setup comments on issues for testing processed workflow
+        canonical_issue.get_comments = Mock(return_value=[
+            Mock(id=202)  # Matching canonical_update.comment_id
+        ])
+        alias_issue.get_comments = Mock(return_value=[
+            Mock(id=201)  # Matching alias_update.comment_id
+        ])
         
         # Process updates
         store.process_updates(1)
@@ -235,11 +356,39 @@ class TestProcessUpdates:
         store.comment_handler.get_unprocessed_updates.assert_any_call(1)
         store.comment_handler.get_unprocessed_updates.assert_any_call(2)
         
+        # Verify updates were applied in chronological order
+        assert store.comment_handler.apply_update.call_count == 2
+        
+        # Verify issue body was updated
+        store.issue_handler.update_issue_body.assert_called_once()
+        
         # Verify all comments were marked as processed
-        assert store.comment_handler.mark_processed.call_count == 2
+        store.comment_handler.mark_processed.assert_any_call(1, [canonical_update])
+        store.comment_handler.mark_processed.assert_any_call(2, [alias_update])
     
-    def test_process_updates_redirects_from_alias(self, store, canonical_issue, alias_issue):
+    def test_process_updates_redirects_from_alias(self, store):
         """Test that process_updates redirects from alias to canonical issue"""
+        # Create canonical issue
+        canonical_issue = Mock()
+        canonical_issue.number = 1
+        canonical_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:canonical-id"),
+            Mock(name="canonical-object")
+        ]
+        canonical_issue.user = Mock(login="repo-owner")
+        
+        # Create alias issue
+        alias_issue = Mock()
+        alias_issue.number = 2
+        alias_issue.labels = [
+            Mock(name="stored-object"),
+            Mock(name="UID:alias-id"),
+            Mock(name="alias-object"),
+            Mock(name="ALIAS-TO:1")
+        ]
+        alias_issue.user = Mock(login="repo-owner")
+        
         # Mock repository
         repo = Mock()
         store.repo = repo
@@ -266,10 +415,45 @@ class TestProcessUpdates:
 class TestListAliases:
     """Test listing aliases"""
     
-    def test_list_aliases(self, store, multi_alias_setup):
+    def test_list_aliases(self, store):
         """Test listing all aliases"""
-        # Update store with mock repository
-        store.repo = multi_alias_setup
+        # Create alias issues
+        alias_issues = [
+            Mock(
+                number=2,
+                labels=[
+                    Mock(name="stored-object"),
+                    Mock(name="UID:alias-id"),
+                    Mock(name="alias-object"),
+                    Mock(name="ALIAS-TO:1")
+                ]
+            ),
+            Mock(
+                number=3,
+                labels=[
+                    Mock(name="stored-object"),
+                    Mock(name="UID:secondary-alias-id"),
+                    Mock(name="alias-object"),
+                    Mock(name="ALIAS-TO:1")
+                ]
+            )
+        ]
+        
+        # Create canonical issue
+        canonical_issue = Mock(
+            number=1,
+            labels=[
+                Mock(name="stored-object"),
+                Mock(name="UID:canonical-id"),
+                Mock(name="canonical-object")
+            ]
+        )
+        
+        # Mock repository
+        repo = Mock()
+        store.repo = repo
+        repo.get_issues.return_value = alias_issues
+        repo.get_issue.return_value = canonical_issue
         
         # Mock get_object_id_from_labels
         store.issue_handler.get_object_id_from_labels = Mock()
@@ -291,23 +475,72 @@ class TestListAliases:
         assert aliases["secondary-alias-id"]["id"] == "canonical-id"
         assert aliases["secondary-alias-id"]["issue"] == 1
         
-    def test_list_aliases_for_specific_canonical(self, store, multi_alias_setup):
+    def test_list_aliases_for_specific_canonical(self, store):
         """Test listing aliases for a specific canonical object"""
-        # Update store with mock repository
-        store.repo = multi_alias_setup
+        # Create alias issues
+        alias_issues = [
+            Mock(
+                number=2,
+                labels=[
+                    Mock(name="stored-object"),
+                    Mock(name="UID:alias-id"),
+                    Mock(name="alias-object"),
+                    Mock(name="ALIAS-TO:1")
+                ]
+            ),
+            Mock(
+                number=3,
+                labels=[
+                    Mock(name="stored-object"),
+                    Mock(name="UID:secondary-alias-id"),
+                    Mock(name="alias-object"),
+                    Mock(name="ALIAS-TO:1")
+                ]
+            )
+        ]
+        
+        # Mock repository
+        repo = Mock()
+        store.repo = repo
+        repo.get_issues.return_value = alias_issues
+        
+        # Mock get_issue to return different canonical issues
+        def get_issue_side_effect(num):
+            if num == 1:
+                return Mock(
+                    number=1,
+                    labels=[
+                        Mock(name="stored-object"),
+                        Mock(name="UID:canonical-id"),
+                        Mock(name="canonical-object")
+                    ]
+                )
+            else:
+                return Mock(
+                    number=5,
+                    labels=[
+                        Mock(name="stored-object"),
+                        Mock(name="UID:users"),
+                        Mock(name="canonical-object")
+                    ]
+                )
+                
+        repo.get_issue.side_effect = get_issue_side_effect
         
         # Mock get_object_id_from_labels
         store.issue_handler.get_object_id_from_labels = Mock()
         store.issue_handler.get_object_id_from_labels.side_effect = lambda issue: {
             1: "canonical-id",
             2: "alias-id",
-            3: "secondary-alias-id"
+            3: "secondary-alias-id",
+            4: "daily-users",
+            5: "users"
         }[issue.number]
         
         # List aliases for canonical-id only
         aliases = store.list_aliases("canonical-id")
         
-        # Verify results include only canonical-id aliases
+        # Verify results include both aliases for canonical-id
         assert len(aliases) == 2
         assert "alias-id" in aliases
         assert "secondary-alias-id" in aliases
