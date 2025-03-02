@@ -67,7 +67,7 @@ class GitHubStore:
     def delete(self, object_id: str) -> None:
         """Delete an object from the store"""
         self.issue_handler.delete_object(object_id)
-        
+    
     def process_updates(self, issue_number: int) -> StoredObject:
         """Process any unhandled updates on an issue and its aliases"""
         logger.info(f"Processing updates for issue #{issue_number}")
@@ -114,9 +114,11 @@ class GitHubStore:
                     updates.extend(alias_updates)
                 except Exception as e:
                     logger.warning(f"Error processing alias #{alias_number}: {e}")
-            
-            # Resort all updates by timestamp
-            updates.sort(key=lambda u: u.timestamp)
+
+            # Sort all updates by `_meta.timestamp` - Use datetime attribute
+            # Fix for the TypeError: '<' not supported between instances of 'Mock' and 'Mock'
+            if updates:
+                updates.sort(key=lambda u: u.timestamp.timestamp() if isinstance(u.timestamp, datetime) else u.timestamp)
         
         # Apply updates in sequence
         obj = self.issue_handler.get_object_by_number(issue_number)
