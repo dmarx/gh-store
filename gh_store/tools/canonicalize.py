@@ -62,7 +62,7 @@ class CanonicalStore(GitHubStore):
         for name, color, description in special_labels:
             if name not in existing_labels:
                 self.repo.create_label(name=name, color=color, description=description)
-    
+                
     def resolve_canonical_object_id(self, object_id: str, max_depth: int = 5) -> str:
         """
         Resolve an object ID to its canonical object ID with loop prevention.
@@ -79,15 +79,19 @@ class CanonicalStore(GitHubStore):
             return object_id
             
         # Check if this is an alias
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
+        alias_prefix = f"{LabelNames.ALIAS_TO_PREFIX}*"
+        
         alias_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{object_id}", f"{LabelNames.ALIAS_TO_PREFIX}*"],
+            labels=[uid_label, alias_prefix],
             state="all"
         ))
         
         if alias_issues:
             for issue in alias_issues:
                 for label in issue.labels:
-                    if label.name.startswith(LabelNames.ALIAS_TO_PREFIX):
+                    # type protection for mocks
+                    if hasattr(label, 'name') and isinstance(label.name, str) and label.name.startswith(LabelNames.ALIAS_TO_PREFIX):
                         # Extract canonical object ID from label
                         canonical_id = label.name[len(LabelNames.ALIAS_TO_PREFIX):]
                         
