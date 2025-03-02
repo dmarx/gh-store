@@ -52,6 +52,10 @@ def test_get_object(store):
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.created_at = datetime.now(timezone.utc)
     mock_issue.updated_at = datetime.now(timezone.utc)
+    # Set up issue.labels as an iterable list of Mocks
+    mock_issue.labels = [
+        Mock(name="stored-object")
+    ]
     store.repo.get_issues.return_value = [mock_issue]
     
     obj = store.get("test-obj")
