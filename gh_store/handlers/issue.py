@@ -1,4 +1,4 @@
-# gh_store/handlers/issue.py
+# gh_store/handlers/issue_handler.py
 
 import json
 from datetime import datetime, timezone
@@ -7,7 +7,7 @@ from github import Repository
 from omegaconf import DictConfig
 
 from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
-from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.exceptions import ObjectNotFound, DuplicateUIDError, AliasedObjectError
 from ..core.version import CLIENT_VERSION
 
 from time import sleep
@@ -31,6 +31,34 @@ class IssueHandler:
         
         # Ensure required labels exist
         self._ensure_labels_exist([self.base_label, uid_label])
+        
+        # Check for existing objects with this ID
+        existing = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[self.base_label, uid_label],
+            state="all"
+        ))
+        
+        if existing:
+            # Filter out deprecated objects
+            active_issues = [i for i in existing if not any(
+                l.name == "deprecated-object" for l in i.labels
+            )]
+            
+            if active_issues:
+                # Check if any are canonical
+                canonical_issues = [i for i in active_issues if any(
+                    l.name == "canonical-object" for l in i.labels
+                )]
+                
+                if canonical_issues:
+                    # Object already exists and has a canonical issue
+                    raise DuplicateUIDError(
+                        f"Object with ID {object_id} already exists (#{canonical_issues[0].number})"
+                    )
+                else:
+                    # Object exists but no canonical - we can make one later
+                    pass
         
         # Create issue with object data and both required labels
         issue = self.repo.create_issue(
@@ -98,27 +126,80 @@ class IssueHandler:
         raise RuntimeError("Should not reach here")
 
     def get_object(self, object_id: str) -> StoredObject:
-        """Retrieve an object by its ID"""
+        """Retrieve an object by its ID, handling aliases"""
         logger.info(f"Retrieving object: {object_id}")
         
         uid_label = f"{self.uid_prefix}{object_id}"
         
-        # Query for issue with matching labels
+        # Query for issue with matching labels (start with closed issues)
         issues = list(self._with_retry(
             self.repo.get_issues,
             labels=[self.base_label, uid_label],
             state="closed"
         ))
         
+        # If no closed issues found, try any state
+        if not issues:
+            issues = list(self._with_retry(
+                self.repo.get_issues,
+                labels=[self.base_label, uid_label],
+                state="all"
+            ))
+        
         if not issues:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
         elif len(issues) > 1:
-            issue_numbers = [i.number for i in issues]
-            raise DuplicateUIDError(
-                f"Found multiple issues ({issue_numbers}) with label: {uid_label}"
-            )
+            # Multiple issues found - check for a canonical one
+            canonical_issues = [i for i in issues if any(
+                l.name == "canonical-object" for l in i.labels
+            )]
+            
+            if canonical_issues:
+                # Use the canonical issue
+                issue = canonical_issues[0]
+            else:
+                # No canonical issue designated, use oldest one
+                issue = sorted(issues, key=lambda i: i.number)[0]
+                issue_numbers = [i.number for i in issues]
+                logger.warning(
+                    f"Multiple issues ({issue_numbers}) with label: {uid_label}. "
+                    f"Using oldest: #{issue.number}"
+                )
+        else:
+            issue = issues[0]
         
-        issue = issues[0]
+        # Check if this is an alias
+        is_alias = any(l.name == "alias-object" for l in issue.labels)
+        alias_to = None
+        
+        if is_alias:
+            # Find canonical issue reference
+            for label in issue.labels:
+                if label.name.startswith("ALIAS-TO:"):
+                    try:
+                        canonical_number = int(label.name.split(":")[1])
+                        alias_to = canonical_number
+                        break
+                    except (ValueError, IndexError):
+                        continue
+            
+            if alias_to:
+                logger.info(f"Object {object_id} is an alias to #{alias_to}")
+                try:
+                    # Get the canonical issue
+                    canonical_issue = self.repo.get_issue(alias_to)
+                    
+                    # Extract object ID from canonical issue
+                    canonical_id = self.get_object_id_from_labels(canonical_issue)
+                    
+                    # Get the canonical object instead
+                    return self.get_object(canonical_id)
+                except Exception as e:
+                    logger.warning(f"Failed to get canonical object: {e}")
+                    # Fall back to returning alias object
+            else:
+                logger.warning(f"Issue #{issue.number} is marked as alias but no canonical reference found")
+            
         data = json.loads(issue.body)
         
         meta = ObjectMeta(
@@ -146,8 +227,29 @@ class IssueHandler:
         
         if not issues:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
-            
+        
+        # Check if this is an alias
         issue = issues[0]
+        is_alias = any(l.name == "alias-object" for l in issue.labels)
+        
+        if is_alias:
+            # Find canonical issue reference
+            for label in issue.labels:
+                if label.name.startswith("ALIAS-TO:"):
+                    try:
+                        canonical_number = int(label.name.split(":")[1])
+                        # Get the canonical issue
+                        canonical_issue = self.repo.get_issue(canonical_number)
+                        # Extract object ID from canonical issue
+                        canonical_id = self.get_object_id_from_labels(canonical_issue)
+                        # Get history from canonical object
+                        history = self.get_object_history(canonical_id)
+                        logger.info(f"Returning history from canonical object: {canonical_id}")
+                        return history
+                    except (ValueError, IndexError, Exception) as e:
+                        logger.warning(f"Failed to get canonical history: {e}")
+                        # Fall back to alias history
+        
         history = []
         
         # Process all comments chronologically
@@ -220,6 +322,23 @@ class IssueHandler:
         logger.info(f"Retrieving object by issue #{issue_number}")
         
         issue = self.repo.get_issue(issue_number)
+        
+        # Check if this is an alias
+        is_alias = any(l.name == "alias-object" for l in issue.labels)
+        
+        if is_alias:
+            # Find canonical issue reference
+            for label in issue.labels:
+                if label.name.startswith("ALIAS-TO:"):
+                    try:
+                        canonical_number = int(label.name.split(":")[1])
+                        logger.info(f"Issue #{issue_number} is an alias to #{canonical_number}")
+                        # Get the canonical issue
+                        return self.get_object_by_number(canonical_number)
+                    except (ValueError, IndexError, Exception) as e:
+                        logger.warning(f"Failed to get canonical object: {e}")
+                        # Fall back to alias object
+        
         object_id = self.get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
@@ -247,16 +366,57 @@ class IssueHandler:
         """Update an object by adding a comment and reopening the issue"""
         logger.info(f"Updating object: {object_id}")
         
-        # Get the object's issue
+        # Try to get the object to find its issue
+        try:
+            obj = self.get_object(object_id)
+        except ObjectNotFound as e:
+            raise e
+            
+        # Get the object's issue 
+        uid_label = f"{self.config.store.uid_prefix}{object_id}"
+        
+        # Query for issue with matching labels
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
-            state="closed"
+            labels=[self.base_label, uid_label],
+            state="all"
         ))
         
         if not issues:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
         
-        issue = issues[0]
+        # Check for canonical issue
+        canonical_issues = [i for i in issues if any(
+            l.name == "canonical-object" for l in i.labels
+        )]
+        
+        if canonical_issues:
+            # Use the canonical issue
+            issue = canonical_issues[0]
+        else:
+            # Check for aliases
+            alias_issues = [i for i in issues if any(
+                l.name == "alias-object" for l in i.labels
+            )]
+            
+            if alias_issues:
+                # Find canonical reference from first alias
+                alias_issue = alias_issues[0]
+                for label in alias_issue.labels:
+                    if label.name.startswith("ALIAS-TO:"):
+                        try:
+                            canonical_number = int(label.name.split(":")[1])
+                            # Get canonical issue
+                            issue = self.repo.get_issue(canonical_number)
+                            logger.info(f"Updating canonical issue #{issue.number} for alias {object_id}")
+                            break
+                        except (ValueError, IndexError):
+                            pass
+                else:
+                    # No canonical found, use the first issue
+                    issue = issues[0]
+            else:
+                # No aliases or canonicals, use the first issue
+                issue = issues[0]
         
         # Create update payload with metadata
         update_payload = CommentPayload(
@@ -277,19 +437,19 @@ class IssueHandler:
         
         # Return current state
         return self.get_object(object_id)
-    
+
     def delete_object(self, object_id: str) -> None:
         """Delete an object by closing and archiving its issue"""
         logger.info(f"Deleting object: {object_id}")
-        
+
         issues = list(self.repo.get_issues(
             labels=[self.base_label, object_id],
             state="all"
         ))
-        
+
         if not issues:
             raise ObjectNotFound(f"No object found with ID: {object_id}")
-        
+
         issue = issues[0]
         issue.edit(
             state="closed",
