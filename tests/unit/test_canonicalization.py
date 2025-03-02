@@ -33,14 +33,14 @@ def canonical_store(store, mock_repo_factory, default_config):
         return store
 
 @pytest.fixture
-def mock_alias_issue(mock_issue_factory, mock_label_factory):
+def mock_alias_issue(mock_issue_factory):
     """Create a mock issue that is an alias to another object."""
     return mock_issue_factory(
         number=789,
         labels=[
-            mock_label_factory("stored-object"),
-            mock_label_factory(f"{LabelNames.UID_PREFIX}daily-metrics"),
-            mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}metrics")
+            "stored-object"),
+            f"{LabelNames.UID_PREFIX}daily-metrics",
+            f"{LabelNames.ALIAS_TO_PREFIX}metrics"
         ],
         body=json.dumps({"period": "daily"}),
         created_at=datetime(2025, 1, 10, tzinfo=timezone.utc),
@@ -48,13 +48,13 @@ def mock_alias_issue(mock_issue_factory, mock_label_factory):
     )
 
 @pytest.fixture
-def mock_canonical_issue(mock_issue_factory, mock_label_factory):
+def mock_canonical_issue(mock_issue_factory):
     """Create a mock issue that is the canonical version of an object."""
     return mock_issue_factory(
         number=123,
         labels=[
-            mock_label_factory("stored-object"),
-            mock_label_factory(f"{LabelNames.UID_PREFIX}metrics")
+            "stored-object",
+            f"{LabelNames.UID_PREFIX}metrics"
         ],
         body=json.dumps({"count": 42}),
         created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
