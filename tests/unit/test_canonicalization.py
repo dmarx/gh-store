@@ -170,18 +170,18 @@ class TestCanonicalStoreObjectResolution:
 class TestCanonicalStoreAliasing:
     """Test alias creation and handling."""
 
-    def test_create_alias(self, canonical_store, mock_canonical_issue, mock_alias_issue, mock_label_factory):
+    def test_create_alias(self, canonical_store, mock_canonical_issue, mock_alias_issue, mock_label_factory, mock_issue_factory):
         """Test creating an alias relationship."""
         # Set up repository to find source and target objects
         def mock_get_issues_side_effect(**kwargs):
             labels = kwargs.get('labels', [])
             if f"{LabelNames.UID_PREFIX}weekly-metrics" in labels:
                 # Source object
-                return [Mock(
+                return [mock_issue_factory(
                     number=101,
                     labels=[
-                        mock_label_factory(name="stored-object"),
-                        mock_label_factory(name=f"{LabelNames.UID_PREFIX}weekly-metrics")
+                        "stored-object",
+                        f"{LabelNames.UID_PREFIX}weekly-metrics"
                     ]
                 )]
             elif f"{LabelNames.UID_PREFIX}metrics" in labels:
