@@ -616,7 +616,7 @@ class TestCanonicalStoreGetUpdate:
         # Verify issue was reopened
         mock_alias_issue.edit.assert_called_with(state="open")
 
-    def test_update_object_deprecated(self, canonical_store, mock_deprecated_issue, mock_canonical_issue):
+    def test_update_object_deprecated(self, canonical_store, mock_deprecated_issue, mock_canonical_issue, mock_label_factory):
         """Test updating a deprecated object."""
         # Setup to find a deprecated issue pointing to a canonical object
         def mock_get_issues_side_effect(**kwargs):
@@ -631,8 +631,8 @@ class TestCanonicalStoreGetUpdate:
         
         # Setup mock_deprecated_issue to have proper labels
         mock_deprecated_issue.labels = [
-            Mock(name=LabelNames.DEPRECATED),
-            Mock(name=f"{LabelNames.MERGED_INTO_PREFIX}metrics")
+            mock_label_factory(name=LabelNames.DEPRECATED),
+            mock_label_factory(name=f"{LabelNames.MERGED_INTO_PREFIX}metrics")
         ]
         
         # Mock issue create_comment and edit methods
