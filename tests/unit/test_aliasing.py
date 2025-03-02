@@ -215,12 +215,24 @@ class TestProcessUpdates:
             data={"value": 42}
         )
         
+        # Create proper Update objects instead of Mock objects
+        from datetime import datetime, timezone
+        from gh_store.core.types import Update
+        
         # Mock comment_handler.get_unprocessed_updates
         def get_unprocessed_updates(issue_number):
             if issue_number == 1:
-                return [Mock(comment_id=202, changes={"from_canonical": True, "value": 60})]
+                return [Update(
+                    comment_id=202,
+                    timestamp=datetime(2025, 1, 2, tzinfo=timezone.utc),
+                    changes={"from_canonical": True, "value": 60}
+                )]
             else:
-                return [Mock(comment_id=201, changes={"from_alias": True, "value": 50})]
+                return [Update(
+                    comment_id=201,
+                    timestamp=datetime(2025, 1, 3, tzinfo=timezone.utc),
+                    changes={"from_alias": True, "value": 50}
+                )]
                 
         store.comment_handler.get_unprocessed_updates = Mock(side_effect=get_unprocessed_updates)
         
