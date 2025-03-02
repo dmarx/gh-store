@@ -38,7 +38,7 @@ def mock_alias_issue(mock_issue_factory):
     return mock_issue_factory(
         number=789,
         labels=[
-            "stored-object"),
+            "stored-object",
             f"{LabelNames.UID_PREFIX}daily-metrics",
             f"{LabelNames.ALIAS_TO_PREFIX}metrics"
         ],
