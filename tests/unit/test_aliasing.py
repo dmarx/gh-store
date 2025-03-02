@@ -451,7 +451,7 @@ class TestListAliases:
         assert aliases["daily-metrics"]["issue"] == 1
         assert aliases["weekly-metrics"]["id"] == "metrics"
         assert aliases["weekly-metrics"]["issue"] == 1
-    
+        
     def test_list_aliases_for_specific_canonical(self, store, mock_repo_factory, mock_issue_factory):
         """Test listing aliases for a specific canonical object"""
         # Create alias issues for two different canonical objects
@@ -473,7 +473,20 @@ class TestListAliases:
         # Mock repository
         repo = mock_repo_factory()
         store.repo = repo
-        repo.get_issues.return_value = alias_issues
+        
+        # IMPORTANT FIX: When a specific canonical_id is provided, we should filter the issues
+        # to only return those corresponding to that canonical ID
+        def get_issues_side_effect(**kwargs):
+            labels = kwargs.get("labels", [])
+            if "ALIAS-TO:1" in labels:
+                # Only return aliases for canonical ID 1 (metrics)
+                return [alias_issues[0], alias_issues[1]]
+            elif "alias-object" in labels:
+                # Return all aliases for any call without specific canonical
+                return alias_issues
+            return []
+                
+        repo.get_issues.side_effect = get_issues_side_effect
         
         # Mock get_issue to return different canonical issues
         def get_issue_side_effect(num):
