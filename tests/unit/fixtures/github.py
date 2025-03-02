@@ -151,6 +151,8 @@ def mock_comment_factory():
     
     return create_comment
 
+# temporary fix for backwards compatibility
+mock_comment = mock_comment_factory
 
 @pytest.fixture
 def mock_issue_factory(mock_comment_factory, mock_label_factory):
