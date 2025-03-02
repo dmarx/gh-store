@@ -91,8 +91,8 @@ def mock_deprecated_issue(mock_issue_factory, mock_label_factory):
 
 class TestCanonicalStoreObjectResolution:
     """Test object resolution functionality."""
-
-    def test_resolve_canonical_object_id_direct(self, canonical_store, mock_canonical_issue, mock_label_factory):
+    
+    def test_resolve_canonical_object_id_direct(self, canonical_store, mock_canonical_issue):
         """Test resolving a canonical object ID (direct match)."""
         # Set up repository to return our canonical issue
         canonical_store.repo.get_issues.return_value = [mock_canonical_issue]
@@ -101,11 +101,9 @@ class TestCanonicalStoreObjectResolution:
         result = canonical_store.resolve_canonical_object_id("metrics")
         assert result == "metrics"
         
-        # Verify correct query was made
+        # Verify correct query was made - using string labels as the real implementation does
         canonical_store.repo.get_issues.assert_called_with(
-            labels=[
-                mock_label_factory(f"{LabelNames.UID_PREFIX}metrics"),
-                mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}*")],
+            labels=[f"{LabelNames.UID_PREFIX}metrics", f"{LabelNames.ALIAS_TO_PREFIX}*"],
             state="all"
         )
 
