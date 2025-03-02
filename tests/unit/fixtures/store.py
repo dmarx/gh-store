@@ -41,8 +41,6 @@ def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
         store.access_control._codeowners = None
 
 
-
-
 @pytest.fixture
 def store(mock_repo_factory, default_config):
     """Create GitHubStore instance with mocked dependencies."""
@@ -75,14 +73,13 @@ def authorized_store(store):
     return _authorized_store
 
 
-
 @pytest.fixture
-def history_mock_comments(mock_comment):
+def history_mock_comments(mock_comment_factory):
     """Create series of comments representing object history."""
     comments = []
     
     # Initial state
-    comments.append(mock_comment(
+    comments.append(mock_comment_factory(
         user_login="repo-owner",
         body={
             "type": "initial_state",
@@ -98,7 +95,7 @@ def history_mock_comments(mock_comment):
     ))
     
     # First update
-    comments.append(mock_comment(
+    comments.append(mock_comment_factory(
         user_login="repo-owner",
         body={
             "_data": {"value": 43},
@@ -113,7 +110,7 @@ def history_mock_comments(mock_comment):
     ))
     
     # Second update
-    comments.append(mock_comment(
+    comments.append(mock_comment_factory(
         user_login="repo-owner",
         body={
             "_data": {"value": 44},
