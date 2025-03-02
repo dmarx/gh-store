@@ -92,7 +92,7 @@ def mock_deprecated_issue(mock_issue_factory, mock_label_factory):
 class TestCanonicalStoreObjectResolution:
     """Test object resolution functionality."""
 
-    def test_resolve_canonical_object_id_direct(self, canonical_store, mock_canonical_issue):
+    def test_resolve_canonical_object_id_direct(self, canonical_store, mock_canonical_issue, mock_label_factory):
         """Test resolving a canonical object ID (direct match)."""
         # Set up repository to return our canonical issue
         canonical_store.repo.get_issues.return_value = [mock_canonical_issue]
@@ -103,11 +103,13 @@ class TestCanonicalStoreObjectResolution:
         
         # Verify correct query was made
         canonical_store.repo.get_issues.assert_called_with(
-            labels=[f"{LabelNames.UID_PREFIX}metrics", f"{LabelNames.ALIAS_TO_PREFIX}*"],
+            labels=[
+                mock_label_factory(f"{LabelNames.UID_PREFIX}metrics"),
+                mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}*")],
             state="all"
         )
 
-    def test_resolve_canonical_object_id_alias(self, canonical_store, mock_alias_issue):
+    def test_resolve_canonical_object_id_alias(self, canonical_store, mock_alias_issue, mock_label_factory):
         """Test resolving an alias to find its canonical object ID."""
         # Set up repository to return our alias issue
         canonical_store.repo.get_issues.return_value = [mock_alias_issue]
@@ -118,7 +120,9 @@ class TestCanonicalStoreObjectResolution:
         
         # Verify correct query was made
         canonical_store.repo.get_issues.assert_called_with(
-            labels=[f"{LabelNames.UID_PREFIX}daily-metrics", f"{LabelNames.ALIAS_TO_PREFIX}*"],
+            labels=[
+                mock_label_factory(f"{LabelNames.UID_PREFIX}daily-metrics"), 
+                mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}*")],
             state="all"
         )
 
@@ -131,7 +135,7 @@ class TestCanonicalStoreObjectResolution:
         result = canonical_store.resolve_canonical_object_id("nonexistent")
         assert result == "nonexistent"
 
-    def test_resolve_canonical_object_id_circular_prevention(self, canonical_store):
+    def test_resolve_canonical_object_id_circular_prevention(self, canonical_store, mock_label_factory):
         """Test prevention of circular references in alias resolution."""
         # Create a circular reference scenario
         circular_alias_1 = Mock()
@@ -164,7 +168,7 @@ class TestCanonicalStoreObjectResolution:
 class TestCanonicalStoreAliasing:
     """Test alias creation and handling."""
 
-    def test_create_alias(self, canonical_store, mock_canonical_issue, mock_alias_issue):
+    def test_create_alias(self, canonical_store, mock_canonical_issue, mock_alias_issue, mock_label_factory):
         """Test creating an alias relationship."""
         # Set up repository to find source and target objects
         def mock_get_issues_side_effect(**kwargs):
@@ -174,8 +178,8 @@ class TestCanonicalStoreAliasing:
                 return [Mock(
                     number=101,
                     labels=[
-                        Mock(name="stored-object"),
-                        Mock(name=f"{LabelNames.UID_PREFIX}weekly-metrics")
+                        mock_label_factory(name="stored-object"),
+                        mock_label_factory(name=f"{LabelNames.UID_PREFIX}weekly-metrics")
                     ]
                 )]
             elif f"{LabelNames.UID_PREFIX}metrics" in labels:
