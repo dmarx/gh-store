@@ -64,6 +64,10 @@ def test_update_metadata_structure(store):
     mock_issue.number = 123
     mock_issue.user = Mock()
     mock_issue.user.login = "repo-owner"  # Set authorized user
+    # Set up issue.labels as an iterable list of Mocks
+    mock_issue.labels = [
+        Mock(name="stored-object")
+    ]
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
