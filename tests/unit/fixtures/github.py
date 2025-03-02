@@ -300,8 +300,18 @@ def mock_repo_factory(mock_label_factory):
         repo.get_labels = Mock(return_value=repo_labels)
         
         # Set up label creation
-        def create_label(name: str, color: str = "0366d6") -> Mock:
-            label = mock_label_factory(name, color)
+        def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
+            """
+            Create a mock label with GitHub-like structure.
+            
+            Args:
+                name: Name of the label
+                color: Color hex code without #
+                description: Optional description for the label
+            """
+            label = mock_label_factory(name, color) # todo: add description
+            if description:
+                label.description = description
             repo_labels.append(label)
             return label
         repo.create_label = Mock(side_effect=create_label)
