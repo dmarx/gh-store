@@ -17,18 +17,21 @@ def mock_label_factory():
     Example:
         label = mock_label_factory("enhancement")
         label = mock_label_factory("bug", "fc2929")
+        label = mock_label_factory("bug", "fc2929", "Bug description")
     """
-    def create_label(name: str, color: str = "0366d6") -> Mock:
+    def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
         """
         Create a mock label with GitHub-like structure.
         
         Args:
             name: Name of the label
             color: Color hex code without #
+            description: Optional description for the label
         """
         label = Mock()
         label.name = name
         label.color = color
+        label.description = description
         return label
     
     return create_label
@@ -301,17 +304,7 @@ def mock_repo_factory(mock_label_factory):
         
         # Set up label creation
         def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
-            """
-            Create a mock label with GitHub-like structure.
-            
-            Args:
-                name: Name of the label
-                color: Color hex code without #
-                description: Optional description for the label
-            """
-            label = mock_label_factory(name, color) # todo: add description
-            if description:
-                label.description = description
+            label = mock_label_factory(name, color, description)
             repo_labels.append(label)
             return label
         repo.create_label = Mock(side_effect=create_label)
