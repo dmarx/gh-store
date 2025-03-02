@@ -62,15 +62,27 @@ def canonical_alias_pair(mock_repo_factory, canonical_issue, alias_issue):
     
     def get_issues_side_effect(**kwargs):
         labels = kwargs.get("labels", [])
+        state = kwargs.get("state", "all")
+        
+        # Match by state if provided
+        if state == "open":
+            return []  # No issues are open
+        
+        # Match by labels
         if "UID:canonical-id" in labels:
             return [canonical_issue]
         elif "UID:alias-id" in labels:
             return [alias_issue]
         elif "ALIAS-TO:1" in labels:
             return [alias_issue]
+        elif len(labels) == 1 and labels[0] == "stored-object":
+            return [canonical_issue, alias_issue]
+        
+        # Return empty list for any other query
         return []
         
     repo.get_issues.side_effect = get_issues_side_effect
+    
     return repo
 
 
