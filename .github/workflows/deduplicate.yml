@@ -4,9 +4,9 @@
 name: Deduplicate Objects
 
 on:
-  # Run daily at 2:00 UTC
+  
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *' # Run daily at 2:00 UTC
   push:
     branches: [ canonicalizer ]
     paths: [ ".github/workflows/deduplicate.yml" ]
