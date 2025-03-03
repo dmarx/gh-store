@@ -229,8 +229,8 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         issue.labels = issue_labels
         if labels:
             for label_name in labels:
-                #issue.labels.append(mock_label_factory(label_name))
-                issue.labels.append(label_name)
+                issue.labels.append(mock_label_factory(label_name))
+                #issue.labels.append(label_name)
         
         
         # Set up comments
