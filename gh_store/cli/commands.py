@@ -172,7 +172,6 @@ def process_updates(
     except Exception as e:
         logger.exception("Unexpected error occurred")
         raise SystemExit(1)
-
 def snapshot(
     token: str | None = None,
     repo: str | None = None,
@@ -184,13 +183,17 @@ def snapshot(
         store = get_store(token, repo, config)
         
         # Use CanonicalStore if available for enhanced relationship handling
+        has_canonical = False
+        canonical_store = None
+        
         try:
             from gh_store.tools.canonicalize import CanonicalStore
             canonical_store = CanonicalStore(token, repo, config_path=Path(config) if config else None)
             has_canonical = True
         except ImportError:
-            canonical_store = store
-            has_canonical = False
+            logger.warning("Canonical store functionality not available")
+        except Exception as e:
+            logger.warning(f"Error initializing canonical store: {e}")
         
         # Get all stored objects
         objects = store.list_all()
@@ -203,13 +206,16 @@ def snapshot(
         }
         
         # Add relationships data if CanonicalStore is available
-        if has_canonical:
-            # Find all aliases
-            aliases = canonical_store.find_aliases()
-            if aliases:
-                snapshot_data["relationships"] = {
-                    "aliases": aliases
-                }
+        if has_canonical and canonical_store:
+            try:
+                # Find all aliases
+                aliases = canonical_store.find_aliases()
+                if aliases:
+                    snapshot_data["relationships"] = {
+                        "aliases": aliases
+                    }
+            except Exception as e:
+                logger.warning(f"Error finding aliases: {e}")
         
         # Add objects to snapshot
         for obj_id, obj in objects.items():
