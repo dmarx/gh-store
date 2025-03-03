@@ -759,3 +759,109 @@ class TestCanonicalStoreFinding:
     #     # When canonicalize is False, the alias's own state is returned.
     #     obj_direct = canonical_store.get_object("daily-metrics", canonicalize=False)
     #     assert obj_direct.meta.object_id == "daily-metrics"
+
+    
+    def test_get_object_canonicalize_modes(self, canonical_store_with_mocks, mock_issue_factory, mock_comment_factory):
+        """Test different canonicalization modes in get_object."""
+        store = canonical_store_with_mocks
+        
+        # Create a mock alias issue (daily-metrics -> metrics)
+        alias_issue = mock_issue_factory(
+            number=101,
+            labels=["stored-object", "UID:daily-metrics", "ALIAS-TO:metrics"],
+            body=json.dumps({"period": "daily"})
+        )
+        
+        # Create a mock canonical issue with initial state
+        initial_state_comment = mock_comment_factory(
+            body={
+                "type": "initial_state",
+                "_data": {"count": 42},
+                "_meta": {
+                    "client_version": "0.7.0", 
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            },
+            comment_id=1
+        )
+        
+        canonical_issue = mock_issue_factory(
+            number=102,
+            labels=["stored-object", "UID:metrics"],
+            body=json.dumps({"count": 42}),
+            comments=[initial_state_comment]
+        )
+        
+        # Setup mocks for get_issues
+        def mock_get_issues(**kwargs):
+            labels = kwargs.get('labels', [])
+            if isinstance(labels, list):
+                if any(label == "UID:daily-metrics" for label in labels):
+                    return [alias_issue]
+                elif any(label == "UID:metrics" for label in labels):
+                    return [canonical_issue]
+                elif any(label == "ALIAS-TO:metrics" for label in labels):
+                    return [alias_issue]
+            return []
+        
+        store.repo.get_issues = Mock(side_effect=mock_get_issues)
+        
+        # Setup resolve_canonical_object_id to correctly resolve the alias
+        store.resolve_canonical_object_id = Mock(side_effect=lambda obj_id: "metrics" if obj_id == "daily-metrics" else obj_id)
+        
+        # Setup get_object_by_number
+        def get_object_by_number(number):
+            if number == 101:  # alias
+                meta = Mock(
+                    object_id="daily-metrics",
+                    label="daily-metrics",
+                    created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+                    version=1
+                )
+                return Mock(meta=meta, data={"period": "daily"})
+            else:  # canonical
+                meta = Mock(
+                    object_id="metrics",
+                    label="metrics",
+                    created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                    updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+                    version=1
+                )
+                return Mock(meta=meta, data={"count": 42})
+        
+        store.issue_handler.get_object_by_number = Mock(side_effect=get_object_by_number)
+        
+        # Mock collect_all_comments to include the initial state
+        store.collect_all_comments = Mock(return_value=[
+            {
+                "data": {
+                    "type": "initial_state",
+                    "_data": {"count": 42},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "update_mode": "append"
+                    }
+                },
+                "timestamp": datetime(2025, 1, 1, tzinfo=timezone.utc),
+                "id": 1,
+                "source_issue": 102,
+                "source_object_id": "metrics"
+            }
+        ])
+        
+        # Mock process_with_virtual_merge
+        store.process_with_virtual_merge = Mock(return_value=Mock(
+            meta=Mock(object_id="metrics"),
+            data={"count": 42}
+        ))
+        
+        # Test canonicalize=True (default) - should return canonical object
+        obj_canonical = store.get_object("daily-metrics", canonicalize=True)
+        assert obj_canonical.meta.object_id == "metrics"
+        
+        # Test canonicalize=False - should return alias object directly
+        obj_direct = store.get_object("daily-metrics", canonicalize=False)
+        assert obj_direct.meta.object_id == "daily-metrics"
