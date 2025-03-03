@@ -306,33 +306,48 @@ class TestCanonicalStoreDeprecation:
         
         # Verify virtual merge was processed
         canonical_store.process_with_virtual_merge.assert_called_with("metrics")
-
-    # def test_deduplicate_object(self, canonical_store, mock_canonical_issue, mock_duplicate_issue):
-    #     """Test deduplication of an object with multiple issues."""
-    #     # Set up repository to find issues with the same UID
-    #     canonical_store.repo.get_issues.return_value = [mock_canonical_issue, mock_duplicate_issue]
+    
+    def test_deduplicate_object(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deduplication of an object with multiple issues."""
+        store = canonical_store_with_mocks
         
-    #     # Mock the deprecate_object method
-    #     canonical_store.deprecate_object = Mock(return_value={
-    #         "success": True,
-    #         "source_object_id": "metrics",
-    #         "target_object_id": "metrics",
-    #         "reason": DeprecationReason.DUPLICATE
-    #     })
+        # Create two issues with same UID
+        canonical_issue = mock_issue_factory(
+            number=101,
+            labels=["stored-object", "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
         
-    #     # Mock _get_object_id method
-    #     canonical_store._get_object_id = Mock(side_effect=lambda issue: "metrics")
+        duplicate_issue = mock_issue_factory(
+            number=102,
+            labels=["stored-object", "UID:metrics"],
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+        )
         
-    #     # Execute deduplicate_object
-    #     result = canonical_store.deduplicate_object("metrics")
+        # Setup mock for get_issues to return our test issues
+        store.repo.get_issues.return_value = [canonical_issue, duplicate_issue]
         
-    #     # Verify result
-    #     assert result["success"] is True
-    #     assert result["canonical_object_id"] == "metrics"
-    #     assert result["duplicates_processed"] == 1
+        # Mock _get_object_id
+        store._get_object_id = Mock(return_value="metrics")
         
-    #     # Verify deprecate_object was called
-    #     canonical_store.deprecate_object.assert_called_once()
+        # Mock deprecate_object
+        store.deprecate_object = Mock(return_value={
+            "success": True,
+            "source_object_id": "metrics",
+            "target_object_id": "metrics",
+            "reason": DeprecationReason.DUPLICATE
+        })
+        
+        # Execute deduplicate_object
+        result = store.deduplicate_object("metrics")
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["canonical_object_id"] == "metrics"
+        assert result["duplicates_processed"] == 1
+        
+        # Verify deprecate_object was called
+        store.deprecate_object.assert_called_once()
 
     def test_deduplicate_object_no_duplicates(self, canonical_store, mock_canonical_issue):
         """Test deduplication when no duplicates exist."""
