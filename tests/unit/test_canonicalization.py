@@ -723,21 +723,21 @@ class TestCanonicalStoreFinding:
             labels=[f"{LabelNames.ALIAS_TO_PREFIX}metrics"],
             state="all"
         )
-
-def test_get_object_canonicalize_modes(self, canonical_store, mock_alias_issue):
-    """
-    Test that get_object returns a canonical (aggregated) view when canonicalize=True (default)
-    and returns the raw alias object when canonicalize=False.
     
-    Assume that mock_alias_issue is set up with labels:
-      "stored-object", "UID:daily-metrics", and "ALIAS-TO:metrics"
-    """
-    canonical_store.repo.get_issues.return_value = [mock_alias_issue]
-
-    # When canonicalize is True, the alias should resolve to the canonical object.
-    obj_canonical = canonical_store.get_object("daily-metrics", canonicalize=True)
-    assert obj_canonical.meta.object_id == "metrics"
-
-    # When canonicalize is False, the alias's own state is returned.
-    obj_direct = canonical_store.get_object("daily-metrics", canonicalize=False)
-    assert obj_direct.meta.object_id == "daily-metrics"
+    def test_get_object_canonicalize_modes(self, canonical_store, mock_alias_issue):
+        """
+        Test that get_object returns a canonical (aggregated) view when canonicalize=True (default)
+        and returns the raw alias object when canonicalize=False.
+        
+        Assume that mock_alias_issue is set up with labels:
+          "stored-object", "UID:daily-metrics", and "ALIAS-TO:metrics"
+        """
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+    
+        # When canonicalize is True, the alias should resolve to the canonical object.
+        obj_canonical = canonical_store.get_object("daily-metrics", canonicalize=True)
+        assert obj_canonical.meta.object_id == "metrics"
+    
+        # When canonicalize is False, the alias's own state is returned.
+        obj_direct = canonical_store.get_object("daily-metrics", canonicalize=False)
+        assert obj_direct.meta.object_id == "daily-metrics"
