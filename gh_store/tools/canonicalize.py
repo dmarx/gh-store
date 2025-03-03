@@ -35,11 +35,13 @@ class DeprecationReason:
 
 class LabelNames:
     """Constants for label names."""
+    GH_STORE = "gh-store"  # New label for all system issues
     STORED_OBJECT = "stored-object"
     DEPRECATED = "deprecated-object"
     UID_PREFIX = "UID:"
     ALIAS_TO_PREFIX = "ALIAS-TO:"
     MERGED_INTO_PREFIX = "MERGED-INTO:"
+    DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # New label for referencing canonical issue
 
 
 class CanonicalStore(GitHubStore):
@@ -53,6 +55,7 @@ class CanonicalStore(GitHubStore):
     def _ensure_special_labels(self) -> None:
         """Create special labels used by the canonicalization system if needed."""
         special_labels = [
+            (LabelNames.GH_STORE, "6f42c1", "All issues managed by gh-store system"),
             (LabelNames.DEPRECATED, "999999", "Deprecated objects that have been merged into others"),
             # Add others as needed
         ]
@@ -149,9 +152,9 @@ class CanonicalStore(GitHubStore):
         """Collect comments from canonical issue and all aliases."""
         canonical_id = self.resolve_canonical_object_id(object_id)
         
-        # Get the canonical issue
+        # Get the canonical issue - look for stored-object label for active objects
         canonical_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
@@ -189,8 +192,21 @@ class CanonicalStore(GitHubStore):
                 if metadata:
                     comments.append(metadata)
         
+        # Get deprecated issues (for virtual merging)
+        deprecated_issues = list(self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.DEPRECATED],
+            state="all"
+        ))
+        
+        # Get comments from deprecated issues
+        for dep_issue in deprecated_issues:
+            for comment in dep_issue.get_comments():
+                metadata = self._extract_comment_metadata(comment, dep_issue.number, canonical_id)
+                if metadata:
+                    comments.append(metadata)
+        
         # Sort by metadata timestamp
-            return sorted(comments, key=lambda c: c["timestamp"])
+        return sorted(comments, key=lambda c: c["timestamp"])
             
     def process_with_virtual_merge(self, object_id: str) -> StoredObject:
         """Process an object with virtual merging of related issues."""
@@ -209,7 +225,7 @@ class CanonicalStore(GitHubStore):
         if not initial_state:
             # Get canonical issue
             canonical_issues = list(self.repo.get_issues(
-                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}"],
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
                 state="all"
             ))
             
@@ -267,7 +283,7 @@ class CanonicalStore(GitHubStore):
         
         # Get canonical issue for metadata
         canonical_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
@@ -320,12 +336,22 @@ class CanonicalStore(GitHubStore):
         else:
             # Direct fetch: use only the issue with the UID label matching object_id.
             issues = list(self.repo.get_issues(
-                labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
+                labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
                 state="all"
             ))
             if not issues:
-                raise ObjectNotFound(f"No object found with ID: {object_id}")
-            issue = issues[0]
+                # Check if it's a deprecated object
+                dep_issues = list(self.repo.get_issues(
+                    labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.DEPRECATED],
+                    state="all"
+                ))
+                if dep_issues:
+                    issue = dep_issues[0]
+                else:
+                    raise ObjectNotFound(f"No object found with ID: {object_id}")
+            else:
+                issue = issues[0]
+            
             data = json.loads(issue.body)
             meta = ObjectMeta(
                 object_id=object_id,
@@ -343,7 +369,7 @@ class CanonicalStore(GitHubStore):
         # (Existing deprecation checks omitted for brevity.)
         # Check if this is an alias or direct match
         alias_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
@@ -351,7 +377,7 @@ class CanonicalStore(GitHubStore):
             # Not a direct match, check for canonical object via aliases.
             canonical_id = self.resolve_canonical_object_id(object_id)
             canonical_issues = list(self.repo.get_issues(
-                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}"],
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
                 state="all"
             ))
             if not canonical_issues:
@@ -382,7 +408,7 @@ class CanonicalStore(GitHubStore):
         """Create an alias from source_id to target_id."""
         # Verify source object exists
         source_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{source_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{source_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
@@ -393,7 +419,7 @@ class CanonicalStore(GitHubStore):
         
         # Verify target object exists
         target_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{target_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{target_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
@@ -459,46 +485,57 @@ class CanonicalStore(GitHubStore):
             "target_id": target_id
         }
     
-    def deprecate_object(self, object_id: str, target_id: str, reason: str) -> dict:
+    def deprecate_issue(self, issue_number: int, target_issue_number: int, reason: str) -> dict:
         """
-        Deprecate an object by merging it into a target object.
+        Deprecate a specific issue by making another issue canonical.
         
         Args:
-            object_id: The ID of the object to deprecate
-            target_id: The ID of the canonical object to merge into
+            issue_number: The number of the issue to deprecate
+            target_issue_number: The number of the canonical issue
             reason: Reason for deprecation ("duplicate", "merged", "replaced")
         """
-        # Verify objects exist
-        source_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
-            state="all"
-        ))
+        # Get source issue
+        try:
+            source_issue = self.repo.get_issue(issue_number)
+        except Exception as e:
+            raise ValueError(f"Source issue #{issue_number} not found: {e}")
         
-        if not source_issues:
-            raise ObjectNotFound(f"Source object not found: {object_id}")
+        # Get target issue
+        try:
+            target_issue = self.repo.get_issue(target_issue_number)
+        except Exception as e:
+            raise ValueError(f"Target issue #{target_issue_number} not found: {e}")
             
-        source_issue = source_issues[0]
+        # Get object IDs from both issues
+        source_object_id = self._get_object_id(source_issue)
+        target_object_id = self._get_object_id(target_issue)
         
-        # Verify target object exists
-        target_issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{target_id}"],
-            state="all"
-        ))
+        # Make sure GH_STORE label is on both issues
+        try:
+            if not any(label.name == LabelNames.GH_STORE for label in source_issue.labels):
+                source_issue.add_to_labels(LabelNames.GH_STORE)
+            if not any(label.name == LabelNames.GH_STORE for label in target_issue.labels):
+                target_issue.add_to_labels(LabelNames.GH_STORE)
+        except Exception as e:
+            logger.warning(f"Failed to ensure GH_STORE label: {e}")
         
-        if not target_issues:
-            raise ObjectNotFound(f"Target object not found: {target_id}")
-            
-        target_issue = target_issues[0]
-        
-        # Remove UID label from source
-        source_issue.remove_from_labels(f"{LabelNames.UID_PREFIX}{object_id}")
+        # Remove stored-object label from source
+        if any(label.name == LabelNames.STORED_OBJECT for label in source_issue.labels):
+            source_issue.remove_from_labels(LabelNames.STORED_OBJECT)
         
         # Add merge and deprecated labels
         try:
             # Create labels if they don't exist
-            merge_label = f"{LabelNames.MERGED_INTO_PREFIX}{target_id}"
+            merge_label = f"{LabelNames.MERGED_INTO_PREFIX}{target_object_id}"
+            deprecated_by_label = f"{LabelNames.DEPRECATED_BY_PREFIX}{target_issue_number}"
+            
             try:
                 self.repo.create_label(merge_label, "d73a49")
+            except:
+                pass  # Label already exists
+                
+            try:
+                self.repo.create_label(deprecated_by_label, "d73a49")
             except:
                 pass  # Label already exists
                 
@@ -508,20 +545,21 @@ class CanonicalStore(GitHubStore):
                 pass  # Label already exists
                 
             # Add labels to source issue
-            source_issue.add_to_labels(LabelNames.DEPRECATED, merge_label)
+            source_issue.add_to_labels(LabelNames.DEPRECATED, merge_label, deprecated_by_label)
         except Exception as e:
-            # If we fail, try to restore UID label
+            # If we fail, try to restore stored-object label
             try:
-                source_issue.add_to_labels(f"{LabelNames.UID_PREFIX}{object_id}")
+                source_issue.add_to_labels(LabelNames.STORED_OBJECT)
             except:
                 pass
-            raise ValueError(f"Failed to deprecate object: {e}")
+            raise ValueError(f"Failed to deprecate issue: {e}")
         
         # Add system comments
         source_comment = {
             "_data": {
                 "status": "deprecated",
-                "canonical_object_id": target_id,
+                "canonical_object_id": target_object_id,
+                "canonical_issue": target_issue_number,
                 "reason": reason,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             },
@@ -539,7 +577,8 @@ class CanonicalStore(GitHubStore):
         target_comment = {
             "_data": {
                 "status": "merged_reference",
-                "merged_object_id": object_id,
+                "merged_object_id": source_object_id,
+                "merged_issue": issue_number,
                 "reason": reason,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             },
@@ -553,62 +592,121 @@ class CanonicalStore(GitHubStore):
         }
         target_issue.create_comment(json.dumps(target_comment, indent=2))
         
-        # Process the target issue to ensure correct state
-        self.process_with_virtual_merge(target_id)
-        
         return {
             "success": True,
-            "source_object_id": object_id,
-            "target_object_id": target_id,
+            "source_issue": issue_number,
+            "source_object_id": source_object_id,
+            "target_issue": target_issue_number, 
+            "target_object_id": target_object_id,
             "reason": reason
         }
     
+    def deprecate_object(self, object_id: str, target_id: str, reason: str) -> dict:
+        """
+        Deprecate an object by merging it into a target object.
+        
+        Args:
+            object_id: The ID of the object to deprecate
+            target_id: The ID of the canonical object to merge into
+            reason: Reason for deprecation ("duplicate", "merged", "replaced")
+        """
+        # Verify objects exist
+        source_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not source_issues:
+            raise ObjectNotFound(f"Source object not found: {object_id}")
+            
+        source_issue = source_issues[0]
+        
+        # Verify target object exists
+        target_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{target_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not target_issues:
+            raise ObjectNotFound(f"Target object not found: {target_id}")
+            
+        target_issue = target_issues[0]
+        
+        # Validate that we're not trying to deprecate an object as itself
+        if object_id == target_id and source_issue.number == target_issue.number:
+            raise ValueError(f"Cannot deprecate an object as itself: {object_id}")
+        
+        # Use the issue-based deprecation function
+        return self.deprecate_issue(
+            issue_number=source_issue.number,
+            target_issue_number=target_issue.number,
+            reason=reason
+        )
+    
     def deduplicate_object(self, object_id: str, canonical_id: str = None) -> dict:
-        """Handle duplicate issues for an object ID."""
-        # Find all issues with this UID
+        """
+        Handle duplicate issues for an object ID by choosing one as canonical
+        and deprecating the others.
+        
+        Args:
+            object_id: The object ID to deduplicate
+            canonical_id: Optional specific canonical object ID to use
+                         (must match object_id unless aliasing)
+                         
+        Returns:
+            Dictionary with deduplication results
+        """
+        # Find all issues with this UID that are active (have stored-object label)
         issues = list(self.repo.get_issues(
-            labels=[f"{LabelNames.UID_PREFIX}{object_id}"],
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
         
         if len(issues) <= 1:
             return {"success": True, "message": "No duplicates found"}
         
-        # Sort issues by creation date
-        sorted_issues = sorted(issues, key=lambda i: i.number)
+        # Sort issues by creation date (oldest first)
+        sorted_issues = sorted(issues, key=lambda i: i.created_at)
         
         # Select canonical issue
-        if canonical_id:
-            # User specified a canonical ID
-            canonical_issue = next(
-                (issue for issue in issues if self._get_object_id(issue) == canonical_id),
-                None
-            )
-            if not canonical_issue:
+        if canonical_id and canonical_id != object_id:
+            # If user specified a different canonical ID, find its issue
+            canonical_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            if not canonical_issues:
                 raise ValueError(f"Specified canonical object {canonical_id} not found")
+            canonical_issue = canonical_issues[0]
         else:
-            # Default to oldest issue
+            # Default to oldest issue for this object ID
             canonical_issue = sorted_issues[0]
-            canonical_id = self._get_object_id(canonical_issue)
+            canonical_id = object_id  # Keep same object ID unless aliasing
         
-        # Process duplicates
+        canonical_issue_number = canonical_issue.number
+        logger.info(f"Selected issue #{canonical_issue_number} as canonical for {object_id}")
+        
+        # Process duplicates - compare by issue number, not object ID
         results = []
         for issue in sorted_issues:
-            current_id = self._get_object_id(issue)
-            if current_id == canonical_id:
+            # Skip the canonical issue
+            if issue.number == canonical_issue_number:
                 continue
-                
-            # Deprecate as duplicate
-            result = self.deprecate_object(
-                current_id,
-                canonical_id,
+            
+            logger.info(f"Processing duplicate issue #{issue.number}")
+            
+            # Deprecate as duplicate - using issue numbers
+            result = self.deprecate_issue(
+                issue_number=issue.number,
+                target_issue_number=canonical_issue_number,
                 reason=DeprecationReason.DUPLICATE
             )
             results.append(result)
         
         return {
             "success": True,
-            "canonical_object_id": canonical_id,
+            "canonical_object_id": self._get_object_id(canonical_issue),
+            "canonical_issue": canonical_issue_number,
             "duplicates_processed": len(results),
             "results": results
         }
@@ -622,9 +720,10 @@ class CanonicalStore(GitHubStore):
         
     def find_duplicates(self) -> Dict[str, List[Issue]]:
         """Find all duplicate objects in the store."""
-        # Get all issues with a UID label
+        # Get all issues with a UID label and stored-object label
         try:
             all_issues = list(self.repo.get_issues(
+                labels=[LabelNames.STORED_OBJECT],
                 state="all"
             ))
             
