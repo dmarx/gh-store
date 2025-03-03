@@ -203,7 +203,8 @@ class TestCanonicalStoreAliasing:
         
         # Verify label was added to source issue
         #source_issue_mock.add_to_labels.assert_called_with(f"{LabelNames.ALIAS_TO_PREFIX}metrics")
-        assert f"{LabelNames.ALIAS_TO_PREFIX}metrics" in source_issue_mock.labels
+        #assert f"{LabelNames.ALIAS_TO_PREFIX}metrics" in source_issue_mock.labels
+        assert source_issue_mock.labels.append.assert_called_with(f"{LabelNames.ALIAS_TO_PREFIX}metrics")
         
         # Verify system comments were added
         source_issue_mock.create_comment.assert_called_once()
