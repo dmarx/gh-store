@@ -679,19 +679,32 @@ class TestCanonicalStoreGetUpdate:
 
 class TestCanonicalStoreFinding:
     """Test finding duplicates and aliases."""
-
-    # def test_find_duplicates(self, canonical_store, mock_canonical_issue, mock_duplicate_issue):
-    #     """Test finding duplicate objects."""
-    #     # Set up repository to return a list of issues
-    #     canonical_store.repo.get_issues.return_value = [mock_canonical_issue, mock_duplicate_issue]
+    
+    def test_find_duplicates(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test finding duplicate objects."""
+        store = canonical_store_with_mocks
         
-    #     # Execute find_duplicates
-    #     duplicates = canonical_store.find_duplicates()
+        # Create issues with same UID
+        issue1 = mock_issue_factory(
+            number=101,
+            labels=["stored-object", "UID:metrics"]
+        )
         
-    #     # Verify results
-    #     assert len(duplicates) == 1
-    #     assert f"{LabelNames.UID_PREFIX}metrics" in duplicates
-    #     assert len(duplicates[f"{LabelNames.UID_PREFIX}metrics"]) == 2
+        issue2 = mock_issue_factory(
+            number=102,
+            labels=["stored-object", "UID:metrics"]
+        )
+        
+        # Setup mock for get_issues
+        store.repo.get_issues.return_value = [issue1, issue2]
+        
+        # Execute find_duplicates
+        duplicates = store.find_duplicates()
+        
+        # Verify results - should find duplicates for "UID:metrics"
+        assert len(duplicates) == 1
+        assert "UID:metrics" in duplicates
+        assert len(duplicates["UID:metrics"]) == 2
 
     def test_find_aliases(self, canonical_store, mock_alias_issue):
         """Test finding aliases for objects."""
