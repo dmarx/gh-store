@@ -655,6 +655,22 @@ class TestCanonicalStoreGetUpdate:
         # Verify results
         assert result.meta.object_id == "metrics"
         assert result.data["new_field"] == "value"
+    
+    def test_update_object_on_alias_preserves_identity(self, canonical_store, mock_alias_issue):
+        """
+        Test that an update on an alias returns the object without merging into the canonical record.
+        """
+        # Setup: mock_alias_issue should represent the alias "daily-metrics" pointing to "metrics".
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Assume update_object is called with changes.
+        changes = {"additional": "info"}
+        updated_obj = canonical_store.update_object("daily-metrics", changes)
+        
+        # Since update_object now returns get_object(..., canonicalize=False),
+        # the alias identity should be preserved.
+        assert updated_obj.meta.object_id == "daily-metrics"
+    
 
 class TestCanonicalStoreFinding:
     """Test finding duplicates and aliases."""
