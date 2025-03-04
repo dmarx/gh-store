@@ -51,15 +51,16 @@ class GitHubStore:
         return self.issue_handler.get_object(object_id)
 
     def update(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an existing object"""
         # Check if object is already being processed
         issues = list(self.repo.get_issues(
-            labels=[self.config.store.base_label, object_id],
+            labels=[self.config.store.base_label, f"UID:{object_id}"],
             state="open"
         ))
         
         if issues:
             raise ConcurrentUpdateError(f"Object {object_id} is currently being processed")
-        """Update an existing object"""
+        
         return self.issue_handler.update_object(object_id, changes)
 
     def delete(self, object_id: str) -> None:
@@ -73,7 +74,7 @@ class GitHubStore:
         issue = self.repo.get_issue(issue_number)
         if not self.access_control.validate_issue_creator(issue):
             raise AccessDeniedError(
-                "Updates can only be processed for issues created by "  # Updated message
+                "Updates can only be processed for issues created by "
                 "repository owner or authorized CODEOWNERS"
             )
         
@@ -95,7 +96,7 @@ class GitHubStore:
         """List all objects in the store, indexed by object ID"""
         logger.info("Fetching all stored objects")
         
-        # Get all closed issues with base label
+        # Get all closed issues with base label (active objects)
         issues = list(self.repo.get_issues(
             state="closed",
             labels=[self.config.store.base_label]
@@ -125,7 +126,7 @@ class GitHubStore:
         """List objects updated since given timestamp"""
         logger.info(f"Fetching objects updated since {timestamp}")
         
-        # Get all objects with base label that are closed
+        # Get all objects with base label that are closed (active objects)
         issues = list(self.repo.get_issues(
             state="closed",
             labels=[self.config.store.base_label],
@@ -154,3 +155,7 @@ class GitHubStore:
         
         logger.info(f"Found {len(objects)} updated objects")
         return objects
+    
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object"""
+        return self.issue_handler.get_object_history(object_id)
