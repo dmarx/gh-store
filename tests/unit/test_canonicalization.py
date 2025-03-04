@@ -319,143 +319,143 @@ class TestCanonicalStoreDeprecation:
         # Verify that deprecate_object raises ValueError for self-reference
         with pytest.raises(ValueError, match="Cannot deprecate an object as itself"):
             store.deprecate_object("metrics", "metrics")
-    
-
-# Modified test for deduplicate_object
-def test_deduplicate_object(self, canonical_store_with_mocks, mock_issue_factory):
-    """Test deduplication of an object with multiple issues."""
-    store = canonical_store_with_mocks
-    
-    # Create two issues with same UID and stored-object labels
-    canonical_issue = mock_issue_factory(
-        number=101,
-        labels=["gh-store", "stored-object", "UID:metrics"],
-        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
-    )
-    
-    duplicate_issue = mock_issue_factory(
-        number=102,
-        labels=["gh-store", "stored-object", "UID:metrics"],
-        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
-    )
-    
-    # Setup mock for get_issues to return our test issues
-    store.repo.get_issues.return_value = [canonical_issue, duplicate_issue]
-    
-    # Mock get_issue to return the correct issue by number
-    def mock_get_issue(issue_number):
-        if issue_number == 101:
-            return canonical_issue
-        elif issue_number == 102:
-            return duplicate_issue
-        return Mock()
         
-    store.repo.get_issue = Mock(side_effect=mock_get_issue)
     
-    # Mock _get_object_id to return the correct object ID
-    store._get_object_id = Mock(return_value="metrics")
+    # Modified test for deduplicate_object
+    def test_deduplicate_object(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deduplication of an object with multiple issues."""
+        store = canonical_store_with_mocks
+        
+        # Create two issues with same UID and stored-object labels
+        canonical_issue = mock_issue_factory(
+            number=101,
+            labels=["gh-store", "stored-object", "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        duplicate_issue = mock_issue_factory(
+            number=102,
+            labels=["gh-store", "stored-object", "UID:metrics"],
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+        )
+        
+        # Setup mock for get_issues to return our test issues
+        store.repo.get_issues.return_value = [canonical_issue, duplicate_issue]
+        
+        # Mock get_issue to return the correct issue by number
+        def mock_get_issue(issue_number):
+            if issue_number == 101:
+                return canonical_issue
+            elif issue_number == 102:
+                return duplicate_issue
+            return Mock()
+            
+        store.repo.get_issue = Mock(side_effect=mock_get_issue)
+        
+        # Mock _get_object_id to return the correct object ID
+        store._get_object_id = Mock(return_value="metrics")
+        
+        # Mock deprecate_issue to simulate the deprecation and return success
+        store.deprecate_issue = Mock(return_value={
+            "success": True,
+            "source_issue": 102,
+            "source_object_id": "metrics",
+            "target_issue": 101,
+            "target_object_id": "metrics",
+            "reason": DeprecationReason.DUPLICATE
+        })
+        
+        # Execute deduplicate_object
+        result = store.deduplicate_object("metrics")
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["canonical_object_id"] == "metrics"
+        assert result["canonical_issue"] == 101
+        assert result["duplicates_processed"] == 1
+        
+        # Verify deprecate_issue was called with correct params
+        store.deprecate_issue.assert_called_once_with(
+            issue_number=102,
+            target_issue_number=101,
+            reason=DeprecationReason.DUPLICATE
+        )
     
-    # Mock deprecate_issue to simulate the deprecation and return success
-    store.deprecate_issue = Mock(return_value={
-        "success": True,
-        "source_issue": 102,
-        "source_object_id": "metrics",
-        "target_issue": 101,
-        "target_object_id": "metrics",
-        "reason": DeprecationReason.DUPLICATE
-    })
-    
-    # Execute deduplicate_object
-    result = store.deduplicate_object("metrics")
-    
-    # Verify result
-    assert result["success"] is True
-    assert result["canonical_object_id"] == "metrics"
-    assert result["canonical_issue"] == 101
-    assert result["duplicates_processed"] == 1
-    
-    # Verify deprecate_issue was called with correct params
-    store.deprecate_issue.assert_called_once_with(
-        issue_number=102,
-        target_issue_number=101,
-        reason=DeprecationReason.DUPLICATE
-    )
-
-# New test to verify deprecate_issue
-def test_deprecate_issue(self, canonical_store_with_mocks, mock_issue_factory):
-    """Test deprecating a specific issue."""
-    store = canonical_store_with_mocks
-    
-    # Create source and target issues
-    source_issue = mock_issue_factory(
-        number=123,
-        labels=["gh-store", "stored-object", "UID:old-metrics"],
-        created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
-    )
-    
-    target_issue = mock_issue_factory(
-        number=456,
-        labels=["gh-store", "stored-object", "UID:metrics"],
-        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
-    )
-    
-    # Setup get_issue mock
-    def mock_get_issue(issue_number):
-        if issue_number == 123:
-            return source_issue
-        elif issue_number == 456:
-            return target_issue
-        raise ValueError(f"Unknown issue number: {issue_number}")
-    
-    store.repo.get_issue = Mock(side_effect=mock_get_issue)
-    
-    # Mock _get_object_id to return the correct IDs
-    def mock_get_object_id(issue):
-        if issue.number == 123:
-            return "old-metrics"
-        elif issue.number == 456:
-            return "metrics"
-        return None
-    
-    store._get_object_id = Mock(side_effect=mock_get_object_id)
-    
-    # Mock label creation
-    store.repo.create_label = Mock()
-    
-    # Mock adding/removing labels
-    source_issue.add_to_labels = Mock()
-    source_issue.remove_from_labels = Mock()
-    
-    # Mock comment creation
-    source_issue.create_comment = Mock()
-    target_issue.create_comment = Mock()
-    
-    # Execute deprecate_issue
-    result = store.deprecate_issue(
-        issue_number=123,
-        target_issue_number=456,
-        reason=DeprecationReason.MERGED
-    )
-    
-    # Verify result
-    assert result["success"] is True
-    assert result["source_issue"] == 123
-    assert result["source_object_id"] == "old-metrics"
-    assert result["target_issue"] == 456
-    assert result["target_object_id"] == "metrics"
-    assert result["reason"] == DeprecationReason.MERGED
-    
-    # Verify labels were removed/added
-    source_issue.remove_from_labels.assert_called_with(LabelNames.STORED_OBJECT)
-    source_issue.add_to_labels.assert_called_with(
-        LabelNames.DEPRECATED, 
-        f"{LabelNames.MERGED_INTO_PREFIX}metrics",
-        f"{LabelNames.DEPRECATED_BY_PREFIX}456"
-    )
-    
-    # Verify comments were added
-    assert source_issue.create_comment.called
-    assert target_issue.create_comment.called
+    # New test to verify deprecate_issue
+    def test_deprecate_issue(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deprecating a specific issue."""
+        store = canonical_store_with_mocks
+        
+        # Create source and target issues
+        source_issue = mock_issue_factory(
+            number=123,
+            labels=["gh-store", "stored-object", "UID:old-metrics"],
+            created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
+        )
+        
+        target_issue = mock_issue_factory(
+            number=456,
+            labels=["gh-store", "stored-object", "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        # Setup get_issue mock
+        def mock_get_issue(issue_number):
+            if issue_number == 123:
+                return source_issue
+            elif issue_number == 456:
+                return target_issue
+            raise ValueError(f"Unknown issue number: {issue_number}")
+        
+        store.repo.get_issue = Mock(side_effect=mock_get_issue)
+        
+        # Mock _get_object_id to return the correct IDs
+        def mock_get_object_id(issue):
+            if issue.number == 123:
+                return "old-metrics"
+            elif issue.number == 456:
+                return "metrics"
+            return None
+        
+        store._get_object_id = Mock(side_effect=mock_get_object_id)
+        
+        # Mock label creation
+        store.repo.create_label = Mock()
+        
+        # Mock adding/removing labels
+        source_issue.add_to_labels = Mock()
+        source_issue.remove_from_labels = Mock()
+        
+        # Mock comment creation
+        source_issue.create_comment = Mock()
+        target_issue.create_comment = Mock()
+        
+        # Execute deprecate_issue
+        result = store.deprecate_issue(
+            issue_number=123,
+            target_issue_number=456,
+            reason=DeprecationReason.MERGED
+        )
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["source_issue"] == 123
+        assert result["source_object_id"] == "old-metrics"
+        assert result["target_issue"] == 456
+        assert result["target_object_id"] == "metrics"
+        assert result["reason"] == DeprecationReason.MERGED
+        
+        # Verify labels were removed/added
+        source_issue.remove_from_labels.assert_called_with(LabelNames.STORED_OBJECT)
+        source_issue.add_to_labels.assert_called_with(
+            LabelNames.DEPRECATED, 
+            f"{LabelNames.MERGED_INTO_PREFIX}metrics",
+            f"{LabelNames.DEPRECATED_BY_PREFIX}456"
+        )
+        
+        # Verify comments were added
+        assert source_issue.create_comment.called
+        assert target_issue.create_comment.called
 
 
     def test_deduplicate_object_no_duplicates(self, canonical_store, mock_canonical_issue):
