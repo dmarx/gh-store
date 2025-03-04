@@ -2,6 +2,10 @@
 import { GitHubStoreClient } from './client';
 import { StoredObject, GitHubStoreConfig, Json, CommentPayload } from './types';
 import { CLIENT_VERSION } from './version';
+import { Logger } from './logging'; // Import a logger utility
+
+// Create a logger instance
+const logger = new Logger('CanonicalStore');
 
 // Label constants for canonicalization system
 export enum LabelNames {
@@ -31,7 +35,7 @@ export interface CommentHistory {
     client_version: string;
     timestamp: string;
     update_mode: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   source_issue?: number;
   source_object_id?: string;
@@ -40,6 +44,26 @@ export interface CommentHistory {
 // Configuration for CanonicalStore
 export interface CanonicalStoreConfig extends GitHubStoreConfig {
   canonicalize?: boolean; // Whether to perform canonicalization by default
+}
+
+// Result type for deduplication
+export interface DeduplicateResult {
+  success: boolean;
+  canonicalObjectId?: string;
+  canonicalIssue?: number;
+  duplicatesProcessed?: number;
+  results?: Array<Record<string, unknown>>;
+  message?: string;
+}
+
+// Result type for deprecateIssue
+export interface DeprecateIssueResult {
+  success: boolean;
+  sourceIssue: number;
+  sourceObjectId: string;
+  targetIssue: number;
+  targetObjectId: string;
+  reason: string;
 }
 
 // The main CanonicalStore class
@@ -56,7 +80,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
     
     // Ensure special labels exist
     this._ensureSpecialLabels().catch(err => {
-      console.warn(`Could not ensure special labels exist: ${(err as Error).message}`);
+      logger.warn(`Could not ensure special labels exist: ${(err as Error).message}`);
     });
   }
   
@@ -86,19 +110,19 @@ export class CanonicalStoreClient extends GitHubStoreClient {
               body: JSON.stringify(label)
             });
           } catch (error) {
-            console.warn(`Could not create label ${label.name}: ${(error as Error).message}`);
+            logger.warn(`Could not create label ${label.name}: ${(error as Error).message}`);
           }
         }
       }
     } catch (error) {
-      console.warn(`Could not ensure special labels exist: ${(error as Error).message}`);
+      logger.warn(`Could not ensure special labels exist: ${(error as Error).message}`);
     }
   }
 
   // Resolve object ID to its canonical form
   async resolveCanonicalObjectId(objectId: string, maxDepth: number = 5): Promise<string> {
     if (maxDepth <= 0) {
-      console.warn(`Maximum alias resolution depth reached for ${objectId}`);
+      logger.warn(`Maximum alias resolution depth reached for ${objectId}`);
       return objectId;
     }
 
@@ -124,7 +148,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
               
               // Prevent self-referential loops
               if (canonicalId === objectId) {
-                console.error(`Self-referential alias detected for ${objectId}`);
+                logger.error(`Self-referential alias detected for ${objectId}`);
                 return objectId;
               }
               
@@ -135,7 +159,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         }
       }
     } catch (error) {
-      console.warn(`Error resolving canonical ID for ${objectId}: ${error}`);
+      logger.warn(`Error resolving canonical ID for ${objectId}: ${(error as Error).message}`);
     }
 
     // Not an alias, or couldn't resolve - assume it's canonical
@@ -149,7 +173,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
     if (canonicalize) {
       const canonicalId = await this.resolveCanonicalObjectId(objectId);
       if (canonicalId !== objectId) {
-        console.info(`Object ${objectId} resolved to canonical object ${canonicalId}`);
+        logger.info(`Object ${objectId} resolved to canonical object ${canonicalId}`);
       }
       return this.processWithVirtualMerge(canonicalId);
     } else {
@@ -246,7 +270,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         });
       }
     } catch (error) {
-      console.warn(`Could not update issue body for ${objectId}: ${(error as Error).message}`);
+      logger.warn(`Could not update issue body for ${objectId}: ${(error as Error).message}`);
     }
   }
 
@@ -310,7 +334,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         visitedIssues.add(issue.number);
       }
     } catch (error) {
-      console.warn(`Error getting alias issue comments: ${(error as Error).message}`);
+      logger.warn(`Error getting alias issue comments: ${(error as Error).message}`);
     }
     
     // 3. Get deprecated issue comments
@@ -331,7 +355,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         visitedIssues.add(issue.number);
       }
     } catch (error) {
-      console.warn(`Error getting deprecated issue comments: ${(error as Error).message}`);
+      logger.warn(`Error getting deprecated issue comments: ${(error as Error).message}`);
     }
     
     // Sort by timestamp
@@ -395,7 +419,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         }
       }
     } catch (error) {
-      console.warn(`Error processing comments for issue #${issueNumber}: ${(error as Error).message}`);
+      logger.warn(`Error processing comments for issue #${issueNumber}: ${(error as Error).message}`);
     }
     
     return comments;
@@ -629,7 +653,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         method: "DELETE"
       });
     } catch (error) {
-      console.warn(`Error removing stored-object label: ${(error as Error).message}`);
+      logger.warn(`Error removing stored-object label: ${(error as Error).message}`);
     }
     
     // 4. Add deprecation labels
@@ -686,7 +710,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           })
         });
       } catch (restoreError) {
-        console.error(`Failed to restore label: ${(restoreError as Error).message}`);
+        logger.error(`Failed to restore label: ${(restoreError as Error).message}`);
       }
       
       throw new Error(`Failed to deprecate object: ${(error as Error).message}`);
@@ -694,7 +718,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
   }
 
   // Find duplicates in the repository
-  async findDuplicates(): Promise<Record<string, any[]>> {
+  async findDuplicates(): Promise<Record<string, Array<{ number: number; labels: Array<{ name: string }> }>>> {
     try {
       // Get all issues with stored-object label
       const issues = await this.fetchFromGitHub<Array<{
@@ -709,7 +733,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       });
       
       // Group by UID
-      const issuesByUid: Record<string, any[]> = {};
+      const issuesByUid: Record<string, Array<{ number: number; labels: Array<{ name: string }> }>> = {};
       
       for (const issue of issues) {
         try {
@@ -725,29 +749,22 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       }
       
       // Filter to only those with duplicates
-      const duplicates: Record<string, any[]> = {};
-      for (const [uid, issues] of Object.entries(issuesByUid)) {
-        if (issues.length > 1) {
-          duplicates[uid] = issues;
+      const duplicates: Record<string, Array<{ number: number; labels: Array<{ name: string }> }>> = {};
+      for (const [uid, issueList] of Object.entries(issuesByUid)) {
+        if (issueList.length > 1) {
+          duplicates[uid] = issueList;
         }
       }
       
       return duplicates;
     } catch (error) {
-      console.warn(`Error finding duplicates: ${(error as Error).message}`);
+      logger.warn(`Error finding duplicates: ${(error as Error).message}`);
       return {};
     }
   }
 
   // Deduplicate an object
-  async deduplicateObject(objectId: string, canonicalId?: string): Promise<{
-    success: boolean;
-    canonicalObjectId?: string;
-    canonicalIssue?: number;
-    duplicatesProcessed?: number;
-    results?: any[];
-    message?: string;
-  }> {
+  async deduplicateObject(objectId: string, canonicalId?: string): Promise<DeduplicateResult> {
     try {
       // Find all issues with this UID that are active
       const issues = await this.fetchFromGitHub<Array<{
@@ -795,10 +812,10 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       }
       
       const canonicalIssueNumber = canonicalIssue.number;
-      console.info(`Selected issue #${canonicalIssueNumber} as canonical for ${objectId}`);
+      logger.info(`Selected issue #${canonicalIssueNumber} as canonical for ${objectId}`);
       
       // Process duplicates
-      const results = [];
+      const results: Array<Record<string, unknown>> = [];
       
       for (const issue of sortedIssues) {
         // Skip the canonical issue
@@ -806,7 +823,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           continue;
         }
         
-        console.info(`Processing duplicate issue #${issue.number}`);
+        logger.info(`Processing duplicate issue #${issue.number}`);
         
         // Deprecate as duplicate
         const result = await this.deprecateIssue(
@@ -882,7 +899,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       return aliases;
     } catch (error) {
-      console.warn(`Error finding aliases: ${(error as Error).message}`);
+      logger.warn(`Error finding aliases: ${(error as Error).message}`);
       return {};
     }
   }
@@ -892,14 +909,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
     issueNumber: number,
     targetIssueNumber: number,
     reason: DeprecationReason
-  ): Promise<{
-    success: boolean;
-    sourceIssue: number;
-    sourceObjectId: string;
-    targetIssue: number;
-    targetObjectId: string;
-    reason: string;
-  }> {
+  ): Promise<DeprecateIssueResult> {
     try {
       // Get source issue
       const sourceIssue = await this.fetchFromGitHub<{
@@ -937,7 +947,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           });
         }
       } catch (error) {
-        console.warn(`Failed to ensure GH_STORE label: ${(error as Error).message}`);
+        logger.warn(`Failed to ensure GH_STORE label: ${(error as Error).message}`);
       }
       
       // Remove stored-object label from source
@@ -1006,7 +1016,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
             })
           });
         } catch (restoreError) {
-          console.error(`Failed to restore label: ${(restoreError as Error).message}`);
+          logger.error(`Failed to restore label: ${(restoreError as Error).message}`);
         }
         
         throw new Error(`Failed to deprecate issue: ${(error as Error).message}`);
@@ -1037,31 +1047,38 @@ export class CanonicalStoreClient extends GitHubStoreClient {
   }
 
   // Deep merge utility for combining objects
-  private _deepMerge(base: any, update: any): any {
+  private _deepMerge<T, U>(base: T, update: U): T & U {
     // Return update directly for non-objects
     if (typeof base !== 'object' || base === null ||
         typeof update !== 'object' || update === null) {
-      return update;
+      return update as T & U;
     }
 
     // Handle arrays
     if (Array.isArray(base) && Array.isArray(update)) {
-      return update; // Replace arrays by default
+      return update as unknown as T & U; // Replace arrays by default
     }
 
     // Handle objects
-    const result = { ...base };
+    const result = { ...base } as Record<string, unknown>;
     
     for (const key in update) {
       if (Object.prototype.hasOwnProperty.call(update, key)) {
-        if (key in base && typeof base[key] === 'object' && typeof update[key] === 'object') {
-          result[key] = this._deepMerge(base[key], update[key]);
+        const updateValue = (update as Record<string, unknown>)[key];
+        const baseValue = (base as Record<string, unknown>)[key];
+        
+        if (
+          key in base && 
+          typeof baseValue === 'object' && baseValue !== null &&
+          typeof updateValue === 'object' && updateValue !== null
+        ) {
+          result[key] = this._deepMerge(baseValue, updateValue);
         } else {
-          result[key] = update[key];
+          result[key] = updateValue;
         }
       }
     }
     
-    return result;
+    return result as T & U;
   }
 }
