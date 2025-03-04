@@ -52,7 +52,7 @@ export interface DeduplicateResult {
   canonicalObjectId?: string;
   canonicalIssue?: number;
   duplicatesProcessed?: number;
-  results?: Array<Record<string, unknown>>;
+  results?: DeprecateIssueResult[]; // Use the specific type instead of generic Record
   message?: string;
 }
 
@@ -815,7 +815,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       logger.info(`Selected issue #${canonicalIssueNumber} as canonical for ${objectId}`);
       
       // Process duplicates
-      const results: Array<Record<string, unknown>> = [];
+      const results: DeprecateIssueResult[] = [];
       
       for (const issue of sortedIssues) {
         // Skip the canonical issue
