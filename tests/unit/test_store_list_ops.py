@@ -10,11 +10,11 @@ def test_list_updated_since(store, mock_issue):
     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
     object_id = "test-123"
     
-    # Create mock issue updated after timestamp
+    # Create mock issue updated after timestamp - include gh-store label
     issue = mock_issue(
         created_at=timestamp - timedelta(minutes=30),
         updated_at=timestamp + timedelta(minutes=30),
-        labels=["stored-object", f"UID:{object_id}"],
+        labels=["gh-store", "stored-object", f"UID:{object_id}"],
     )
     store.repo.get_issues.return_value = [issue]
     
@@ -30,6 +30,7 @@ def test_list_updated_since(store, mock_issue):
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
+    assert call_kwargs["labels"] == ["stored-object"]  # Query by stored-object for active objects
     assert len(updated) == 1
     assert mock_obj in updated.values()
 
@@ -55,18 +56,19 @@ def test_list_updated_since_no_updates(store, mock_issue):
     
     # Verify no updates found
     assert len(updated) == 0
+# Updates needed for test_store_list_ops.py
 
 def test_list_all_objects(store, mock_issue, mock_label_factory):
     """Test listing all objects in store"""
-    # Create mock issues with proper labels
+    # Create mock issues with proper labels - include gh-store label
     issues = [
         mock_issue(
             number=1,
-            labels=["stored-object", f"UID:test-1"],
+            labels=["gh-store", "stored-object", f"UID:test-1"],
         ),
         mock_issue(
             number=2,
-            labels=["stored-object", f"UID:test-2"],
+            labels=["gh-store", "stored-object", f"UID:test-2"],
         )
     ]
     store.repo.get_issues.return_value = issues
@@ -88,13 +90,20 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     assert len(objects) == 2
     assert "test-1" in objects
     assert "test-2" in objects
+    
+    # Verify the query was made with stored-object label
+    store.repo.get_issues.assert_called_with(
+        state="closed",
+        labels=["stored-object"]
+    )
 
 def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     """Test that archived objects are skipped in listing"""
-    # Create archived and active issues
+    # Create archived and active issues - include gh-store label
     archived_issue = mock_issue(
         number=1,
         labels=[
+            "gh-store",
             "stored-object",
             "UID:test-1",
             "archived",
@@ -102,7 +111,7 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     )
     active_issue = mock_issue(
         number=2,
-        labels=["stored-object", "UID:test-2"]
+        labels=["gh-store", "stored-object", "UID:test-2"]
     )
     
     store.repo.get_issues.return_value = [archived_issue, active_issue]
