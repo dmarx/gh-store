@@ -686,7 +686,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           })
         });
       } catch (restoreError) {
-        console.error(`Failed to restore label: ${(restoreError as error).message}`);
+        console.error(`Failed to restore label: ${(restoreError as Error).message}`);
       }
       
       throw new Error(`Failed to deprecate object: ${(error as Error).message}`);
