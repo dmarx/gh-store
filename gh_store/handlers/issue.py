@@ -21,6 +21,7 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
+    # Changes to the IssueHandler.create_object method in gh_store/core/store.py
     
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
@@ -29,14 +30,17 @@ class IssueHandler:
         # Create uid label with prefix
         uid_label = f"{self.uid_prefix}{object_id}"
         
-        # Ensure required labels exist
-        self._ensure_labels_exist([self.base_label, uid_label])
+        # Get labels to apply
+        labels_to_apply = ["gh-store", self.base_label, uid_label]
         
-        # Create issue with object data and both required labels
+        # Ensure required labels exist
+        self._ensure_labels_exist(labels_to_apply)
+        
+        # Create issue with object data and required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
-            labels=[self.base_label, uid_label]
+            labels=labels_to_apply
         )
         
         # Create initial state comment with metadata
