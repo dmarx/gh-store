@@ -265,7 +265,7 @@ mock_issue = mock_issue_factory
 def mock_repo_factory(mock_label_factory):
     """
     Create GitHub repository mocks with standard structure.
-    	
+    
     Note: Creates basic repository structure. Labels, issues, and permissions
     should be explicitly set up in tests where they matter.
     """
@@ -298,10 +298,12 @@ def mock_repo_factory(mock_label_factory):
         owner.type = owner_type
         repo.owner = owner
         
-        # Set up labels
+        # Set up labels - include gh-store by default unless specified otherwise
         repo_labels = []
         if labels:
-            repo_labels = [mock_label_factory(name) for name in labels]
+            default_labels = ["gh-store", "stored-object"] if "gh-store" not in labels and "stored-object" not in labels else []
+            for name in default_labels + labels:
+                repo_labels.append(mock_label_factory(name))
         repo.get_labels = Mock(return_value=repo_labels)
         
         # Set up label creation
