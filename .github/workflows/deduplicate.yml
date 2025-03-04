@@ -8,7 +8,7 @@ on:
   schedule:
     - cron: '0 2 * * *' # Run daily at 2:00 UTC
   push:
-    branches: [ canonicalizer ]
+    branches: [ canonicalizer-newlabels ]
     paths: [ ".github/workflows/deduplicate.yml" ]
   # Allow manual triggering
   workflow_dispatch:
