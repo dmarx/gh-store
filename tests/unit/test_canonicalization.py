@@ -318,7 +318,7 @@ class TestCanonicalStoreDeprecation:
         
         # Verify that deprecate_object raises ValueError for self-reference
         with pytest.raises(ValueError, match="Cannot deprecate an object as itself"):
-            store.deprecate_object("metrics", "metrics")
+            store.deprecate_object("metrics", "metrics", DeprecationReason.REPLACED)
         
     
     # Modified test for deduplicate_object
