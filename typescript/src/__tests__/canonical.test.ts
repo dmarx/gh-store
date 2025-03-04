@@ -4,14 +4,30 @@ import { describe, it, expect, beforeEach } from '@jest/globals';
 import { CanonicalStoreClient, LabelNames, DeprecationReason } from '../canonical';
 import fetchMock from 'jest-fetch-mock';
 
+// Create a test version with access to protected methods
+class TestCanonicalStoreClient extends CanonicalStoreClient {
+  public testFetchFromGitHub<T>(path: string, options?: RequestInit & { params?: Record<string, string> }): Promise<T> {
+    return this.fetchFromGitHub<T>(path, options);
+  }
+  
+  public testExtractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+    return this._extractObjectIdFromLabels(issue);
+  }
+  
+  // Expose deep merge for testing with defined types
+  public testDeepMerge<T extends Record<string, unknown>, U extends Record<string, unknown>>(base: T, update: U): T & U {
+    return this._deepMerge(base, update);
+  }
+}
+
 describe('CanonicalStoreClient', () => {
   const token = 'test-token';
   const repo = 'owner/repo';
-  let client: CanonicalStoreClient;
+  let client: TestCanonicalStoreClient;
 
   beforeEach(() => {
     fetchMock.resetMocks();
-    client = new CanonicalStoreClient(token, repo, {
+    client = new TestCanonicalStoreClient(token, repo, {
       cache: {
         maxSize: 100,
         ttl: 3600000
@@ -97,6 +113,50 @@ describe('CanonicalStoreClient', () => {
     });
   });
 
+  describe('Deep merge utility', () => {
+    // This directly tests the internal _deepMerge method through the test class
+    it('should correctly merge objects at multiple levels', () => {
+      const base = {
+        level1: {
+          a: 1,
+          level2: {
+            b: 2,
+            c: 3
+          }
+        },
+        list: [1, 2, 3]
+      };
+      
+      const update = {
+        level1: {
+          a: 10,
+          level2: {
+            c: 30,
+            d: 40
+          }
+        },
+        list: [4, 5, 6],
+        new_field: 'value'
+      };
+      
+      // Test the typed deep merge
+      const result = client.testDeepMerge(base, update);
+      
+      expect(result).toEqual({
+        level1: {
+          a: 10,  // Updated
+          level2: {
+            b: 2,   // Preserved
+            c: 30,  // Updated
+            d: 40   // Added
+          }
+        },
+        list: [4, 5, 6],  // Replaced
+        new_field: 'value'  // Added
+      });
+    });
+  });
+  
   describe('getObject with canonicalization', () => {
     it('should resolve and process virtual merge by default', async () => {
       // Mock to find the alias
