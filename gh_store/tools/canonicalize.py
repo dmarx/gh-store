@@ -272,8 +272,9 @@ class CanonicalStore(GitHubStore):
                 continue
             
             # Skip system comments
-            if comment["data"].get("type", "").startswith("system_"):
-                continue
+            # if comment["data"].get("type", "").startswith("system_"):
+            #     continue
+            # TODO: `type` should be a _meta attribute, not _data
             
             data = comment["data"]
             if isinstance(data, dict) and "_data" in data:
@@ -455,37 +456,39 @@ class CanonicalStore(GitHubStore):
         except Exception as e:
             raise ValueError(f"Failed to create alias: {e}")
         
-        # Add system comments
-        source_comment = {
-            "_data": {
-                "alias_to": target_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_alias"
-        }
-        source_issue.create_comment(json.dumps(source_comment, indent=2))
+        # ... You know what? We don't actualy need these "system comments". 
+        # Adding labels is already tracked within github issues anyway.
+        # # Add system comments
+        # source_comment = {
+        #     "_data": {
+        #         "alias_to": target_id,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_alias"
+        # }
+        # source_issue.create_comment(json.dumps(source_comment, indent=2))
         
         # Add reference comment to target
-        target_comment = {
-            "_data": {
-                "aliased_by": source_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_alias_reference"
-        }
-        target_issue.create_comment(json.dumps(target_comment, indent=2))
+        # target_comment = {
+        #     "_data": {
+        #         "aliased_by": source_id,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_alias_reference"
+        # }
+        # target_issue.create_comment(json.dumps(target_comment, indent=2))
         
         return {
             "success": True,
@@ -562,43 +565,43 @@ class CanonicalStore(GitHubStore):
                 pass
             raise ValueError(f"Failed to deprecate issue: {e}")
         
-        # Add system comments
-        source_comment = {
-            "_data": {
-                "status": "deprecated",
-                "canonical_object_id": target_object_id,
-                "canonical_issue": target_issue_number,
-                "reason": reason,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_deprecation"
-        }
-        source_issue.create_comment(json.dumps(source_comment, indent=2))
+        # # Add system comments
+        # source_comment = {
+        #     "_data": {
+        #         "status": "deprecated",
+        #         "canonical_object_id": target_object_id,
+        #         "canonical_issue": target_issue_number,
+        #         "reason": reason,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_deprecation"
+        # }
+        # source_issue.create_comment(json.dumps(source_comment, indent=2))
         
-        # Add reference comment to target
-        target_comment = {
-            "_data": {
-                "status": "merged_reference",
-                "merged_object_id": source_object_id,
-                "merged_issue": issue_number,
-                "reason": reason,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            "_meta": {
-                "client_version": CLIENT_VERSION,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "update_mode": "append",
-                "system": True
-            },
-            "type": "system_reference"
-        }
-        target_issue.create_comment(json.dumps(target_comment, indent=2))
+        # # Add reference comment to target
+        # target_comment = {
+        #     "_data": {
+        #         "status": "merged_reference",
+        #         "merged_object_id": source_object_id,
+        #         "merged_issue": issue_number,
+        #         "reason": reason,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_reference"
+        # }
+        # target_issue.create_comment(json.dumps(target_comment, indent=2))
         
         return {
             "success": True,
