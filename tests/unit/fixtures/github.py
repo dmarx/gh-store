@@ -17,18 +17,21 @@ def mock_label_factory():
     Example:
         label = mock_label_factory("enhancement")
         label = mock_label_factory("bug", "fc2929")
+        label = mock_label_factory("bug", "fc2929", "Bug description")
     """
-    def create_label(name: str, color: str = "0366d6") -> Mock:
+    def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
         """
         Create a mock label with GitHub-like structure.
         
         Args:
             name: Name of the label
             color: Color hex code without #
+            description: Optional description for the label
         """
         label = Mock()
         label.name = name
         label.color = color
+        label.description = description
         return label
     
     return create_label
@@ -223,10 +226,12 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         
         # Set up labels
         issue_labels = []
+        issue.labels = issue_labels
         if labels:
             for label_name in labels:
-                issue_labels.append(mock_label_factory(label_name))
-        issue.labels = issue_labels
+                issue.labels.append(mock_label_factory(label_name))
+                #issue.labels.append(label_name)
+        
         
         # Set up comments
         mock_comments = list(comments) if comments is not None else []
@@ -260,7 +265,7 @@ mock_issue = mock_issue_factory
 def mock_repo_factory(mock_label_factory):
     """
     Create GitHub repository mocks with standard structure.
-    	
+    
     Note: Creates basic repository structure. Labels, issues, and permissions
     should be explicitly set up in tests where they matter.
     """
@@ -293,15 +298,17 @@ def mock_repo_factory(mock_label_factory):
         owner.type = owner_type
         repo.owner = owner
         
-        # Set up labels
+        # Set up labels - include gh-store by default unless specified otherwise
         repo_labels = []
         if labels:
-            repo_labels = [mock_label_factory(name) for name in labels]
+            default_labels = ["gh-store", "stored-object"] if "gh-store" not in labels and "stored-object" not in labels else []
+            for name in default_labels + labels:
+                repo_labels.append(mock_label_factory(name))
         repo.get_labels = Mock(return_value=repo_labels)
         
         # Set up label creation
-        def create_label(name: str, color: str = "0366d6") -> Mock:
-            label = mock_label_factory(name, color)
+        def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
+            label = mock_label_factory(name, color, description)
             repo_labels.append(label)
             return label
         repo.create_label = Mock(side_effect=create_label)

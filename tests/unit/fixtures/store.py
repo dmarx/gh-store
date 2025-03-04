@@ -50,7 +50,7 @@ def store(mock_repo_factory, default_config):
         name="owner/repo",
         owner_login="repo-owner",
         owner_type="User",
-        labels=["stored-object"]
+        labels=["gh-store", "stored-object"]  # Include gh-store label
     )
     
     with patch('gh_store.core.store.Github') as mock_gh:

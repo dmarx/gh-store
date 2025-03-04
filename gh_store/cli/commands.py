@@ -172,16 +172,28 @@ def process_updates(
     except Exception as e:
         logger.exception("Unexpected error occurred")
         raise SystemExit(1)
-
 def snapshot(
     token: str | None = None,
     repo: str | None = None,
     output: str = "snapshot.json",
     config: str | None = None,
 ) -> None:
-    """Create a full snapshot of all objects in the store"""
+    """Create a full snapshot of all objects in the store, including relationship info."""
     try:
         store = get_store(token, repo, config)
+        
+        # Use CanonicalStore if available for enhanced relationship handling
+        has_canonical = False
+        canonical_store = None
+        
+        try:
+            from gh_store.tools.canonicalize import CanonicalStore
+            canonical_store = CanonicalStore(token, repo, config_path=Path(config) if config else None)
+            has_canonical = True
+        except ImportError:
+            logger.warning("Canonical store functionality not available")
+        except Exception as e:
+            logger.warning(f"Error initializing canonical store: {e}")
         
         # Get all stored objects
         objects = store.list_all()
@@ -190,24 +202,41 @@ def snapshot(
         snapshot_data = {
             "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
             "repository": repo or os.environ.get("GITHUB_REPOSITORY", ""),
-            "objects": {
-                obj_id: {
-                    "data": obj.data,
-                    "meta": {
-                        "created_at": obj.meta.created_at.isoformat(),
-                        "updated_at": obj.meta.updated_at.isoformat(),
-                        "version": obj.meta.version
-                    }
-                }
-                for obj_id, obj in objects.items()
-            }
+            "objects": {},
         }
+        
+        # Add relationships data if CanonicalStore is available
+        if has_canonical and canonical_store:
+            try:
+                # Find all aliases
+                aliases = canonical_store.find_aliases()
+                if aliases:
+                    snapshot_data["relationships"] = {
+                        "aliases": aliases
+                    }
+            except Exception as e:
+                logger.warning(f"Error finding aliases: {e}")
+        
+        # Add objects to snapshot
+        for obj_id, obj in objects.items():
+            snapshot_data["objects"][obj_id] = {
+                "data": obj.data,
+                "meta": {
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version
+                }
+            }
         
         # Write to file
         output_path = Path(output)
         output_path.write_text(json.dumps(snapshot_data, indent=2))
         logger.info(f"Snapshot written to {output_path}")
         logger.info(f"Captured {len(objects)} objects")
+        
+        if has_canonical and "relationships" in snapshot_data:
+            aliases_count = len(snapshot_data["relationships"].get("aliases", {}))
+            logger.info(f"Included {aliases_count} alias relationships")
         
     except GitHubStoreError as e:
         logger.error(f"Failed to create snapshot: {e}")
