@@ -36,7 +36,7 @@ export class GitHubStoreClient {
     this.cache = new IssueCache(config.cache);
   }
 
-  private async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+  protected async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
     const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
     
     if (options.params) {
@@ -45,7 +45,7 @@ export class GitHubStoreClient {
       });
       delete options.params;
     }
-
+  
     const response = await fetch(url.toString(), {
       ...options,
       headers: {
@@ -54,11 +54,11 @@ export class GitHubStoreClient {
         ...options.headers,
       },
     });
-
+  
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status}`);
     }
-
+  
     return response.json() as Promise<T>;
   }
 
