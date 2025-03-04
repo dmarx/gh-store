@@ -35,7 +35,14 @@ export class GitHubStoreClient {
     };
     this.cache = new IssueCache(config.cache);
   }
-
+  
+  /**
+   * Makes a request to the GitHub API
+   * 
+   * @param path - The API path to request (e.g., "/issues")
+   * @param options - Request options including optional params
+   * @returns The JSON response from the API
+   */
   protected async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
     const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
     
