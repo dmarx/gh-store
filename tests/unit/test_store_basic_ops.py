@@ -97,7 +97,8 @@ def test_create_object_ensures_labels_exist(store):
     # Update assertion to verify the uid_label was created
     create_label_calls = store.repo.create_label.call_args_list
     print(create_label_calls)
-    created_labels = [call_args[0][0] for call_args in create_label_calls]
+    #created_labels = [call_args[0][0] for call_args in create_label_calls]
+    created_labels = [call_args.name for call_args in create_label_calls]
     assert uid_label in created_labels
     
     # Verify issue creation with all required labels (now includes gh-store)
