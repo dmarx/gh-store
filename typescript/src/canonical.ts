@@ -1,6 +1,6 @@
 // typescript/src/canonical.ts
 import { GitHubStoreClient } from './client';
-import { StoredObject, ObjectMeta, GitHubStoreConfig, Json, CommentPayload } from './types';
+import { StoredObject, GitHubStoreConfig, Json, CommentPayload } from './types';
 import { CLIENT_VERSION } from './version';
 
 // Label constants for canonicalization system
@@ -56,8 +56,13 @@ export class CanonicalStoreClient extends GitHubStoreClient {
     
     // Ensure special labels exist
     this._ensureSpecialLabels().catch(err => {
-      console.warn(`Could not ensure special labels exist: ${err.message}`);
+      console.warn(`Could not ensure special labels exist: ${(err as Error).message}`);
     });
+  }
+  
+  // Override the protected method from GitHubStoreClient
+  protected async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+    return super.fetchFromGitHub<T>(path, options);
   }
 
   // Create special labels needed by the system
@@ -81,12 +86,12 @@ export class CanonicalStoreClient extends GitHubStoreClient {
               body: JSON.stringify(label)
             });
           } catch (error) {
-            console.warn(`Could not create label ${label.name}: ${error}`);
+            console.warn(`Could not create label ${label.name}: ${(error as Error).message}`);
           }
         }
       }
     } catch (error) {
-      console.warn(`Could not ensure special labels exist: ${error}`);
+      console.warn(`Could not ensure special labels exist: ${(error as Error).message}`);
     }
   }
 
@@ -177,7 +182,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           }
         };
       } catch (error) {
-        throw new Error(`No initial state found for ${objectId}: ${error.message}`);
+        throw new Error(`No initial state found for ${objectId}: ${(error as Error).message}`);
       }
     }
     
@@ -390,7 +395,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         }
       }
     } catch (error) {
-      console.warn(`Error processing comments for issue #${issueNumber}: ${error.message}`);
+      console.warn(`Error processing comments for issue #${issueNumber}: ${(error as Error).message}`);
     }
     
     return comments;
@@ -400,7 +405,6 @@ export class CanonicalStoreClient extends GitHubStoreClient {
   async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
     // Find the object - first try direct match, then resolve alias
     let issue;
-    let targetObjectId = objectId;
     
     try {
       // Check if this is a direct match
@@ -417,7 +421,6 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       } else {
         // Try to resolve as alias
         const canonicalId = await this.resolveCanonicalObjectId(objectId);
-        targetObjectId = canonicalId;
         
         const canonicalIssues = await this.fetchFromGitHub<Array<{ number: number }>>("/issues", {
           method: "GET",
@@ -709,15 +712,15 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       const issuesByUid: Record<string, any[]> = {};
       
       for (const issue of issues) {
-        for (const label of issue.labels) {
-          if (label.name.startsWith(LabelNames.UID_PREFIX)) {
-            const uid = label.name;
-            if (!issuesByUid[uid]) {
-              issuesByUid[uid] = [];
-            }
-            issuesByUid[uid].push(issue);
-            break;
+        try {
+          const objectId = this._extractObjectIdFromLabels(issue);
+          const uid = `${LabelNames.UID_PREFIX}${objectId}`;
+          if (!issuesByUid[uid]) {
+            issuesByUid[uid] = [];
           }
+          issuesByUid[uid].push(issue);
+        } catch (error) {
+          continue; // Skip issues without proper UID label
         }
       }
       
@@ -731,7 +734,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       return duplicates;
     } catch (error) {
-      console.warn(`Error finding duplicates: ${error.message}`);
+      console.warn(`Error finding duplicates: ${(error as Error).message}`);
       return {};
     }
   }
@@ -845,7 +848,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         });
         
         for (const issue of aliasIssues || []) {
-          const aliasId = this._getObjectIdFromLabels(issue);
+          const aliasId = this._extractObjectIdFromLabels(issue);
           if (aliasId) {
             aliases[aliasId] = objectId;
           }
@@ -863,7 +866,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         });
         
         for (const issue of aliasIssues || []) {
-          const aliasId = this._getObjectIdFromLabels(issue);
+          const aliasId = this._extractObjectIdFromLabels(issue);
           if (!aliasId) continue;
           
           // Find target of alias
@@ -879,7 +882,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       return aliases;
     } catch (error) {
-      console.warn(`Error finding aliases: ${error.message}`);
+      console.warn(`Error finding aliases: ${(error as Error).message}`);
       return {};
     }
   }
@@ -909,8 +912,8 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       }>(`/issues/${targetIssueNumber}`);
       
       // Get object IDs from both issues
-      const sourceObjectId = this._getObjectIdFromLabels(sourceIssue);
-      const targetObjectId = this._getObjectIdFromLabels(targetIssue);
+      const sourceObjectId = this._extractObjectIdFromLabels(sourceIssue);
+      const targetObjectId = this._extractObjectIdFromLabels(targetIssue);
       
       // Make sure GH_STORE label is on both issues
       try {
@@ -1022,8 +1025,8 @@ export class CanonicalStoreClient extends GitHubStoreClient {
     }
   }
 
-  // Helper to extract object ID from labels
-  private _getObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+  // Helper to extract object ID from labels (specialized version for canonicalization)
+  private _extractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
     for (const label of issue.labels) {
       if (label.name.startsWith(LabelNames.UID_PREFIX)) {
         return label.name.slice(LabelNames.UID_PREFIX.length);
