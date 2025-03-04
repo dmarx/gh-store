@@ -220,7 +220,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         data: currentState
       };
     } catch (error) {
-      throw new Error(`Error updating canonical object: ${(error as Error).message`);
+      throw new Error(`Error updating canonical object: ${(error as Error).message}`);
     }
   }
 
@@ -246,7 +246,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         });
       }
     } catch (error) {
-      console.warn(`Could not update issue body for ${objectId}: ${(error as Error).message`);
+      console.warn(`Could not update issue body for ${objectId}: ${(error as Error).message}`);
     }
   }
 
@@ -275,7 +275,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         throw new Error(`No canonical object found with ID: ${canonicalId}`);
       }
     } catch (error) {
-      throw new Error(`Error getting canonical issue comments: ${(error as Error).message`);
+      throw new Error(`Error getting canonical issue comments: ${(error as Error).message}`);
     }
     
     // 2. Get alias issue comments
@@ -310,7 +310,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         visitedIssues.add(issue.number);
       }
     } catch (error) {
-      console.warn(`Error getting alias issue comments: ${(error as Error).message`);
+      console.warn(`Error getting alias issue comments: ${(error as Error).message}`);
     }
     
     // 3. Get deprecated issue comments
@@ -331,7 +331,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         visitedIssues.add(issue.number);
       }
     } catch (error) {
-      console.warn(`Error getting deprecated issue comments: ${(error as Error).message`);
+      console.warn(`Error getting deprecated issue comments: ${(error as Error).message}`);
     }
     
     // Sort by timestamp
@@ -464,7 +464,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       // Return the object with canonicalize=false to preserve alias identity
       return this.getObject(objectId, { canonicalize: false });
     } catch (error) {
-      throw new Error(`Error updating object: ${(error as Error).message`);
+      throw new Error(`Error updating object: ${(error as Error).message}`);
     }
   }
 
@@ -491,7 +491,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       sourceIssue = sourceIssues[0];
     } catch (error) {
-      throw new Error(`Error finding source object: ${(error as Error).message`);
+      throw new Error(`Error finding source object: ${(error as Error).message}`);
     }
     
     // 2. Verify target object exists
@@ -508,7 +508,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         throw new Error(`Target object not found: ${targetId}`);
       }
     } catch (error) {
-      throw new Error(`Error finding target object: ${(error as Error).message`);
+      throw new Error(`Error finding target object: ${(error as Error).message}`);
     }
     
     // 3. Check if this is already an alias
@@ -522,7 +522,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       }
     } catch (error) {
       if (!error.message.includes('already an alias')) {
-        throw new Error(`Error checking existing aliases: ${(error as Error).message`);
+        throw new Error(`Error checking existing aliases: ${(error as Error).message}`);
       } else {
         throw error; // Rethrow "already an alias" error
       }
@@ -558,7 +558,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         targetId
       };
     } catch (error) {
-      throw new Error(`Failed to create alias: ${(error as Error).message`);
+      throw new Error(`Failed to create alias: ${(error as Error).message}`);
     }
   }
 
@@ -594,7 +594,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       sourceIssue = sourceIssues[0];
     } catch (error) {
-      throw new Error(`Error finding source object: ${(error as Error).message`);
+      throw new Error(`Error finding source object: ${(error as Error).message}`);
     }
     
     try {
@@ -615,7 +615,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
       
       targetIssue = targetIssues[0];
     } catch (error) {
-      throw new Error(`Error finding target object: ${(error as Error).message`);
+      throw new Error(`Error finding target object: ${(error as Error).message}`);
     }
     
     // 2. Validate that we're not trying to deprecate an object as itself
@@ -629,7 +629,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         method: "DELETE"
       });
     } catch (error) {
-      console.warn(`Error removing stored-object label: ${(error as Error).message`);
+      console.warn(`Error removing stored-object label: ${(error as Error).message}`);
     }
     
     // 4. Add deprecation labels
@@ -689,7 +689,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         console.error(`Failed to restore label: ${restoreError.message}`);
       }
       
-      throw new Error(`Failed to deprecate object: ${(error as Error).message`);
+      throw new Error(`Failed to deprecate object: ${(error as Error).message}`);
     }
   }
 
@@ -826,7 +826,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         results
       };
     } catch (error) {
-      throw new Error(`Error deduplicating object: ${(error as Error).message`);
+      throw new Error(`Error deduplicating object: ${(error as Error).message}`);
     }
   }
 
@@ -937,7 +937,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           });
         }
       } catch (error) {
-        console.warn(`Failed to ensure GH_STORE label: ${(error as Error).message`);
+        console.warn(`Failed to ensure GH_STORE label: ${(error as Error).message}`);
       }
       
       // Remove stored-object label from source
@@ -1009,7 +1009,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
           console.error(`Failed to restore label: ${restoreError.message}`);
         }
         
-        throw new Error(`Failed to deprecate issue: ${(error as Error).message`);
+        throw new Error(`Failed to deprecate issue: ${(error as Error).message}`);
       }
       
       return {
@@ -1021,7 +1021,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
         reason
       };
     } catch (error) {
-      throw new Error(`Failed to deprecate issue: ${(error as Error).message`);
+      throw new Error(`Failed to deprecate issue: ${(error as Error).message}`);
     }
   }
 
