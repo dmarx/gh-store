@@ -95,7 +95,7 @@ class GitHubStore:
         """List all objects in the store, indexed by object ID"""
         logger.info("Fetching all stored objects")
         
-        # Get all closed issues with base label
+        # Get all closed issues with stored-object label (active objects only)
         issues = list(self.repo.get_issues(
             state="closed",
             labels=[self.config.store.base_label]
@@ -106,13 +106,13 @@ class GitHubStore:
             # Skip archived objects
             if any(label.name == "archived" for label in issue.labels):
                 continue
-                
+                    
             try:
                 # Get object ID from labels
-                object_id = self.issue_handler.get_object_id_from_labels(issue)
+                object_id = self.get_object_id_from_labels(issue)
                 
                 # Load object
-                obj = self.issue_handler.get_object_by_number(issue.number)
+                obj = self.get_object_by_number(issue.number)
                 objects[object_id] = obj
                 
             except ValueError as e:
@@ -125,7 +125,7 @@ class GitHubStore:
         """List objects updated since given timestamp"""
         logger.info(f"Fetching objects updated since {timestamp}")
         
-        # Get all objects with base label that are closed
+        # Get all objects with stored-object label that are closed
         issues = list(self.repo.get_issues(
             state="closed",
             labels=[self.config.store.base_label],
@@ -137,13 +137,13 @@ class GitHubStore:
             # Skip archived objects
             if any(label.name == "archived" for label in issue.labels):
                 continue
-                
+                    
             try:
                 # Get object ID from labels - strip prefix to get bare ID
-                object_id = self.issue_handler.get_object_id_from_labels(issue)
+                object_id = self.get_object_id_from_labels(issue)
                 
                 # Load object
-                obj = self.issue_handler.get_object_by_number(issue.number)
+                obj = self.get_object_by_number(issue.number)
                 
                 # Double check the timestamp (since GitHub's since parameter includes issue comments)
                 if obj.meta.updated_at > timestamp:
