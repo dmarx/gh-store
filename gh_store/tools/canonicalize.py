@@ -163,12 +163,14 @@ class CanonicalStore(GitHubStore):
         
         canonical_issue = canonical_issues[0]
         comments = []
+        visited_issues = set() # sort of hacky way to make sure we only collect comments for a given issue once
         
         # Get comments from canonical issue
         for comment in canonical_issue.get_comments():
             metadata = self._extract_comment_metadata(comment, canonical_issue.number, canonical_id)
             if metadata:
                 comments.append(metadata)
+        visited_issues.add(canonical_issue.id)
         
         # Get all aliases of this canonical object
         alias_issues = list(self.repo.get_issues(
@@ -178,6 +180,9 @@ class CanonicalStore(GitHubStore):
         
         # Get comments from each alias
         for alias_issue in alias_issues:
+            if alias_issue.id in visited_issues:
+                continue
+            visited_issues.add(alias_issue.id)
             alias_id = None
             for label in alias_issue.labels:
                 if label.name.startswith(LabelNames.UID_PREFIX):
@@ -200,6 +205,9 @@ class CanonicalStore(GitHubStore):
         
         # Get comments from deprecated issues
         for dep_issue in deprecated_issues:
+            if dep_issue.id in visited_issues:
+                continue
+            visited_issues.add(dep_issue.id)
             for comment in dep_issue.get_comments():
                 metadata = self._extract_comment_metadata(comment, dep_issue.number, canonical_id)
                 if metadata:
