@@ -21,7 +21,6 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
-    # Changes to the IssueHandler.create_object method in gh_store/core/store.py
     
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
@@ -30,13 +29,13 @@ class IssueHandler:
         # Create uid label with prefix
         uid_label = f"{self.uid_prefix}{object_id}"
         
-        # Get labels to apply
+        # Get labels to apply - includes gh-store for system boundary
         labels_to_apply = ["gh-store", self.base_label, uid_label]
         
         # Ensure required labels exist
         self._ensure_labels_exist(labels_to_apply)
         
-        # Create issue with object data and required labels
+        # Create issue with object data and all required labels
         issue = self.repo.create_issue(
             title=f"Stored Object: {object_id}",
             body=json.dumps(data, indent=2),
@@ -107,7 +106,7 @@ class IssueHandler:
         
         uid_label = f"{self.uid_prefix}{object_id}"
         
-        # Query for issue with matching labels
+        # Query for issue with matching labels - must have stored-object (active)
         issues = list(self._with_retry(
             self.repo.get_issues,
             labels=[self.base_label, uid_label],
@@ -253,7 +252,7 @@ class IssueHandler:
         
         # Get the object's issue
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, f"{self.uid_prefix}{object_id}"],
             state="closed"
         ))
         
@@ -287,7 +286,7 @@ class IssueHandler:
         logger.info(f"Deleting object: {object_id}")
         
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, object_id],
+            labels=[self.base_label, f"{self.uid_prefix}{object_id}"],
             state="all"
         ))
         
@@ -297,8 +296,11 @@ class IssueHandler:
         issue = issues[0]
         issue.edit(
             state="closed",
-            labels=["archived", self.base_label, object_id]
+            labels=["archived", "gh-store", f"{self.uid_prefix}{object_id}"]
         )
+        
+        # Remove stored-object label to mark as inactive
+        issue.remove_from_labels(self.base_label)
 
     def _get_version(self, issue) -> int:
         """Extract version number from issue"""
