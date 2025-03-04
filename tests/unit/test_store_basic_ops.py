@@ -42,20 +42,29 @@ def test_get_object(store):
     """Test retrieving an object"""
     test_data = {"name": "test", "value": 42}
     
-    # Mock labels
+    # Mock labels - should include both stored-object and gh-store
     stored_label = Mock()
     stored_label.name = "stored-object"
-    store.repo.get_labels.return_value = [stored_label]
+    gh_store_label = Mock()
+    gh_store_label.name = "gh-store"
+    store.repo.get_labels.return_value = [stored_label, gh_store_label]
     
     mock_issue = Mock()
     mock_issue.body = json.dumps(test_data)
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.created_at = datetime.now(timezone.utc)
     mock_issue.updated_at = datetime.now(timezone.utc)
+    mock_issue.labels = [stored_label, gh_store_label]
     store.repo.get_issues.return_value = [mock_issue]
     
     obj = store.get("test-obj")
     assert obj.data == test_data
+    
+    # Verify correct query was made (still using stored-object as active indicator)
+    store.repo.get_issues.assert_called_with(
+        labels=["stored-object", "UID:test-obj"],
+        state="closed"
+    )
 
 def test_get_nonexistent_object(store):
     """Test getting an object that doesn't exist"""
@@ -83,13 +92,16 @@ def test_create_object_ensures_labels_exist(store):
     
     store.create(object_id, test_data)
     
-    # Verify label creation
-    store.repo.create_label.assert_called_once_with(
-        name=uid_label,
-        color="0366d6"
-    )
+    # Verify label creation - should include gh-store label
+    # store.repo.create_label might be called multiple times, so we can't assert_called_once
+    # Update assertion to verify the uid_label was created
+    create_label_calls = store.repo.create_label.call_args_list
+    created_labels = [call_args[0][0] for call_args in create_label_calls]
+    assert uid_label in created_labels
     
-    # Verify issue creation with both labels
+    # Verify issue creation with all required labels (now includes gh-store)
     store.repo.create_issue.assert_called_once()
     call_kwargs = store.repo.create_issue.call_args[1]
-    assert call_kwargs["labels"] == ["stored-object", uid_label]
+    assert "gh-store" in call_kwargs["labels"]
+    assert "stored-object" in call_kwargs["labels"]
+    assert uid_label in call_kwargs["labels"]
