@@ -11,7 +11,7 @@ class TestCanonicalStoreClient extends CanonicalStoreClient {
     return this.fetchFromGitHub<T>(path, options);
   }
   
-  // We need to recreate these private methods for testing
+  // We need to recreate these protected methods for testing
   public testExtractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
     return this._extractObjectIdFromLabels(issue);
   }
