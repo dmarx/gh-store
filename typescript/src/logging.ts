@@ -1,7 +1,7 @@
 // typescript/src/logging.ts
 /**
- * Simple logger utility to help with linting requirements
- * that disallow direct console statements
+ * Simple logger utility that avoids console statements
+ * but collects messages for potential later use
  */
 
 // Log levels
@@ -15,14 +15,23 @@ export enum LogLevel {
 // Logger configuration
 export interface LoggerConfig {
   level: LogLevel;
-  enableConsole: boolean;
+  silent?: boolean;
   prefix?: string;
+}
+
+// Log entry structure
+export interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  module: string;
+  message: string;
+  metadata?: Record<string, unknown>;
 }
 
 // Default configuration
 const DEFAULT_CONFIG: LoggerConfig = {
   level: LogLevel.INFO,
-  enableConsole: true
+  silent: false
 };
 
 // Mapping of log levels to numeric values for comparison
@@ -34,12 +43,12 @@ const LOG_LEVEL_VALUES: Record<LogLevel, number> = {
 };
 
 /**
- * Logger utility class to handle logging consistently
- * while avoiding direct console statements in the codebase
+ * Logger utility class that avoids direct console usage
  */
 export class Logger {
   private moduleName: string;
   private config: LoggerConfig;
+  private entries: LogEntry[] = [];
 
   /**
    * Create a new logger
@@ -91,7 +100,7 @@ export class Logger {
   }
 
   /**
-   * Internal helper method to handle logging
+   * Internal helper method to record logs
    */
   private log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
     // Check if this log level should be processed
@@ -99,27 +108,35 @@ export class Logger {
       return;
     }
 
-    const timestamp = new Date().toISOString();
-    const prefix = this.config.prefix || `[${this.moduleName}]`;
-    const formattedMessage = `${timestamp} ${prefix} ${level.toUpperCase()}: ${message}`;
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      module: this.moduleName,
+      message,
+      metadata: meta
+    };
 
-    // Send to console if enabled
-    if (this.config.enableConsole) {
-      // Using Function to avoid ESLint warnings about console
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      Function.prototype.call.call(console[level], console, formattedMessage);
-      
-      // Log metadata if present
-      if (meta && Object.keys(meta).length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval
-        Function.prototype.call.call(console[level], console, meta);
-      }
-    }
+    this.entries.push(entry);
 
-    // Here you could add other logging targets:
-    // - Write to file
-    // - Send to logging service
-    // - etc.
+    // In production, you would implement external logging here
+    // For example:
+    // - Write to a database
+    // - Send to a logging service
+    // - Write to a file
+  }
+
+  /**
+   * Get collected log entries
+   */
+  getEntries(): LogEntry[] {
+    return [...this.entries];
+  }
+
+  /**
+   * Clear collected log entries
+   */
+  clearEntries(): void {
+    this.entries = [];
   }
 
   /**
