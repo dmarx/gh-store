@@ -1,4 +1,4 @@
-// typescript/src/__tests__/canonical.test.ts - Updated test class and config
+// typescript/src/__tests__/canonical.test.ts
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { CanonicalStoreClient, LabelNames, DeprecationReason } from '../canonical';
@@ -547,32 +547,8 @@ describe('CanonicalStoreClient', () => {
   describe('Deep merge utility', () => {
     // This directly tests the internal _deepMerge method through the test class
     it('should correctly merge objects at multiple levels', () => {
-      // Define explicit interfaces for our test objects
-      interface BaseType {
-        level1: {
-          a: number;
-          level2: {
-            b: number;
-            c: number;
-          };
-        };
-        list: number[];
-      }
-      
-      interface UpdateType {
-        level1: {
-          a: number;
-          level2: {
-            c: number;
-            d: number;
-          };
-        };
-        list: number[];
-        new_field: string;
-      }
-      
-      // Create typed test objects
-      const base: BaseType = {
+      // Use Record<string, unknown> type to match the method signature
+      const base: Record<string, unknown> = {
         level1: {
           a: 1,
           level2: {
@@ -583,7 +559,7 @@ describe('CanonicalStoreClient', () => {
         list: [1, 2, 3]
       };
       
-      const update: UpdateType = {
+      const update: Record<string, unknown> = {
         level1: {
           a: 10,
           level2: {
@@ -595,7 +571,7 @@ describe('CanonicalStoreClient', () => {
         new_field: 'value'
       };
       
-      // Use the typed deep merge test method
+      // Use the test deep merge method
       const result = client.testDeepMerge(base, update);
       
       expect(result).toEqual({
