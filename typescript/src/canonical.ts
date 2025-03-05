@@ -1,6 +1,6 @@
 // typescript/src/canonical.ts
 import { GitHubStoreClient } from './client';
-import { StoredObject, GitHubStoreConfig, Json } from './types';
+import { StoredObject, GitHubStoreConfig } from './types';
 import { Logger } from './logging'; // Import a logger utility
 
 // Create a logger instance
