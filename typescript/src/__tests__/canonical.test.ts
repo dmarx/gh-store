@@ -112,76 +112,7 @@ describe('CanonicalStoreClient', () => {
       expect(result).toBe('test-alias-b');
     });
   });
-  
-  describe('Deep merge utility', () => {
-    // This directly tests the internal _deepMerge method through the test class
-    it('should correctly merge objects at multiple levels', () => {
-      // Define explicit interfaces for our test objects
-      interface BaseType {
-        level1: {
-          a: number;
-          level2: {
-            b: number;
-            c: number;
-          };
-        };
-        list: number[];
-      }
-      
-      interface UpdateType {
-        level1: {
-          a: number;
-          level2: {
-            c: number;
-            d: number;
-          };
-        };
-        list: number[];
-        new_field: string;
-      }
-      
-      // Create typed test objects
-      const base: BaseType = {
-        level1: {
-          a: 1,
-          level2: {
-            b: 2,
-            c: 3
-          }
-        },
-        list: [1, 2, 3]
-      };
-      
-      const update: UpdateType = {
-        level1: {
-          a: 10,
-          level2: {
-            c: 30,
-            d: 40
-          }
-        },
-        list: [4, 5, 6],
-        new_field: 'value'
-      };
-      
-      // Use the typed deep merge test method
-      const result = client.testDeepMerge(base, update);
-      
-      expect(result).toEqual({
-        level1: {
-          a: 10,  // Updated
-          level2: {
-            b: 2,   // Preserved
-            c: 30,  // Updated
-            d: 40   // Added
-          }
-        },
-        list: [4, 5, 6],  // Replaced
-        new_field: 'value'  // Added
-      });
-    });
-  });
-  
+
   describe('getObject with canonicalization', () => {
     it('should resolve and process virtual merge by default', async () => {
       // Mock to find the alias
@@ -608,10 +539,34 @@ describe('CanonicalStoreClient', () => {
   });
 
   describe('Deep merge utility', () => {
-    // This directly tests the private _deepMerge method
-    // In a real implementation, we would use a more elegant way to test private methods
+    // This directly tests the internal _deepMerge method through the test class
     it('should correctly merge objects at multiple levels', () => {
-      const base = {
+      // Define explicit interfaces for our test objects
+      interface BaseType {
+        level1: {
+          a: number;
+          level2: {
+            b: number;
+            c: number;
+          };
+        };
+        list: number[];
+      }
+      
+      interface UpdateType {
+        level1: {
+          a: number;
+          level2: {
+            c: number;
+            d: number;
+          };
+        };
+        list: number[];
+        new_field: string;
+      }
+      
+      // Create typed test objects
+      const base: BaseType = {
         level1: {
           a: 1,
           level2: {
@@ -622,7 +577,7 @@ describe('CanonicalStoreClient', () => {
         list: [1, 2, 3]
       };
       
-      const update = {
+      const update: UpdateType = {
         level1: {
           a: 10,
           level2: {
@@ -634,8 +589,8 @@ describe('CanonicalStoreClient', () => {
         new_field: 'value'
       };
       
-      // We need to access the private method
-      const result = (client as any)._deepMerge(base, update);
+      // Use the typed deep merge test method
+      const result = client.testDeepMerge(base, update);
       
       expect(result).toEqual({
         level1: {
