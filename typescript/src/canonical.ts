@@ -304,7 +304,7 @@ export class CanonicalStoreClient extends GitHubStoreClient {
   }
 
   // Helper to extract object ID from labels
-  private _extractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+  protected _extractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
     for (const label of issue.labels) {
       if (label.name.startsWith(LabelNames.UID_PREFIX)) {
         return label.name.slice(LabelNames.UID_PREFIX.length);
