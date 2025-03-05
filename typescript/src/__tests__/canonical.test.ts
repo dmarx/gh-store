@@ -22,11 +22,12 @@ class TestCanonicalStoreClient extends CanonicalStoreClient {
     throw new Error(`No UID label found with prefix ${LabelNames.UID_PREFIX}`);
   }
   
-  // Create a public method for testing deep merge
   public testDeepMerge<T, U>(base: T, update: U): T & U {
-    // Call the private method using 'any' to bypass TypeScript access checks
-    // This is only for testing and won't appear in production code
-    return (this as any)._deepMerge(base, update);
+    // Use a cast to unknown first, then to the desired type
+    // This avoids the explicit 'any' type while still bypassing TypeScript's access checks
+    return (this as unknown as {
+      _deepMerge<X, Y>(base: X, update: Y): X & Y;
+    })._deepMerge(base, update);
   }
 }
 
