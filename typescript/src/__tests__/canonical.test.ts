@@ -1,7 +1,7 @@
 // typescript/src/__tests__/canonical.test.ts
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import { CanonicalStoreClient, LabelNames, AliasResult } from '../canonical';
+import { CanonicalStoreClient, LabelNames } from '../canonical';
 import fetchMock from 'jest-fetch-mock';
 
 // Create a test version by extending and adding protected methods for exposure
