@@ -385,7 +385,7 @@ class CanonicalStore(GitHubStore):
             labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
             state="all"
         ))
-        
+
         if not alias_issues:
             # Not a direct match, check for canonical object via aliases.
             canonical_id = self.resolve_canonical_object_id(object_id)
@@ -404,7 +404,7 @@ class CanonicalStore(GitHubStore):
             _data=changes,
             _meta=CommentMeta(
                 client_version=CLIENT_VERSION,
-                issue_number=canonical_issue.number,
+                issue_number=issue.number,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 update_mode="append"
             )
