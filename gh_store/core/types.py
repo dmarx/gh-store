@@ -11,6 +11,7 @@ class ObjectMeta:
     """Metadata for a stored object"""
     object_id: str
     label: str
+    issue_number: int  # Added field to track GitHub issue number
     created_at: datetime
     updated_at: datetime
     version: int
