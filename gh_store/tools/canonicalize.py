@@ -367,7 +367,7 @@ class CanonicalStore(GitHubStore):
             meta = ObjectMeta(
                 object_id=object_id,
                 label=f"{LabelNames.UID_PREFIX}{object_id}",
-                issue_number=canonical_issue.number,
+                issue_number=canonical_id,
                 created_at=issue.created_at,
                 updated_at=issue.updated_at,
                 version=len(list(issue.get_comments())) + 1
