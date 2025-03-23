@@ -35,7 +35,8 @@ class CommentMeta:
     client_version: str
     timestamp: str
     update_mode: str
-
+    issue_number: int  # Added field to track GitHub issue number
+    
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
         return asdict(self)
