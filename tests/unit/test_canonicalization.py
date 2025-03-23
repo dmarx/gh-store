@@ -541,6 +541,7 @@ class TestCanonicalStoreVirtualMerge:
                     "data": data,
                     "timestamp": comment.created_at,
                     "id": comment.id,
+                    "issue_number":issue_number,
                     "source_issue": issue_number,
                     "source_object_id": object_id
                 }
