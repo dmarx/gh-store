@@ -172,7 +172,7 @@ export class GitHubStoreClient {
     });
 
     // Create and add initial state comment
-    const initialState = this.createCommentPayload(data, "initial_state");
+    const initialState = this.createCommentPayload(data, issue.number, "initial_state");
     
     const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
       method: "POST",
@@ -237,7 +237,7 @@ export class GitHubStoreClient {
     const issue = issues[0];
     
     // Create update payload with metadata
-    const updatePayload = this.createCommentPayload(changes);
+    const updatePayload = this.createCommentPayload(changes, issue.number);
 
     // Add update comment
     await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
