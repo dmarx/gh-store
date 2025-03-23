@@ -9,6 +9,8 @@ from omegaconf import DictConfig
 from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
 from ..core.version import CLIENT_VERSION
+from .comment import CommentHandler
+
 
 from time import sleep
 from github.GithubException import RateLimitExceededException
@@ -43,7 +45,7 @@ class IssueHandler:
         )
         
         # Create initial state comment with metadata including issue number
-        initial_state_comment = self.comment_handler.create_comment_payload(
+        initial_state_comment = CommentHandler.create_comment_payload(
             data=data,
             issue_number=issue.number,  # Include issue number
             comment_type='initial_state'
