@@ -90,7 +90,8 @@ def history_mock_comments(mock_comment):
             "_meta": {
                 "client_version": CLIENT_VERSION,
                 "timestamp": "2025-01-01T00:00:00Z",
-                "update_mode": "append"
+                "update_mode": "append",
+                "issue_number": 123,
             }
         },
         comment_id=1,
@@ -105,7 +106,8 @@ def history_mock_comments(mock_comment):
             "_meta": {
                 "client_version": CLIENT_VERSION,
                 "timestamp": "2025-01-02T00:00:00Z",
-                "update_mode": "append"
+                "update_mode": "append",
+                "issue_number": 123,
             }
         },
         comment_id=2,
@@ -120,7 +122,8 @@ def history_mock_comments(mock_comment):
             "_meta": {
                 "client_version": CLIENT_VERSION,
                 "timestamp": "2025-01-03T00:00:00Z",
-                "update_mode": "append"
+                "update_mode": "append",
+                "issue_number": 123,
             }
         },
         comment_id=3,
