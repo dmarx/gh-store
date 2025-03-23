@@ -11,6 +11,7 @@ def test_create_object_with_initial_state(store):
     """Test that creating an object stores the initial state in a comment"""
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
+    issue_number = 456  # Define issue number
     
     # Mock existing labels
     mock_base_label = Mock()
@@ -19,6 +20,7 @@ def test_create_object_with_initial_state(store):
     
     # Mock issue creation
     mock_issue = Mock()
+    mock_issue.number = issue_number  # Set issue number
     mock_comment = Mock()
     store.repo.create_issue.return_value = mock_issue
     mock_issue.create_comment.return_value = mock_comment
@@ -37,10 +39,16 @@ def test_create_object_with_initial_state(store):
     assert comment_data["type"] == "initial_state"
     assert comment_data["_data"] == test_data
     assert "_meta" in comment_data
+    assert "issue_number" in comment_data["_meta"]  # Verify issue_number in metadata
+    assert comment_data["_meta"]["issue_number"] == issue_number  # Verify issue_number value
+    
+    # Verify object metadata
+    assert obj.meta.issue_number == issue_number  # Verify issue_number in object metadata
 
 def test_get_object(store):
     """Test retrieving an object"""
     test_data = {"name": "test", "value": 42}
+    issue_number = 42  # Define issue number
     
     # Mock labels - should include both stored-object and gh-store
     stored_label = Mock()
@@ -50,6 +58,7 @@ def test_get_object(store):
     store.repo.get_labels.return_value = [stored_label, gh_store_label]
     
     mock_issue = Mock()
+    mock_issue.number = issue_number  # Set issue number
     mock_issue.body = json.dumps(test_data)
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.created_at = datetime.now(timezone.utc)
@@ -59,6 +68,7 @@ def test_get_object(store):
     
     obj = store.get("test-obj")
     assert obj.data == test_data
+    assert obj.meta.issue_number == issue_number  # Verify issue_number in metadata
     
     # Verify correct query was made (still using stored-object as active indicator)
     store.repo.get_issues.assert_called_with(
@@ -78,6 +88,7 @@ def test_create_object_ensures_labels_exist(store):
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
     uid_label = f"{store.config.store.uid_prefix}{object_id}"
+    issue_number = 789  # Define issue number
     
     # Mock existing labels
     mock_label = Mock()
@@ -85,12 +96,16 @@ def test_create_object_ensures_labels_exist(store):
     store.repo.get_labels.return_value = [mock_label]
     
     mock_issue = Mock()
+    mock_issue.number = issue_number  # Set issue number
     mock_issue.created_at = datetime.now(timezone.utc)
     mock_issue.updated_at = datetime.now(timezone.utc)
     mock_issue.get_comments = Mock(return_value=[])
     store.repo.create_issue.return_value = mock_issue
     
-    store.create(object_id, test_data)
+    obj = store.create(object_id, test_data)
+    
+    # Verify issue_number in object metadata
+    assert obj.meta.issue_number == issue_number
     
     # Verify label creation - should include gh-store label
     # store.repo.create_label might be called multiple times, so we can't assert_called_once
