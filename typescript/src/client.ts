@@ -139,6 +139,7 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: `${this.config.uidPrefix}${objectId}`,
+      issueNumber: issue.number,
       createdAt,
       updatedAt,
       version: await this._getVersion(issue.number),
@@ -198,6 +199,7 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: uidLabel,
+      issueNumber: issue.number,
       createdAt: new Date(issue.created_at),
       updatedAt: new Date(issue.updated_at),
       version: 1
@@ -285,6 +287,7 @@ export class GitHubStoreClient {
         const meta: ObjectMeta = {
           objectId,
           label: objectId,
+          issueNumber: issue.number,
           createdAt: new Date(issue.created_at),
           updatedAt: new Date(issue.updated_at),
           version: await this._getVersion(issue.number),
@@ -332,6 +335,7 @@ export class GitHubStoreClient {
           const meta: ObjectMeta = {
             objectId,
             label: objectId,
+            issueNumber: issue.number,
             createdAt: new Date(issue.created_at),
             updatedAt,
             version: await this._getVersion(issue.number),
