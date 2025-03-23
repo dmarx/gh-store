@@ -69,13 +69,14 @@ export class GitHubStoreClient {
     return response.json() as Promise<T>;
   }
 
-  private createCommentPayload(data: Json, type?: string): CommentPayload {
+  private createCommentPayload(data: Json, issueNumber: number, type?: string): CommentPayload {
     const payload: CommentPayload = {
       _data: data,
       _meta: {
         client_version: CLIENT_VERSION,
         timestamp: new Date().toISOString(),
-        update_mode: "append"
+        update_mode: "append",
+        issue_number: issueNumber  // Include issue number in metadata
       }
     };
     
