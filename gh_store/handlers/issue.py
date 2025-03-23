@@ -9,6 +9,8 @@ from omegaconf import DictConfig
 from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
 from ..core.version import CLIENT_VERSION
+from .comment import CommentHandler
+
 
 from time import sleep
 from github.GithubException import RateLimitExceededException
@@ -21,7 +23,7 @@ class IssueHandler:
         self.config = config
         self.base_label = config.store.base_label
         self.uid_prefix = config.store.uid_prefix
-    
+        
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
@@ -42,15 +44,11 @@ class IssueHandler:
             labels=labels_to_apply
         )
         
-        # Create initial state comment with metadata
-        initial_state_comment = CommentPayload(
-            _data=data,
-            _meta=CommentMeta(
-                client_version=CLIENT_VERSION,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                update_mode="append"
-            ),
-            type='initial_state'
+        # Create initial state comment with metadata including issue number
+        initial_state_comment = CommentHandler.create_comment_payload(
+            data=data,
+            issue_number=issue.number,  # Include issue number
+            comment_type='initial_state'
         )
         
         comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
@@ -63,6 +61,7 @@ class IssueHandler:
         meta = ObjectMeta(
             object_id=object_id,
             label=uid_label,
+            issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=1
@@ -127,6 +126,7 @@ class IssueHandler:
         meta = ObjectMeta(
             object_id=object_id,
             label=uid_label,
+            issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -229,6 +229,7 @@ class IssueHandler:
         meta = ObjectMeta(
             object_id=object_id,
             label=object_id,
+            issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -267,6 +268,7 @@ class IssueHandler:
             _meta=CommentMeta(
                 client_version=CLIENT_VERSION,
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                issue_number=issue.number,  # Include issue number
                 update_mode="append"
             ),
             type=None

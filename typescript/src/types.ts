@@ -4,6 +4,7 @@ export type Json = { [key: string]: Json } | Json[] | string | number | boolean 
 export interface ObjectMeta {
   objectId: string;
   label: string;
+  issueNumber: number;  // Added field to track GitHub issue number
   createdAt: Date;
   updatedAt: Date;
   version: number;
@@ -27,6 +28,7 @@ export interface CommentMeta {
   client_version: string;
   timestamp: string;
   update_mode: string;
+  issue_number: number;  // Added field to track GitHub issue number
 }
 
 export interface CommentPayload {

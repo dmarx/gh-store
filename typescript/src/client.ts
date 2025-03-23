@@ -69,13 +69,14 @@ export class GitHubStoreClient {
     return response.json() as Promise<T>;
   }
 
-  private createCommentPayload(data: Json, type?: string): CommentPayload {
+  private createCommentPayload(data: Json, issueNumber: number, type?: string): CommentPayload {
     const payload: CommentPayload = {
       _data: data,
       _meta: {
         client_version: CLIENT_VERSION,
         timestamp: new Date().toISOString(),
-        update_mode: "append"
+        update_mode: "append",
+        issue_number: issueNumber  // Include issue number in metadata
       }
     };
     
@@ -138,6 +139,7 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: `${this.config.uidPrefix}${objectId}`,
+      issueNumber: issue.number,
       createdAt,
       updatedAt,
       version: await this._getVersion(issue.number),
@@ -170,7 +172,7 @@ export class GitHubStoreClient {
     });
 
     // Create and add initial state comment
-    const initialState = this.createCommentPayload(data, "initial_state");
+    const initialState = this.createCommentPayload(data, issue.number, "initial_state");
     
     const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
       method: "POST",
@@ -197,6 +199,7 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: uidLabel,
+      issueNumber: issue.number,
       createdAt: new Date(issue.created_at),
       updatedAt: new Date(issue.updated_at),
       version: 1
@@ -234,7 +237,7 @@ export class GitHubStoreClient {
     const issue = issues[0];
     
     // Create update payload with metadata
-    const updatePayload = this.createCommentPayload(changes);
+    const updatePayload = this.createCommentPayload(changes, issue.number);
 
     // Add update comment
     await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
@@ -284,6 +287,7 @@ export class GitHubStoreClient {
         const meta: ObjectMeta = {
           objectId,
           label: objectId,
+          issueNumber: issue.number,
           createdAt: new Date(issue.created_at),
           updatedAt: new Date(issue.updated_at),
           version: await this._getVersion(issue.number),
@@ -331,6 +335,7 @@ export class GitHubStoreClient {
           const meta: ObjectMeta = {
             objectId,
             label: objectId,
+            issueNumber: issue.number,
             createdAt: new Date(issue.created_at),
             updatedAt,
             version: await this._getVersion(issue.number),

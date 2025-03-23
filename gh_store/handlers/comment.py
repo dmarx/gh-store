@@ -111,12 +111,14 @@ class CommentHandler:
                     comment.create_reaction(self.processed_reaction)
                     break
 
-    def create_comment_payload(self, data: dict, comment_type: str | None = None) -> CommentPayload:
+    @staticmethod
+    def create_comment_payload(data: dict, issue_number: int, comment_type: str | None = None, update_mode: str = "append") -> CommentPayload:
         """Create a properly structured comment payload"""
         meta = CommentMeta(
             client_version=CLIENT_VERSION,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            update_mode="append"
+            update_mode=update_mode,
+            issue_number=issue_number  # Include issue number in metadata
         )
         
         return CommentPayload(

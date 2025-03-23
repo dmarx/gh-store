@@ -81,7 +81,8 @@ def mock_issue_with_initial_state(mock_issue_factory, mock_comment_factory):
             "_meta": {
                 "client_version": "0.7.0",
                 "timestamp": "2025-01-01T00:00:00Z",
-                "update_mode": "append"
+                "update_mode": "append",
+                "issue_number": 123  # Add issue number
             }
         },
         comment_id=1,

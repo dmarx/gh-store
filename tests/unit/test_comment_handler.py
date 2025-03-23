@@ -32,6 +32,7 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
     
     # Setup mock issue with various types of comments
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     
     # Create a variety of comments to test filtering
@@ -44,7 +45,8 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -60,7 +62,8 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             user=Mock(login="owner"),
@@ -85,7 +88,8 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             user=Mock(login="owner"),
@@ -108,7 +112,8 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-02T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -146,6 +151,7 @@ def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
 def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
     """Test that valid JSON updates from unauthorized users are skipped"""
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     
     # Create an unauthorized but valid JSON update
@@ -156,7 +162,8 @@ def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
             '_meta': {
                 'client_version': CLIENT_VERSION,
                 'timestamp': '2025-01-01T00:00:00Z',
-                'update_mode': 'append'
+                'update_mode': 'append',
+                'issue_number': 123  # Add issue number
             }
         }),
         created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -178,6 +185,7 @@ def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
 def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
     """Test processing updates with CODEOWNERS authorization"""
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     
     # Create comments from different users
@@ -190,7 +198,8 @@ def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -205,7 +214,8 @@ def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-02T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
@@ -236,6 +246,7 @@ def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
 def test_get_unprocessed_updates_empty(comment_handler, mock_repo):
     """Test behavior with no comments"""
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     issue.get_comments.return_value = []
     
@@ -245,6 +256,7 @@ def test_get_unprocessed_updates_empty(comment_handler, mock_repo):
 def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
     """Test behavior when all comments are already processed"""
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     
     # Create some processed comments
@@ -256,7 +268,8 @@ def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             user=Mock(login="owner"),
@@ -269,7 +282,8 @@ def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
                 '_meta': {
                     'client_version': CLIENT_VERSION,
                     'timestamp': '2025-01-01T00:00:00Z',
-                    'update_mode': 'append'
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
                 }
             }),
             user=Mock(login="owner"),
@@ -285,24 +299,28 @@ def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
 def test_create_comment_payload(comment_handler):
     """Test creation of properly structured comment payloads"""
     data = {'test': 'data'}
+    issue_number = 123  # Add issue number parameter
     
     # Test regular update payload
-    update_payload = comment_handler.create_comment_payload(data)
+    update_payload = comment_handler.create_comment_payload(data, issue_number)
     assert update_payload._data == data
     assert update_payload._meta.client_version == CLIENT_VERSION
     assert update_payload._meta.update_mode == 'append'
+    assert update_payload._meta.issue_number == issue_number  # Verify issue_number
     assert update_payload.type is None
     
     # Test initial state payload
-    initial_payload = comment_handler.create_comment_payload(data, 'initial_state')
+    initial_payload = comment_handler.create_comment_payload(data, issue_number, 'initial_state')
     assert initial_payload._data == data
     assert initial_payload._meta.client_version == CLIENT_VERSION
     assert initial_payload._meta.update_mode == 'append'
+    assert initial_payload._meta.issue_number == issue_number  # Verify issue_number
     assert initial_payload.type == 'initial_state'
 
 def test_get_unprocessed_updates_malformed_metadata(comment_handler, mock_repo):
     """Test handling of malformed metadata in comments"""
     issue = Mock()
+    issue.number = 123  # Add issue number
     mock_repo.get_issue.return_value = issue
     
     # Create comment with malformed metadata
@@ -312,7 +330,8 @@ def test_get_unprocessed_updates_malformed_metadata(comment_handler, mock_repo):
             '_data': {'test': 'data'},
             '_meta': {
                 # Missing required fields
-                'client_version': CLIENT_VERSION
+                'client_version': CLIENT_VERSION,
+                # missing issue_number
             }
         }),
         created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
@@ -336,7 +355,7 @@ def test_apply_update_preserves_metadata(comment_handler):
     """Test that applying updates preserves any existing metadata"""
     # Create mock object with existing metadata
     obj = Mock()
-    obj.meta = Mock(object_id='test-123')
+    obj.meta = Mock(object_id='test-123', issue_number=123)  # Add issue_number
     obj.data = {
         'value': 1,
         '_meta': {
