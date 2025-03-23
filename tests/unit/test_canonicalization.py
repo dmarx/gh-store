@@ -9,85 +9,85 @@ from unittest.mock import Mock, patch
 from gh_store.tools.canonicalize import CanonicalStore, LabelNames, DeprecationReason
 
 
-# @pytest.fixture
-# def canonical_store(store, mock_repo_factory, default_config):
-#     """Create a CanonicalStore with mocked dependencies."""
-#     repo = mock_repo_factory(
-#         name="owner/repo",
-#         owner_login="repo-owner",
-#         owner_type="User",
-#         labels=["stored-object"]
-#     )
+@pytest.fixture
+def canonical_store(store, mock_repo_factory, default_config):
+    """Create a CanonicalStore with mocked dependencies."""
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=["stored-object"]
+    )
     
-#     with patch('gh_store.core.store.Github') as mock_gh:
-#         mock_gh.return_value.get_repo.return_value = repo
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
         
-#         store = CanonicalStore(token="fake-token", repo="owner/repo")
-#         store.repo = repo
-#         store.access_control.repo = repo
-#         store.config = default_config
+        store = CanonicalStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
         
-#         # Mock the _ensure_special_labels method to avoid API calls
-#         store._ensure_special_labels = Mock()
+        # Mock the _ensure_special_labels method to avoid API calls
+        store._ensure_special_labels = Mock()
         
-#         return store
+        return store
 
-# @pytest.fixture
-# def mock_alias_issue(mock_issue_factory):
-#     """Create a mock issue that is an alias to another object."""
-#     return mock_issue_factory(
-#         number=789,
-#         labels=[
-#             "stored-object",
-#             f"{LabelNames.UID_PREFIX}daily-metrics",
-#             f"{LabelNames.ALIAS_TO_PREFIX}metrics"
-#         ],
-#         body=json.dumps({"period": "daily"}),
-#         created_at=datetime(2025, 1, 10, tzinfo=timezone.utc),
-#         updated_at=datetime(2025, 1, 12, tzinfo=timezone.utc)
-#     )
+@pytest.fixture
+def mock_alias_issue(mock_issue_factory):
+    """Create a mock issue that is an alias to another object."""
+    return mock_issue_factory(
+        number=789,
+        labels=[
+            "stored-object",
+            f"{LabelNames.UID_PREFIX}daily-metrics",
+            f"{LabelNames.ALIAS_TO_PREFIX}metrics"
+        ],
+        body=json.dumps({"period": "daily"}),
+        created_at=datetime(2025, 1, 10, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 12, tzinfo=timezone.utc)
+    )
 
-# @pytest.fixture
-# def mock_canonical_issue(mock_issue_factory):
-#     """Create a mock issue that is the canonical version of an object."""
-#     return mock_issue_factory(
-#         number=123,
-#         labels=[
-#             "stored-object",
-#             f"{LabelNames.UID_PREFIX}metrics"
-#         ],
-#         body=json.dumps({"count": 42}),
-#         created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
-#         updated_at=datetime(2025, 1, 15, tzinfo=timezone.utc)
-#     )
+@pytest.fixture
+def mock_canonical_issue(mock_issue_factory):
+    """Create a mock issue that is the canonical version of an object."""
+    return mock_issue_factory(
+        number=123,
+        labels=[
+            "stored-object",
+            f"{LabelNames.UID_PREFIX}metrics"
+        ],
+        body=json.dumps({"count": 42}),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 15, tzinfo=timezone.utc)
+    )
 
-# @pytest.fixture
-# def mock_duplicate_issue(mock_issue_factory, mock_label_factory):
-#     """Create a mock issue that is a duplicate to be deprecated."""
-#     return mock_issue_factory(
-#         number=456,
-#         labels=[
-#             mock_label_factory("stored-object"),
-#             mock_label_factory(f"{LabelNames.UID_PREFIX}metrics")
-#         ],
-#         body=json.dumps({"count": 15}),
-#         created_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
-#         updated_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
-#     )
+@pytest.fixture
+def mock_duplicate_issue(mock_issue_factory, mock_label_factory):
+    """Create a mock issue that is a duplicate to be deprecated."""
+    return mock_issue_factory(
+        number=456,
+        labels=[
+            mock_label_factory("stored-object"),
+            mock_label_factory(f"{LabelNames.UID_PREFIX}metrics")
+        ],
+        body=json.dumps({"count": 15}),
+        created_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
+    )
 
-# @pytest.fixture
-# def mock_deprecated_issue(mock_issue_factory, mock_label_factory):
-#     """Create a mock issue that has already been deprecated."""
-#     return mock_issue_factory(
-#         number=457,
-#         labels=[
-#             mock_label_factory(LabelNames.DEPRECATED),
-#             mock_label_factory(f"{LabelNames.MERGED_INTO_PREFIX}metrics")
-#         ],
-#         body=json.dumps({"old": "data"}),
-#         created_at=datetime(2025, 1, 6, tzinfo=timezone.utc),
-#         updated_at=datetime(2025, 1, 6, tzinfo=timezone.utc)
-#     )
+@pytest.fixture
+def mock_deprecated_issue(mock_issue_factory, mock_label_factory):
+    """Create a mock issue that has already been deprecated."""
+    return mock_issue_factory(
+        number=457,
+        labels=[
+            mock_label_factory(LabelNames.DEPRECATED),
+            mock_label_factory(f"{LabelNames.MERGED_INTO_PREFIX}metrics")
+        ],
+        body=json.dumps({"old": "data"}),
+        created_at=datetime(2025, 1, 6, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 6, tzinfo=timezone.utc)
+    )
 
 class TestCanonicalStoreObjectResolution:
     """Test object resolution functionality."""
