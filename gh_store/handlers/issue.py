@@ -124,6 +124,7 @@ class IssueHandler:
         meta = ObjectMeta(
             object_id=object_id,
             label=uid_label,
+            issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -226,6 +227,7 @@ class IssueHandler:
         meta = ObjectMeta(
             object_id=object_id,
             label=object_id,
+            issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             version=self._get_version(issue)
@@ -264,6 +266,7 @@ class IssueHandler:
             _meta=CommentMeta(
                 client_version=CLIENT_VERSION,
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                issue_number=issue.number,  # Include issue number
                 update_mode="append"
             ),
             type=None
