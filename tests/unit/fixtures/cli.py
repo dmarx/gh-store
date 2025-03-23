@@ -135,6 +135,7 @@ def mock_store_response():
     mock_obj = Mock()
     mock_obj.meta = Mock(
         object_id="test-123",
+        issue_number=42,  # Added issue_number field
         created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
         version=1
@@ -150,6 +151,7 @@ def mock_stored_objects():
         mock_obj = Mock()
         mock_obj.meta = Mock(
             object_id=f"test-obj-{i}",
+            issue_number=100 + i,  # Added issue_number field
             created_at=datetime(2025, 1, i, tzinfo=timezone.utc),
             updated_at=datetime(2025, 1, i+1, tzinfo=timezone.utc),
             version=1
@@ -176,7 +178,8 @@ def mock_snapshot_file(tmp_path, mock_stored_objects):
                 "meta": {
                     "created_at": obj.meta.created_at.isoformat(),
                     "updated_at": obj.meta.updated_at.isoformat(),
-                    "version": obj.meta.version
+                    "version": obj.meta.version,
+                    "issue_number": obj.meta.issue_number  # Added issue_number
                 }
             }
             for obj_id, obj in mock_stored_objects.items()
