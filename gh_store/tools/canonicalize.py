@@ -252,7 +252,8 @@ class CanonicalStore(GitHubStore):
                         "_meta": {
                             "client_version": CLIENT_VERSION,
                             "timestamp": canonical_issue.created_at.isoformat(),
-                            "update_mode": "append"
+                            "update_mode": "append",
+                            "issue_number": canonical_issue.number,
                         }
                     },
                     "timestamp": canonical_issue.created_at,
@@ -306,6 +307,7 @@ class CanonicalStore(GitHubStore):
             object_id=canonical_id,
             label=f"{LabelNames.UID_PREFIX}{canonical_id}",
             created_at=canonical_issue.created_at,
+            issue_number=canonical_issue.number,
             updated_at=max(c["timestamp"] for c in all_comments) if all_comments else canonical_issue.updated_at,
             version=len(all_comments) if all_comments else 1
         )
@@ -365,6 +367,7 @@ class CanonicalStore(GitHubStore):
             meta = ObjectMeta(
                 object_id=object_id,
                 label=f"{LabelNames.UID_PREFIX}{object_id}",
+                issue_number=canonical_issue.number,
                 created_at=issue.created_at,
                 updated_at=issue.updated_at,
                 version=len(list(issue.get_comments())) + 1
@@ -400,6 +403,7 @@ class CanonicalStore(GitHubStore):
             _data=changes,
             _meta=CommentMeta(
                 client_version=CLIENT_VERSION,
+                issue_number=canonical_issue.number,
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 update_mode="append"
             )
