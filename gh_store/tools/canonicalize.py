@@ -339,6 +339,7 @@ class CanonicalStore(GitHubStore):
         - If canonicalize=True (default), follow the alias chain and merge updates from all related issues.
         - If canonicalize=False, return the object as stored for the given object_id without alias resolution.
         """
+        canonical_id=None
         if canonicalize:
             canonical_id = self.resolve_canonical_object_id(object_id)
             if canonical_id != object_id:
