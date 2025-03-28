@@ -13,18 +13,23 @@ interface GitHubIssue {
 }
 
 export class GitHubStoreClient {
-  private token: string;
+  private token: string | null;
   private repo: string;
   private config: Required<GitHubStoreConfig>;
   private cache: IssueCache;
 
   constructor(
-    token: string,
+    token: string | null, 
     repo: string,
     config: GitHubStoreConfig & { cache?: CacheConfig } = {}
   ) {
     this.token = token;
     this.repo = repo;
+    
+    if (!this.repo) {
+      throw new Error('Repository is required');
+    }
+
     this.config = {
       baseLabel: config.baseLabel ?? "stored-object",
       uidPrefix: config.uidPrefix ?? "UID:",
@@ -53,30 +58,43 @@ export class GitHubStoreClient {
       delete options.params;
     }
   
+    const headers: Record<string, string> = {
+      "Accept": "application/vnd.github.v3+json",
+      ...options.headers
+    };
+
+    // Add authorization header only if token is provided
+    if (this.token) {
+      headers["Authorization"] = `token ${this.token}`;
+    }
+  
     const response = await fetch(url.toString(), {
       ...options,
-      headers: {
-        "Authorization": `token ${this.token}`,
-        "Accept": "application/vnd.github.v3+json",
-        ...options.headers,
-      },
+      headers
     });
   
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status}`);
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
   
     return response.json() as Promise<T>;
   }
 
-  private createCommentPayload(data: Json, issueNumber: number, type?: string): CommentPayload {
+  /**
+   * Check if the client is operating in public (unauthenticated) mode
+   * @returns True if client is using unauthenticated mode
+   */
+  public isPublic(): boolean {
+    return this.token === null;
+  }
+
+  private createCommentPayload(data: Json, type?: string): CommentPayload {
     const payload: CommentPayload = {
       _data: data,
       _meta: {
         client_version: CLIENT_VERSION,
         timestamp: new Date().toISOString(),
-        update_mode: "append",
-        issue_number: issueNumber  // Include issue number in metadata
+        update_mode: "append"
       }
     };
     
@@ -139,7 +157,6 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: `${this.config.uidPrefix}${objectId}`,
-      issueNumber: issue.number,
       createdAt,
       updatedAt,
       version: await this._getVersion(issue.number),
@@ -149,6 +166,10 @@ export class GitHubStoreClient {
   }
 
   async createObject(objectId: string, data: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for creating objects');
+    }
+
     const uidLabel = `${this.config.uidPrefix}${objectId}`;
     
     const issue = await this.fetchFromGitHub<{
@@ -172,7 +193,7 @@ export class GitHubStoreClient {
     });
 
     // Create and add initial state comment
-    const initialState = this.createCommentPayload(data, issue.number, "initial_state");
+    const initialState = this.createCommentPayload(data, "initial_state");
     
     const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
       method: "POST",
@@ -199,7 +220,6 @@ export class GitHubStoreClient {
     const meta: ObjectMeta = {
       objectId,
       label: uidLabel,
-      issueNumber: issue.number,
       createdAt: new Date(issue.created_at),
       updatedAt: new Date(issue.updated_at),
       version: 1
@@ -218,6 +238,10 @@ export class GitHubStoreClient {
   }
   
   async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for updating objects');
+    }
+
     // Get the object's issue first
     const issues = await this.fetchFromGitHub<Array<{
       number: number;
@@ -237,7 +261,7 @@ export class GitHubStoreClient {
     const issue = issues[0];
     
     // Create update payload with metadata
-    const updatePayload = this.createCommentPayload(changes, issue.number);
+    const updatePayload = this.createCommentPayload(changes);
 
     // Add update comment
     await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
