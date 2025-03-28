@@ -1,5 +1,5 @@
 // typescript/src/__tests__/public-mode.test.ts
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import { GitHubStoreClient } from '../client';
 import fetchMock from 'jest-fetch-mock';
 
