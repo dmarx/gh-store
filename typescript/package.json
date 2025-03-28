@@ -28,7 +28,7 @@
     "prepublishOnly": "npm run build && npm run test:packaging"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "keywords": [
     "github",
