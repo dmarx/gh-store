@@ -86,45 +86,55 @@ jobs:
         cd typescript
         npm install
         npm run build
-        
-    - name: Run public mode retrieval test
-      run: |
-        cd typescript
-        node - <<EOF
-        import { GitHubStoreClient } from './dist/index.mjs';
-        
-        async function runPublicModeTest() {
-          try {
-            // Initialize client with null token (public mode)
-            const client = new GitHubStoreClient(null, process.env.GITHUB_REPOSITORY);
+          
+   - name: Run public mode retrieval test
+        run: |
+          cd typescript
+          cat > test-public-mode.js << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Dynamically import the ESM module
+          async function main() {
+            // Use dynamic import to load the ESM module
+            const { GitHubStoreClient } = await import('./dist/index.mjs');
             
-            console.log('Running in public mode:', client.isPublic());
-            
-            // Try to retrieve the object we just created/updated
-            const object = await client.getObject('daily-metrics123');
-            
-            console.log('Successfully retrieved object:');
-            console.log('Object ID:', object.meta.objectId);
-            console.log('Created at:', object.meta.createdAt);
-            console.log('Version:', object.meta.version);
-            console.log('Data sample:', JSON.stringify(object.data).substring(0, 200) + '...');
-            
-            // Try to get object history
-            const history = await client.getObjectHistory('daily-metrics123');
-            console.log('History entries:', history.length);
-            
-            // Validate we received data
-            if (!object.data || !object.meta) {
-              throw new Error('Retrieved object is missing data or metadata');
+            try {
+              // Initialize client with null token (public mode)
+              const client = new GitHubStoreClient(null, process.env.GITHUB_REPOSITORY);
+              
+              console.log('Running in public mode:', client.isPublic());
+              
+              // Try to retrieve the object we just created/updated
+              const object = await client.getObject('daily-metrics123');
+              
+              console.log('Successfully retrieved object:');
+              console.log('Object ID:', object.meta.objectId);
+              console.log('Created at:', object.meta.createdAt);
+              console.log('Version:', object.meta.version);
+              console.log('Data sample:', JSON.stringify(object.data).substring(0, 200) + '...');
+              
+              // Try to get object history
+              const history = await client.getObjectHistory('daily-metrics123');
+              console.log('History entries:', history.length);
+              
+              // Validate we received data
+              if (!object.data || !object.meta) {
+                throw new Error('Retrieved object is missing data or metadata');
+              }
+              
+              console.log('Public mode retrieval test passed!');
+              process.exit(0);
+            } catch (error) {
+              console.error('Public mode test failed:', error);
+              process.exit(1);
             }
-            
-            console.log('Public mode retrieval test passed!');
-            process.exit(0);
-          } catch (error) {
-            console.error('Public mode test failed:', error);
-            process.exit(1);
           }
-        }
-        
-        runPublicModeTest();
-        EOF
+          
+          main().catch(err => {
+            console.error(err);
+            process.exit(1);
+          });
+          EOF
+          
+          node --experimental-vm-modules test-public-mode.js
