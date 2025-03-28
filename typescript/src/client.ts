@@ -13,18 +13,23 @@ interface GitHubIssue {
 }
 
 export class GitHubStoreClient {
-  private token: string;
+  private token: string | null;
   private repo: string;
   private config: Required<GitHubStoreConfig>;
   private cache: IssueCache;
 
   constructor(
-    token: string,
+    token: string | null, 
     repo: string,
     config: GitHubStoreConfig & { cache?: CacheConfig } = {}
   ) {
     this.token = token;
     this.repo = repo;
+    
+    if (!this.repo) {
+      throw new Error('Repository is required');
+    }
+
     this.config = {
       baseLabel: config.baseLabel ?? "stored-object",
       uidPrefix: config.uidPrefix ?? "UID:",
@@ -36,6 +41,14 @@ export class GitHubStoreClient {
     this.cache = new IssueCache(config.cache);
   }
   
+  /**
+   * Check if the client is operating in public (unauthenticated) mode
+   * @returns True if client is using unauthenticated mode
+   */
+  public isPublic(): boolean {
+    return this.token === null;
+  }
+
   /**
    * Makes a request to the GitHub API
    * 
@@ -53,13 +66,20 @@ export class GitHubStoreClient {
       delete options.params;
     }
   
+    // Create a new headers object
+    const headers: HeadersInit = {
+      "Accept": "application/vnd.github.v3+json",
+      ...options.headers
+    };
+
+    // Add authorization header only if token is provided
+    if (this.token) {
+      headers["Authorization"] = `token ${this.token}`;
+    }
+  
     const response = await fetch(url.toString(), {
       ...options,
-      headers: {
-        "Authorization": `token ${this.token}`,
-        "Accept": "application/vnd.github.v3+json",
-        ...options.headers,
-      },
+      headers
     });
   
     if (!response.ok) {
@@ -142,13 +162,17 @@ export class GitHubStoreClient {
       issueNumber: issue.number,
       createdAt,
       updatedAt,
-      version: await this._getVersion(issue.number),
+      version: await this._getVersion(issue.number)
     };
 
     return { meta, data };
   }
 
   async createObject(objectId: string, data: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for creating objects');
+    }
+
     const uidLabel = `${this.config.uidPrefix}${objectId}`;
     
     const issue = await this.fetchFromGitHub<{
@@ -218,6 +242,10 @@ export class GitHubStoreClient {
   }
   
   async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for updating objects');
+    }
+
     // Get the object's issue first
     const issues = await this.fetchFromGitHub<Array<{
       number: number;
@@ -257,6 +285,8 @@ export class GitHubStoreClient {
     return this.getObject(objectId);
   }
 
+  // Rest of methods remain the same...
+  
   async listAll(): Promise<Record<string, StoredObject>> {
     const issues = await this.fetchFromGitHub<Array<{
       number: number;
@@ -290,7 +320,7 @@ export class GitHubStoreClient {
           issueNumber: issue.number,
           createdAt: new Date(issue.created_at),
           updatedAt: new Date(issue.updated_at),
-          version: await this._getVersion(issue.number),
+          version: await this._getVersion(issue.number) // shuold this just be issue._meta.version or something ilke that?
         };
 
         objects[objectId] = { meta, data };
@@ -338,7 +368,7 @@ export class GitHubStoreClient {
             issueNumber: issue.number,
             createdAt: new Date(issue.created_at),
             updatedAt,
-            version: await this._getVersion(issue.number),
+            version: await this._getVersion(issue.number)
           };
 
           objects[objectId] = { meta, data };
@@ -439,4 +469,4 @@ export class GitHubStoreClient {
       }
       throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
     }
-  }
+}
