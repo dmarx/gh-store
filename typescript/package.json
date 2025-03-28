@@ -1,6 +1,6 @@
 {
   "name": "gh-store-client",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "TypeScript client for GitHub Issue Store",
   "type": "module",
   "exports": {
@@ -28,7 +28,7 @@
     "prepublishOnly": "npm run build && npm run test:packaging"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "keywords": [
     "github",

@@ -67,19 +67,26 @@ export class GitHubStoreClient {
     }
   
     // Create a new headers object
-    const headers: HeadersInit = {
-      "Accept": "application/vnd.github.v3+json",
-      ...options.headers
+    const headersObj: Record<string, string> = {
+      "Accept": "application/vnd.github.v3+json"
     };
-
+    
+    // Add any existing headers from options
+    if (options.headers) {
+      const existingHeaders = options.headers as Record<string, string>;
+      Object.keys(existingHeaders).forEach(key => {
+        headersObj[key] = existingHeaders[key];
+      });
+    }
+    
     // Add authorization header only if token is provided
     if (this.token) {
-      headers["Authorization"] = `token ${this.token}`;
+      headersObj["Authorization"] = `token ${this.token}`;
     }
   
     const response = await fetch(url.toString(), {
       ...options,
-      headers
+      headers: headersObj
     });
   
     if (!response.ok) {
