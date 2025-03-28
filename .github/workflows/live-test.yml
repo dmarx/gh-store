@@ -90,7 +90,7 @@ jobs:
     - name: Run public mode retrieval test
       run: |
         cd typescript
-        cat > test-public-mode.js << 'EOF'
+        cat > test-public-mode.cjs << 'EOF'
         const fs = require('fs');
         const path = require('path');
         
@@ -137,4 +137,4 @@ jobs:
         });
         EOF
         
-        node --experimental-vm-modules test-public-mode.js
+        node --experimental-vm-modules test-public-mode.cjs
