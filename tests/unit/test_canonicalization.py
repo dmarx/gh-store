@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 import pytest
 from unittest.mock import Mock, patch
 
-from gh_store.tools.canonicalize import CanonicalStore, LabelNames, DeprecationReason
+from gh_store.core.constants import LabelNames
+from gh_store.tools.canonicalize import CanonicalStore, DeprecationReason
 
 
 @pytest.fixture
@@ -38,7 +39,7 @@ def mock_alias_issue(mock_issue_factory):
     return mock_issue_factory(
         number=789,
         labels=[
-            "stored-object",
+            LabelNames.STORED_OBJECT,
             f"{LabelNames.UID_PREFIX}daily-metrics",
             f"{LabelNames.ALIAS_TO_PREFIX}metrics"
         ],
@@ -53,7 +54,7 @@ def mock_canonical_issue(mock_issue_factory):
     return mock_issue_factory(
         number=123,
         labels=[
-            "stored-object",
+            LabelNames.STORED_OBJECT,
             f"{LabelNames.UID_PREFIX}metrics"
         ],
         body=json.dumps({"count": 42}),
@@ -67,7 +68,7 @@ def mock_duplicate_issue(mock_issue_factory, mock_label_factory):
     return mock_issue_factory(
         number=456,
         labels=[
-            mock_label_factory("stored-object"),
+            mock_label_factory(LabelNames.STORED_OBJECT),
             mock_label_factory(f"{LabelNames.UID_PREFIX}metrics")
         ],
         body=json.dumps({"count": 15}),
@@ -168,7 +169,7 @@ class TestCanonicalStoreAliasing:
                 return [mock_issue_factory(
                     number=101,
                     labels=[
-                        "stored-object",
+                        LabelNames.STORED_OBJECT,
                         f"{LabelNames.UID_PREFIX}weekly-metrics"
                     ]
                 )]
@@ -254,13 +255,13 @@ class TestCanonicalStoreDeprecation:
         # Create source and target issues
         source_issue = mock_issue_factory(
             number=123,
-            labels=["gh-store", "stored-object", "UID:old-metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:old-metrics"],
             created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
         )
         
         target_issue = mock_issue_factory(
             number=456,
-            labels=["gh-store", "stored-object", "UID:metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
         )
         
@@ -309,7 +310,7 @@ class TestCanonicalStoreDeprecation:
         # Create a test issue
         issue = mock_issue_factory(
             number=123,
-            labels=["gh-store", "stored-object", "UID:metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
         )
         
@@ -329,13 +330,13 @@ class TestCanonicalStoreDeprecation:
         # Create two issues with same UID and stored-object labels
         canonical_issue = mock_issue_factory(
             number=101,
-            labels=["gh-store", "stored-object", "UID:metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
         )
         
         duplicate_issue = mock_issue_factory(
             number=102,
-            labels=["gh-store", "stored-object", "UID:metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
             created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
         )
         
@@ -389,13 +390,13 @@ class TestCanonicalStoreDeprecation:
         # Create source and target issues
         source_issue = mock_issue_factory(
             number=123,
-            labels=["gh-store", "stored-object", "UID:old-metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:old-metrics"],
             created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
         )
         
         target_issue = mock_issue_factory(
             number=456,
-            labels=["gh-store", "stored-object", "UID:metrics"],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
         )
         
@@ -840,12 +841,12 @@ class TestCanonicalStoreFinding:
         # Create issues with same UID
         issue1 = mock_issue_factory(
             number=101,
-            labels=["stored-object", "UID:metrics"]
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"]
         )
         
         issue2 = mock_issue_factory(
             number=102,
-            labels=["stored-object", "UID:metrics"]
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"]
         )
         
         # Setup mock for get_issues

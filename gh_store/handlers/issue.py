@@ -6,8 +6,9 @@ from loguru import logger
 from github import Repository
 from omegaconf import DictConfig
 
-from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
+from ..core.constants import LabelNames
 from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
 from ..core.version import CLIENT_VERSION
 from .comment import CommentHandler
 
@@ -21,18 +22,18 @@ class IssueHandler:
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.base_label = config.store.base_label
-        self.uid_prefix = config.store.uid_prefix
-        
+        self.base_label = config.store.base_label if config.store.base_label else LabelNames.STORED_OBJECT # could this be an OR?
+            
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
         # Create uid label with prefix
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
         
-        # Get labels to apply - includes gh-store for system boundary
-        labels_to_apply = ["gh-store", self.base_label, uid_label]
+        # Get labels to apply - includes LabelNames.GH_STORE for system boundary
+        # Note: The str() conversion is handled automatically due to our __str__ method
+        labels_to_apply = [LabelNames.GH_STORE, self.base_label, uid_label]
         
         # Ensure required labels exist
         self._ensure_labels_exist(labels_to_apply)
@@ -103,12 +104,12 @@ class IssueHandler:
         """Retrieve an object by its ID"""
         logger.info(f"Retrieving object: {object_id}")
         
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
         
         # Query for issue with matching labels - must have stored-object (active)
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[self.base_label, uid_label],
+            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
             state="closed"
         ))
         
@@ -138,12 +139,12 @@ class IssueHandler:
         """Get complete history of an object, including initial state"""
         logger.info(f"Retrieving history for object: {object_id}")
         
-        uid_label = f"{self.uid_prefix}{object_id}"
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
         
         # Query for issue with matching labels
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[self.base_label, uid_label],
+            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
             state="all"
         ))
         
@@ -213,10 +214,10 @@ class IssueHandler:
             
             if (label_name != self.base_label and 
                 isinstance(label_name, str) and 
-                label_name.startswith(self.uid_prefix)):
-                return label_name[len(self.uid_prefix):]
+                label_name.startswith(LabelNames.UID_PREFIX)):
+                return label_name[len(LabelNames.UID_PREFIX):]
                 
-        raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
+        raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
@@ -253,7 +254,7 @@ class IssueHandler:
         
         # Get the object's issue
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, f"{self.uid_prefix}{object_id}"],
+            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
             state="closed"
         ))
         
@@ -288,7 +289,7 @@ class IssueHandler:
         logger.info(f"Deleting object: {object_id}")
         
         issues = list(self.repo.get_issues(
-            labels=[self.base_label, f"{self.uid_prefix}{object_id}"],
+            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
             state="all"
         ))
         
@@ -298,7 +299,7 @@ class IssueHandler:
         issue = issues[0]
         issue.edit(
             state="closed",
-            labels=["archived", "gh-store", f"{self.uid_prefix}{object_id}"]
+            labels=[LabelNames.DELETED, LabelNames.GH_STORE, f"{LabelNames.UID_PREFIX}{object_id}"]
         )
         
         # Remove stored-object label to mark as inactive

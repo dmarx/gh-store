@@ -5,6 +5,9 @@ from zoneinfo import ZoneInfo
 import pytest
 from unittest.mock import Mock
 
+from gh_store.core.constants import LabelNames
+
+
 def test_list_updated_since(store, mock_issue):
     """Test fetching objects updated since timestamp"""
     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
@@ -30,7 +33,7 @@ def test_list_updated_since(store, mock_issue):
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
-    assert call_kwargs["labels"] == ["stored-object"]  # Query by stored-object for active objects
+    assert call_kwargs["labels"] == ["gh-store", "stored-object"]  # Query by stored-object for active objects
     assert len(updated) == 1
     assert mock_obj in updated.values()
 
@@ -42,7 +45,7 @@ def test_list_updated_since_no_updates(store, mock_issue):
     issue = mock_issue(
         created_at=timestamp - timedelta(minutes=30),
         updated_at=timestamp - timedelta(minutes=30),
-        labels=["stored-object", f"UID:foo"],
+        labels=[str(LabelNames.GH_STORE), "stored-object", f"UID:foo"],
     )
     store.repo.get_issues.return_value = [issue]
     
@@ -94,7 +97,7 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     # Verify the query was made with stored-object label
     store.repo.get_issues.assert_called_with(
         state="closed",
-        labels=["stored-object"]
+        labels=["gh-store", "stored-object"]
     )
 
 def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
@@ -139,13 +142,13 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     # Create issue missing UID label
     invalid_issue = mock_issue(
         number=1,
-        labels=["stored-object"]  # Missing UID label
+        labels=["gh-store", "stored-object"]  # Missing UID label
     )
     
     # Create valid issue with explicit labels including UID
     valid_issue = mock_issue(
         number=2,
-        labels=["stored-object","UID:test-2"]  # Explicitly set UID label
+        labels=["gh-store", "stored-object","UID:test-2"]  # Explicitly set UID label
     )
     
     store.repo.get_issues.return_value = [invalid_issue, valid_issue]
