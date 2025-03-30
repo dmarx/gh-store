@@ -147,7 +147,7 @@ export class GitHubStoreClient {
       const issues = await this.fetchFromGitHub<GitHubIssue[]>("/issues", {
         method: "GET",
         params: {
-          labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+          labels: [LabelNames.GH_STORE, this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
           state: "closed",
         },
       });
@@ -199,7 +199,7 @@ export class GitHubStoreClient {
       body: JSON.stringify({
         title: `Stored Object: ${objectId}`,
         body: JSON.stringify(data, null, 2),
-        labels: [this.config.baseLabel, uidLabel]
+        labels: [LabelNames.GH_STORE, this.config.baseLabel, uidLabel]
       })
     });
 
