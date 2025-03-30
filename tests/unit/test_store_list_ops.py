@@ -94,7 +94,7 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     # Verify the query was made with stored-object label
     store.repo.get_issues.assert_called_with(
         state="closed",
-        labels=["stored-object"]
+        labels=["gh-store", "stored-object"]
     )
 
 def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
@@ -139,13 +139,13 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     # Create issue missing UID label
     invalid_issue = mock_issue(
         number=1,
-        labels=["stored-object"]  # Missing UID label
+        labels=["gh-store", "stored-object"]  # Missing UID label
     )
     
     # Create valid issue with explicit labels including UID
     valid_issue = mock_issue(
         number=2,
-        labels=["stored-object","UID:test-2"]  # Explicitly set UID label
+        labels=["gh-store", "stored-object","UID:test-2"]  # Explicitly set UID label
     )
     
     store.repo.get_issues.return_value = [invalid_issue, valid_issue]
