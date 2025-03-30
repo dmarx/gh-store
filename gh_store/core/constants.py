@@ -16,7 +16,7 @@ class LabelNames(StrEnum):
     ALIAS_TO_PREFIX = "ALIAS-TO:"  # Prefix for alias labels
     MERGED_INTO_PREFIX = "MERGED-INTO:"  # Prefix for merged object labels
     DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # Prefix for referencing canonical issue
-    ARCHIVED = "archived'
+    DELETED = "archived'
     
     # def __str__(self) -> str:
     #     """Allow direct string usage in string contexts."""
