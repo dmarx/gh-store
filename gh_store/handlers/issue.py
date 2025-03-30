@@ -109,7 +109,7 @@ class IssueHandler:
         # Query for issue with matching labels - must have stored-object (active)
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[self.base_label, uid_label],
+            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
             state="closed"
         ))
         
