@@ -9,10 +9,11 @@ from github import Github
 from omegaconf import OmegaConf
 
 from ..core.access import AccessControl
-from .exceptions import AccessDeniedError, ConcurrentUpdateError
-from .types import StoredObject, Update, Json
+from ..core.constants import LabelNames
 from ..handlers.issue import IssueHandler
 from ..handlers.comment import CommentHandler
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
+from .types import StoredObject, Update, Json
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
@@ -54,7 +55,7 @@ class GitHubStore:
         """Update an existing object"""
         # Check if object is already being processed
         issues = list(self.repo.get_issues(
-            labels=[self.config.store.base_label, f"UID:{object_id}"],
+            labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
             state="open"
         ))
         
@@ -99,7 +100,7 @@ class GitHubStore:
         # Get all closed issues with base label (active objects)
         issues = list(self.repo.get_issues(
             state="closed",
-            labels=[self.config.store.base_label]
+            labels=[LabelNames.GH_STORE, self.config.store.base_label]
         ))
         
         objects = {}
@@ -129,7 +130,7 @@ class GitHubStore:
         # Get all objects with base label that are closed (active objects)
         issues = list(self.repo.get_issues(
             state="closed",
-            labels=[self.config.store.base_label],
+            labels=[LabelNames.GH_STORE, self.config.store.base_label],
             since=timestamp  # GitHub API's since parameter
         ))
         
