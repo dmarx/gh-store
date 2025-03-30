@@ -2,16 +2,16 @@
 """Store-related fixtures for gh-store unit tests."""
 
 from datetime import datetime, timezone
+from typing import Sequence
+from unittest.mock import Mock, patch
+
 import pytest
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.exceptions import ObjectNotFound
 from gh_store.core.store import GitHubStore
 from gh_store.core.version import CLIENT_VERSION
-from gh_store.core.exceptions import ObjectNotFound
 
-from unittest.mock import patch
-
-
-from typing import Sequence
-from unittest.mock import Mock
 
 def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
     """Set up mocked authorization for testing.
@@ -41,8 +41,6 @@ def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
         store.access_control._codeowners = None
 
 
-
-
 @pytest.fixture
 def store(mock_repo_factory, default_config):
     """Create GitHubStore instance with mocked dependencies."""
@@ -50,7 +48,7 @@ def store(mock_repo_factory, default_config):
         name="owner/repo",
         owner_login="repo-owner",
         owner_type="User",
-        labels=["gh-store", "stored-object"]  # Include gh-store label
+        labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value]
     )
     
     with patch('gh_store.core.store.Github') as mock_gh:
@@ -73,7 +71,6 @@ def authorized_store(store):
         setup_mock_auth(store, authorized_users=authorized_users)
         return store
     return _authorized_store
-
 
 
 @pytest.fixture
