@@ -1,5 +1,12 @@
 // typescript/src/client.ts
-import { StoredObject, ObjectMeta, GitHubStoreConfig, Json, CommentPayload } from './types';
+import { 
+  CommentPayload, 
+  ObjectMeta, 
+  GitHubStoreConfig, 
+  Json, 
+  LabelNames, 
+  StoredObject 
+} from './types';
 import { IssueCache, CacheConfig } from './cache';
 import { CLIENT_VERSION } from './version';
 
