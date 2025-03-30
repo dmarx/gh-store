@@ -20,28 +20,11 @@ from github import Github
 from github.Issue import Issue
 from github.Repository import Repository
 
-from gh_store.core.store import GitHubStore
-from gh_store.core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
-from gh_store.core.exceptions import ObjectNotFound
-from gh_store.core.version import CLIENT_VERSION
-
-
-class DeprecationReason:
-    """Constants for deprecation reasons stored in metadata."""
-    DUPLICATE = "duplicate"
-    MERGED = "merged" 
-    REPLACED = "replaced"
-
-
-class LabelNames:
-    """Constants for label names."""
-    GH_STORE = "gh-store"  # New label for all system issues
-    STORED_OBJECT = "stored-object"
-    DEPRECATED = "deprecated-object"
-    UID_PREFIX = "UID:"
-    ALIAS_TO_PREFIX = "ALIAS-TO:"
-    MERGED_INTO_PREFIX = "MERGED-INTO:"
-    DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # New label for referencing canonical issue
+from ..core.constants import LabelNames, DeprecationReason
+from ..core.exceptions import ObjectNotFound
+from ..core.store import GitHubStore
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
+from ..core.version import CLIENT_VERSION
 
 
 class CanonicalStore(GitHubStore):
