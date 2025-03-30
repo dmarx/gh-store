@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
+from gh_store.core.constants import LabelNames
 
 @pytest.fixture
 def mock_label_factory():
