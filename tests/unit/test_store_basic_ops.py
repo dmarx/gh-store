@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 import pytest
 from unittest.mock import Mock
 
+from gh_store.core.constants import LabelNames
 from gh_store.core.exceptions import ObjectNotFound
+
 
 def test_create_object_with_initial_state(store):
     """Test that creating an object stores the initial state in a comment"""
@@ -54,8 +56,11 @@ def test_get_object(store):
     stored_label = Mock()
     stored_label.name = "stored-object"
     gh_store_label = Mock()
-    gh_store_label.name = "gh-store"
-    store.repo.get_labels.return_value = [stored_label, gh_store_label]
+    gh_store_label.name = LabelNames.GH_STORE
+    uid_label = Mock()
+    uid_label.name = "UID:test-obj"
+    
+    store.repo.get_labels.return_value = [stored_label, gh_store_label, uid_label]
     
     mock_issue = Mock()
     mock_issue.number = issue_number  # Set issue number
@@ -63,16 +68,16 @@ def test_get_object(store):
     mock_issue.get_comments = Mock(return_value=[])
     mock_issue.created_at = datetime.now(timezone.utc)
     mock_issue.updated_at = datetime.now(timezone.utc)
-    mock_issue.labels = [stored_label, gh_store_label]
+    mock_issue.labels = [stored_label, gh_store_label, uid_label]
     store.repo.get_issues.return_value = [mock_issue]
     
     obj = store.get("test-obj")
     assert obj.data == test_data
     assert obj.meta.issue_number == issue_number  # Verify issue_number in metadata
     
-    # Verify correct query was made (still using stored-object as active indicator)
+    # Verify correct query was made (now checking for all three labels)
     store.repo.get_issues.assert_called_with(
-        labels=["stored-object", "UID:test-obj"],
+        labels=[LabelNames.GH_STORE, "stored-object", "UID:test-obj"],
         state="closed"
     )
 
