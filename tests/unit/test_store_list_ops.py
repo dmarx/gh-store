@@ -33,7 +33,7 @@ def test_list_updated_since(store, mock_issue):
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
-    assert call_kwargs["labels"] == ["stored-object"]  # Query by stored-object for active objects
+    assert call_kwargs["labels"] == ["gh-store", "stored-object"]  # Query by stored-object for active objects
     assert len(updated) == 1
     assert mock_obj in updated.values()
 
