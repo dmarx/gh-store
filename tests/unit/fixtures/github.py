@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import Mock, patch
 from github import GithubException
 
+from gh_store.core.constants import LabelNames
 
 @pytest.fixture
 def mock_label_factory():
@@ -301,7 +302,8 @@ def mock_repo_factory(mock_label_factory):
         # Set up labels - include gh-store by default unless specified otherwise
         repo_labels = []
         if labels:
-            default_labels = ["gh-store", "stored-object"] if "gh-store" not in labels and "stored-object" not in labels else []
+            default_labels = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value] \ 
+                                if LabelNames.GH_STORE.value not in labels and LabelNames.STORED_OBJECT.value not in labels else []
             for name in default_labels + labels:
                 repo_labels.append(mock_label_factory(name))
         repo.get_labels = Mock(return_value=repo_labels)
@@ -356,7 +358,7 @@ def mock_github():
         mock_repo.owner = owner
         
         # Setup labels
-        mock_labels = [Mock(name="stored-object")]
+        mock_labels = [Mock(name=LabelNames.STORED_OBJECT.value), Mock(name=LabelNames.GH_STORE.value)]
         mock_repo.get_labels = Mock(return_value=mock_labels)
         
         def create_label(name: str, color: str = "0366d6") -> Mock:
