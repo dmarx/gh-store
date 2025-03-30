@@ -17,17 +17,17 @@ class LabelNames(StrEnum):
     MERGED_INTO_PREFIX = "MERGED-INTO:"  # Prefix for merged object labels
     DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # Prefix for referencing canonical issue
     
-    def __str__(self) -> str:
-        """Allow direct string usage in string contexts."""
-        return self.value
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
 
 
-class DeprecationReason(str, Enum):
+class DeprecationReason(StrEnum):
     """Constants for deprecation reasons stored in metadata."""
     DUPLICATE = "duplicate"
     MERGED = "merged"
     REPLACED = "replaced"
     
-    def __str__(self) -> str:
-        """Allow direct string usage in string contexts."""
-        return self.value
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
