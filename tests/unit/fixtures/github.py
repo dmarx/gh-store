@@ -302,7 +302,7 @@ def mock_repo_factory(mock_label_factory):
         # Set up labels - include gh-store by default unless specified otherwise
         repo_labels = []
         if labels:
-            default_labels = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value] \ 
+            default_labels = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value] \
                                 if LabelNames.GH_STORE.value not in labels and LabelNames.STORED_OBJECT.value not in labels else []
             for name in default_labels + labels:
                 repo_labels.append(mock_label_factory(name))
