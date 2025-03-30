@@ -1,7 +1,9 @@
 // typescript/src/__tests__/client.test.ts
 
+// In typescript/src/__tests__/client.test.ts:
 import { describe, it, expect, beforeEach } from '@jest/globals';
 import { GitHubStoreClient } from '../client';
+import { LabelNames } from '../types'; // Add this import
 import { CLIENT_VERSION } from '../version';
 import fetchMock from 'jest-fetch-mock';
 
@@ -89,7 +91,8 @@ describe('GitHubStoreClient', () => {
       expect(obj.data).toEqual({ key: 'value' });
     });
   });
-
+  
+  // In client.test.ts, update the createObject test:
   describe('createObject', () => {
     it('should create new object with initial state and metadata', async () => {
       const mockIssue = {
@@ -103,27 +106,28 @@ describe('GitHubStoreClient', () => {
           { name: 'UID:test-object' }
         ]
       };
-
+  
       const mockComment = { id: 123 };
-
+  
       fetchMock
         .mockResponseOnce(JSON.stringify(mockIssue)) // Create issue
         .mockResponseOnce(JSON.stringify(mockComment)) // Create comment
         .mockResponseOnce(JSON.stringify({ id: 1 })) // Add processed reaction
         .mockResponseOnce(JSON.stringify({ id: 2 })) // Add initial state reaction
         .mockResponseOnce(JSON.stringify({ state: 'closed' })); // Close issue
-
+  
       const data = { test: 'data' };
       const obj = await client.createObject('test-object', data);
-
+  
       expect(obj.meta.objectId).toBe('test-object');
       expect(obj.meta.version).toBe(1);
       expect(obj.data).toEqual(data);
-
-      // Verify issue creation
+  
+      // Verify issue creation includes all required labels
       expect(fetchMock.mock.calls[0][1]?.body).toContain('"stored-object"');
       expect(fetchMock.mock.calls[0][1]?.body).toContain('"UID:test-object"');
-
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"gh-store"'); // Verify gh-store label is included
+  
       // Verify initial state comment with metadata
       const commentBody = JSON.parse(JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body);
       expect(commentBody.type).toBe('initial_state');
@@ -133,6 +137,37 @@ describe('GitHubStoreClient', () => {
       expect(commentBody._meta.timestamp).toBeDefined();
       expect(commentBody._meta.update_mode).toBe('append');
     });
+  });
+  
+  // Add a specific test to verify label structure:
+  it('should include gh-store label when creating objects', async () => {
+    const mockIssue = {
+      number: 789,
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+      html_url: 'https://github.com/owner/repo/issues/789',
+      body: '{}',
+      labels: []
+    };
+    
+    // Mock all the required responses
+    fetchMock
+      .mockResponseOnce(JSON.stringify(mockIssue))
+      .mockResponseOnce(JSON.stringify({ id: 1 }))
+      .mockResponseOnce(JSON.stringify({ id: 1 }))
+      .mockResponseOnce(JSON.stringify({ id: 2 }))
+      .mockResponseOnce(JSON.stringify({ state: 'closed' }));
+    
+    await client.createObject('test-label-object', {});
+    
+    // Parse the request body from the first call (create issue)
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    
+    // Verify the labels array includes all required labels
+    expect(requestBody.labels).toContain(LabelNames.GH_STORE);
+    expect(requestBody.labels).toContain('stored-object');
+    expect(requestBody.labels).toContain('UID:test-label-object');
+    expect(requestBody.labels.length).toBe(3); // Should only be these three labels
   });
 
   describe('updateObject', () => {
