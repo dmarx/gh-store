@@ -1,19 +1,10 @@
 // typescript/src/canonical.ts
 import { GitHubStoreClient } from './client';
-import { StoredObject, GitHubStoreConfig } from './types';
+import { GitHubStoreConfig, LabelNames, StoredObject } from './types';
 import { Logger } from './logging'; // Import a logger utility
 
 // Create a logger instance
 const logger = new Logger('CanonicalStore');
-
-// Label constants for canonicalization system
-export enum LabelNames {
-  GH_STORE = "gh-store",
-  STORED_OBJECT = "stored-object",
-  DEPRECATED = "deprecated-object",
-  UID_PREFIX = "UID:",
-  ALIAS_TO_PREFIX = "ALIAS-TO:"
-}
 
 // Configuration for CanonicalStore
 export interface CanonicalStoreConfig extends GitHubStoreConfig {
