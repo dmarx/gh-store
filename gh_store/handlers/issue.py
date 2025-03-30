@@ -217,7 +217,7 @@ class IssueHandler:
                 label_name.startswith(LabelNames.UID_PREFIX)):
                 return label_name[len(LabelNames.UID_PREFIX):]
                 
-        raise ValueError(f"No UID label found with prefix {self.uid_prefix}")
+        raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
