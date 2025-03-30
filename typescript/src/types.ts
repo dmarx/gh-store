@@ -36,3 +36,13 @@ export interface CommentPayload {
   _meta: CommentMeta;
   type?: string;
 }
+
+/* Constants */
+
+export enum LabelNames {
+  GH_STORE = "gh-store",
+  STORED_OBJECT = "stored-object",
+  DEPRECATED = "deprecated-object",
+  UID_PREFIX = "UID:",
+  ALIAS_TO_PREFIX = "ALIAS-TO:"
+}
