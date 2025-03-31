@@ -3,9 +3,9 @@
 import json
 from datetime import datetime, timezone
 import pytest
-from gh_store.types import LabelNames
 from unittest.mock import Mock
 
+from gh_store.core.constants import LabelNames
 from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
 from gh_store.core.version import CLIENT_VERSION
 
