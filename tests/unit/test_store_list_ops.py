@@ -27,7 +27,7 @@ def test_list_updated_since(store, mock_issue):
     store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test listing
-    updated = store.list_updated_since(timestamp)
+    updated = list(store.list_updated_since(timestamp))
     
     # Verify
     store.repo.get_issues.assert_called_once()
@@ -55,7 +55,7 @@ def test_list_updated_since_no_updates(store, mock_issue):
     store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test listing
-    updated = store.list_updated_since(timestamp)
+    updated = list(store.list_updated_since(timestamp))
     
     # Verify no updates found
     assert len(updated) == 0
@@ -87,7 +87,7 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     )
     
     # Test listing all
-    objects = store.list_all()
+    objects = list(store.list_all())
     
     # Verify
     assert len(objects) == 2
@@ -130,7 +130,7 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = store.list_all()
+    objects = list(store.list_all())
     
     # Verify only active object listed
     assert len(objects) == 1
@@ -165,7 +165,7 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = store.list_all()
+    objects = list(store.list_all())
     
     # Verify only valid object listed
     assert len(objects) == 1
