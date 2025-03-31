@@ -37,7 +37,7 @@ def test_create_object_with_initial_state(store, mock_label_factory, mock_commen
             "type": "initial_state",
             "_data": test_data,
             "_meta": {
-                "client_version": CLIENT_VERSION,
+                "client_version": "1.2.3",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "update_mode": "append",
                 "issue_number": issue_number
