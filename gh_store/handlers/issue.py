@@ -1,6 +1,5 @@
 # gh_store/handlers/issue.py
 
-import json
 from datetime import datetime, timezone
 from loguru import logger
 from github import Repository, Issue
@@ -74,7 +73,7 @@ class IssueHandler:
         
         # return StoredObject(meta=meta, data=data)
     
-        return self._from_issue(issue, version=1)
+        return StoredObject.from_issue(issue, version=1)
 
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
@@ -125,7 +124,7 @@ class IssueHandler:
             )
         
         issue = issues[0]
-        return self._from_issue(issue)
+        return StoredObject.from_issue(issue)
 
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
@@ -192,7 +191,7 @@ class IssueHandler:
         logger.info(f"Retrieving object by issue #{issue_number}")
         
         issue = self.repo.get_issue(issue_number)
-        return self._from_issue(issue)
+        return StoredObject.from_issue(issue)
 
 
     def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
