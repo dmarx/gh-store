@@ -51,7 +51,7 @@ class StoredObject:
     data: Json
 
     @classmethod
-    def from_issue(cls, issue: Issue, version: int|None = None) -> StoredObject:
+    def from_issue(cls, issue: Issue, version: int = 1) -> StoredObject:
         object_id = get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
@@ -61,7 +61,7 @@ class StoredObject:
             issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
-            version=version if version else self._get_version(issue)
+            version=version,
         )
         
         return cls(meta=meta, data=data)
