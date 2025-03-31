@@ -108,7 +108,7 @@ class GitHubStore:
             if any(label.name == "archived" for label in issue.labels):
                 continue
             try:
-                yield self.issue_handler._from_issue(issue)
+                yield StoredObject.from_issue(issue)
             except ValueError as e:
                 logger.warning(f"Skipping issue #{issue.number}: {e}")        
         logger.info(f"Found {idx+1} stored objects")
@@ -137,7 +137,7 @@ class GitHubStore:
             if any(label.name == "archived" for label in issue.labels):
                 continue
             try:
-                obj = self.issue_handler._from_issue(issue)
+                obj = StoredObject.from_issue(issue)
                 # Double check the timestamp (since GitHub's since parameter includes issue comments)
                 # ....except, I think we want those, no? or do we only want objects whose updates have been "processed" into the view on the object?
                 # Isn't this the function we use to figure out which comments need to be processed???
