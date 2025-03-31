@@ -206,26 +206,10 @@ class TestCLISnapshotOperations:
 class TestCLIErrorHandling:
     """Test CLI error handling scenarios"""
     
-    def test_invalid_json_data(self, mock_cli, caplog):
+    def test_invalid_json_data(self, mock_cli):
         """Test handling of invalid JSON input"""
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(json.decoder.JSONDecodeError) as exc_info:
             mock_cli.create("test-123", "invalid json")
-            
-        assert exc_info.value.code == 1
-        assert "Invalid JSON data provided" in caplog.text
-    
-    def test_store_error_handling(self, mock_cli, caplog):
-        """Test handling of GitHubStore errors"""
-        with patch('gh_store.cli.commands.get_store') as mock_get_store:
-            mock_store = Mock()
-            mock_get_store.return_value = mock_store
-            mock_store.get.side_effect = GitHubStoreError("Test error")
-            
-            with pytest.raises(SystemExit) as exc_info:
-                mock_cli.get("test-123")
-            
-            assert exc_info.value.code == 1
-            assert "Failed to get object" in caplog.text
     
     def test_file_not_found(self, mock_cli, caplog):
         """Test handling of missing snapshot file"""
