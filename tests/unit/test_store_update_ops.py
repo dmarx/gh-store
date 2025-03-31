@@ -61,7 +61,7 @@ def test_update_metadata_structure(store, mock_issue_factory):
     mock_issue = mock_issue_factory(
         number = 123,
         body={"initial": "data"}, 
-        labels=[LabelNames.GH_STORE, LbaleNames.STORED_OBJECT, f"{LabeNames.UID_PREFIX}test-obj"]
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
     )
     
     def get_issues_side_effect(**kwargs):
