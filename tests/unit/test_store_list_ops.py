@@ -35,7 +35,7 @@ def test_list_updated_since(store, mock_issue_factory):
     assert call_kwargs["since"] == timestamp
     assert call_kwargs["labels"] == [LabelNames.GH_STORE, LabelNames.STORED_OBJECT]  # Query by stored-object for active objects
     assert len(updated) == 1
-    assert mock_obj in updated
+    assert updated[0].meta.object_id == object_id
 
 def test_list_updated_since_no_updates(store, mock_issue):
     """Test when no updates since timestamp"""
