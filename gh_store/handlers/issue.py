@@ -23,7 +23,7 @@ class IssueHandler:
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.base_label = config.store.base_label if config.store.base_label else LabelNames.STORED_OBJECT # could this be an OR?
+        self.base_label = LabelNames.STORED_OBJECT # could this be an OR?
             
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
