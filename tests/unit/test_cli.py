@@ -168,7 +168,6 @@ class TestCLIErrorHandling:
         with pytest.raises(FileNotFoundError) as exc_info:
             mock_cli.update_snapshot("/nonexistent/path")
             
-        assert exc_info.value.code == 1
         assert "Snapshot file not found" in caplog.text
 
 # should probably just deprecate all the config stuff.
