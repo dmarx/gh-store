@@ -68,7 +68,7 @@ def get(
             
     except Exception as e:
         logger.exception("Failed to get object")
-        raise SystemExit(1)
+        raise
 
 def create(
     object_id: str,
@@ -87,10 +87,10 @@ def create(
         
     except json.JSONDecodeError:
         logger.error("Invalid JSON data provided")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Failed to create object")
-        raise SystemExit(1)
+        raise
 
 def update(
     object_id: str,
@@ -109,10 +109,10 @@ def update(
         
     except json.JSONDecodeError:
         logger.error("Invalid JSON changes provided")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Failed to update object")
-        raise SystemExit(1)
+        raise
 
 def delete(
     object_id: str,
@@ -128,7 +128,7 @@ def delete(
         
     except Exception as e:
         logger.exception("Failed to delete object")
-        raise SystemExit(1)
+        raise
 
 def get_history(
     object_id: str,
@@ -150,9 +150,7 @@ def get_history(
             
     except Exception as e:
         logger.exception("Failed to get object history")
-        raise SystemExit(1)
-
-# Adding to gh_store/cli/commands.py
+        raise
 
 def process_updates(
     issue: int,
@@ -242,10 +240,10 @@ def snapshot(
         
     except GitHubStoreError as e:
         logger.error(f"Failed to create snapshot: {e}")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        raise SystemExit(1)
+        raise
 
 def update_snapshot(
     snapshot_path: str,
@@ -274,6 +272,7 @@ def update_snapshot(
         
         # Get updated objects and add them to snapshot
         for obj in store.list_updated_since(last_snapshot):
+            # We only get here if the object passed the timestamp check in list_updated_since
             updated_count += 1
             snapshot_data["objects"][obj.meta.object_id] = {
                 "data": obj.data,
@@ -286,16 +285,19 @@ def update_snapshot(
                 }
             }
         
-        # Update snapshot timestamp
-        snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
-        
-        # Write updated snapshot
-        snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
-        logger.info(f"Updated {updated_count} objects in snapshot")
+        # Only update snapshot timestamp if we actually updated objects
+        if updated_count > 0:
+            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
+            
+            # Write updated snapshot
+            snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+            logger.info(f"Updated {updated_count} objects in snapshot")
+        else:
+            logger.info("No updates found since last snapshot")
         
     except GitHubStoreError as e:
         logger.error(f"Failed to update snapshot: {e}")
-        raise e
+        raise
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        raise e
+        raise
