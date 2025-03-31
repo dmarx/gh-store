@@ -87,7 +87,7 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     )
     
     # Test listing all
-    objects = [obj.object_id for obj in list(store.list_all())]
+    objects = [obj.data.object_id for obj in list(store.list_all())]
     
     # Verify
     assert len(objects) == 2
@@ -130,7 +130,7 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = [obj.object_id for obj in list(store.list_all())]
+    objects = [obj.data.object_id for obj in list(store.list_all())]
     
     # Verify only active object listed
     # 
@@ -166,7 +166,7 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = [obj.object_id for obj in list(store.list_all())]
+    objects = [obj.data.object_id for obj in list(store.list_all())]
     
     # Verify only valid object listed
     assert len(objects) == 1
