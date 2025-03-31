@@ -186,22 +186,6 @@ class IssueHandler:
                 logger.warning(f"Skipping comment {comment.id}: {e}")
                 
         return history
-
-    @staticmethod
-    def _from_issue(issue: Issue, version: int|None = None) -> StoredObject:
-        object_id = get_object_id_from_labels(issue)
-        data = json.loads(issue.body)
-        
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=object_id,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=version if version else self._get_version(issue)
-        )
-        
-        return StoredObject(meta=meta, data=data)
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
