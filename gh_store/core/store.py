@@ -112,9 +112,19 @@ class GitHubStore:
             except ValueError as e:
                 logger.warning(f"Skipping issue #{issue.number}: {e}")        
         logger.info(f"Found {idx+1} stored objects")
-
+    
     def list_updated_since(self, timestamp: datetime) -> Iterator[StoredObject]:
-        """List objects updated since given timestamp"""
+        """
+        List objects updated since given timestamp.
+
+        The main purpose of this function is for delta updating snapshots.
+        The use of "updated" here specifically refers to updates *which have already been processed*
+        with respect to the "view" on the object provided by the issue description body, i.e. it
+        only fetches closed issued.
+        
+        Issues that have updates pending processing (i.e. which are open and have unreacted update comments) 
+        are processed on an issue-by-issue basis by `GitHubStore.process_updates`.
+        """
         logger.info(f"Fetching objects updated since {timestamp}")
         
         # Get all objects with base label that are closed (active objects)
@@ -126,31 +136,29 @@ class GitHubStore:
             labels=[LabelNames.GH_STORE, self.config.store.base_label],
             since=timestamp 
         )
-
-        # Get object ID from labels - strip prefix to get bare ID
-        # object_id = self.issue_handler.get_object_id_from_labels(issue)
-        
-        # # Load object
-        # obj = self.issue_handler.get_object_by_number(issue.number)
-                
+    
+        found_count = 0
+        yielded_count = 0
+                    
         for idx, issue in enumerate(issues_generator):
+            found_count += 1
+            # Skip archived issues
             if any(label.name == "archived" for label in issue.labels):
                 continue
+                
             try:
                 obj = StoredObject.from_issue(issue)
-                # Double check the timestamp (since GitHub's since parameter includes issue comments)
-                # ....except, I think we want those, no? or do we only want objects whose updates have been "processed" into the view on the object?
-                # Isn't this the function we use to figure out which comments need to be processed???
-                # ...can't be, right? Because we're only querying for closed issues. 
-                # So this must be for delta updating the snapshot.
+                # Double check the timestamp (since GitHub's since parameter includes issues with comments after the timestamp)
                 if obj.meta.updated_at > timestamp:
+                    yielded_count += 1
                     yield obj
-                logger.info(f"Skipping issue #{issue.number}: failed `obj.meta.updated_at > timestamp` check.") 
-                
+                else:
+                    logger.debug(f"Skipping issue #{issue.number}: last updated at {obj.meta.updated_at}, before {timestamp}")
             except ValueError as e:
-                logger.warning(f"Skipping issue #{issue.number}: {e}")        
-        logger.info(f"Found {idx+1} stored objects")
-    
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {found_count} issues, yielded {yielded_count} updated objects")
+        
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object"""
         return self.issue_handler.get_object_history(object_id)
