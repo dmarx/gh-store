@@ -21,7 +21,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 class GitHubStore:
     """Interface for storing and retrieving objects using GitHub Issues"""
     
-    def __init__(self, token: str, repo: str, config_path: Path | None = None):
+    def __init__(self, repo: str, token: str|None = None,  config_path: Path | None = None):
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
