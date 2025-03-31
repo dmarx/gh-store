@@ -236,7 +236,7 @@ def snapshot(
         output_path = Path(output)
         output_path.write_text(json.dumps(snapshot_data, indent=2))
         logger.info(f"Snapshot written to {output_path}")
-        logger.info(f"Captured {} objects")
+        logger.info(f"Captured {len(snapshot_data["objects"])} objects")
         
         if has_canonical and "relationships" in snapshot_data:
             aliases_count = len(snapshot_data["relationships"].get("aliases", {}))
