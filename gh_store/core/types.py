@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, asdict
 from datetime import datetime
-from typing import TypeAlias
+from typing import Self, TypeAlias
 
 import json
 from github import Issue
@@ -51,10 +51,9 @@ class StoredObject:
     data: Json
 
     @classmethod
-    def from_issue(cls, issue: Issue, version: int = 1) -> StoredObject:
+    def from_issue(cls, issue: Issue, version: int = 1) -> Self:
         object_id = get_object_id_from_labels(issue)
         data = json.loads(issue.body)
-        
         meta = ObjectMeta(
             object_id=object_id,
             label=object_id,
@@ -63,7 +62,6 @@ class StoredObject:
             updated_at=issue.updated_at,
             version=version,
         )
-        
         return cls(meta=meta, data=data)
 
 @dataclass
