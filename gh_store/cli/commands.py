@@ -68,7 +68,7 @@ def get(
             
     except Exception as e:
         logger.exception("Failed to get object")
-        raise SystemExit(1)
+        raise
 
 def create(
     object_id: str,
@@ -87,10 +87,10 @@ def create(
         
     except json.JSONDecodeError:
         logger.error("Invalid JSON data provided")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Failed to create object")
-        raise SystemExit(1)
+        raise
 
 def update(
     object_id: str,
@@ -109,10 +109,10 @@ def update(
         
     except json.JSONDecodeError:
         logger.error("Invalid JSON changes provided")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Failed to update object")
-        raise SystemExit(1)
+        raise
 
 def delete(
     object_id: str,
@@ -128,7 +128,7 @@ def delete(
         
     except Exception as e:
         logger.exception("Failed to delete object")
-        raise SystemExit(1)
+        raise
 
 def get_history(
     object_id: str,
@@ -150,7 +150,7 @@ def get_history(
             
     except Exception as e:
         logger.exception("Failed to get object history")
-        raise SystemExit(1)
+        raise
 
 # Adding to gh_store/cli/commands.py
 
@@ -242,10 +242,10 @@ def snapshot(
         
     except GitHubStoreError as e:
         logger.error(f"Failed to create snapshot: {e}")
-        raise SystemExit(1)
+        raise
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        raise SystemExit(1)
+        raise
 
 def update_snapshot(
     snapshot_path: str,
@@ -299,7 +299,7 @@ def update_snapshot(
         
     except GitHubStoreError as e:
         logger.error(f"Failed to update snapshot: {e}")
-        raise e
+        raise
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        raise e
+        raise
