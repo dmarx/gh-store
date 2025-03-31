@@ -39,7 +39,7 @@ def test_create_object_with_initial_state(store, mock_label_factory, mock_commen
     
     # Verify initial state comment
     mock_issue.create_comment.assert_called_once()
-    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    comment_data = json.loads(mock_issue.comments[0].body)
     assert comment_data["type"] == "initial_state"
     assert comment_data["_data"] == test_data
     assert "_meta" in comment_data
