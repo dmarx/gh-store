@@ -124,7 +124,7 @@ class IssueHandler:
             )
         
         issue = issues[0]
-        return StoredObject.from_issue(issue)
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
 
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
@@ -191,7 +191,7 @@ class IssueHandler:
         logger.info(f"Retrieving object by issue #{issue_number}")
         
         issue = self.repo.get_issue(issue_number)
-        return StoredObject.from_issue(issue)
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
 
 
     def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
