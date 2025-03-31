@@ -3,7 +3,7 @@
 import json
 from datetime import datetime, timezone
 from loguru import logger
-from github import Repository
+from github import Repository, Issue
 from omegaconf import DictConfig
 
 from ..core.constants import LabelNames
@@ -57,21 +57,23 @@ class IssueHandler:
         # Mark as processed to prevent update processing
         comment.create_reaction(self.config.store.reactions.processed)
         comment.create_reaction(self.config.store.reactions.initial_state)
-        
-        # Create metadata
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=uid_label,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=1
-        )
-        
+
         # Close issue immediately to indicate no processing needed
         issue.edit(state="closed")
+
+        # # Create metadata
+        # meta = ObjectMeta(
+        #     object_id=object_id,
+        #     label=uid_label,
+        #     issue_number=issue.number,  # Include issue number
+        #     created_at=issue.created_at,
+        #     updated_at=issue.updated_at,
+        #     version=1
+        # )
         
-        return StoredObject(meta=meta, data=data)
+        # return StoredObject(meta=meta, data=data)
+    
+        return self._from_issue(issue)
 
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
@@ -122,18 +124,7 @@ class IssueHandler:
             )
         
         issue = issues[0]
-        data = json.loads(issue.body)
-        
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=uid_label,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=self._get_version(issue)
-        )
-        
-        return StoredObject(meta=meta, data=data)
+        return self._from_issue(issue)
 
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
@@ -218,12 +209,9 @@ class IssueHandler:
                 return label_name[len(LabelNames.UID_PREFIX):]
                 
         raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
-        
-    def get_object_by_number(self, issue_number: int) -> StoredObject:
-        """Retrieve an object by issue number"""
-        logger.info(f"Retrieving object by issue #{issue_number}")
-        
-        issue = self.repo.get_issue(issue_number)
+
+    @staticmethod
+    def _from_issue(issue: Issue) -> StoredObject:
         object_id = self.get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
@@ -237,6 +225,14 @@ class IssueHandler:
         )
         
         return StoredObject(meta=meta, data=data)
+        
+    def get_object_by_number(self, issue_number: int) -> StoredObject:
+        """Retrieve an object by issue number"""
+        logger.info(f"Retrieving object by issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        return self._from_issue(issue)
+
 
     def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
         """Update the issue body with new object state"""
