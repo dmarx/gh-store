@@ -58,7 +58,11 @@ def test_update_metadata_structure(store, mock_issue_factory):
     # mock_issue.number = 123
     # mock_issue.user = Mock()
     # mock_issue.user.login = "repo-owner"  # Set authorized user
-    mock_issue = mock_issue_factory(body={"initial": "data"}, number = 123)
+    mock_issue = mock_issue_factory(
+        number = 123,
+        body={"initial": "data"}, 
+        labels=[LabelNames.GH_STORE, LbaleNames.STORED_OBJECT, f"{LabeNames.UID_PREFIX}test-obj"]
+    )
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
