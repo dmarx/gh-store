@@ -73,7 +73,7 @@ class IssueHandler:
         
         # return StoredObject(meta=meta, data=data)
     
-        return self._from_issue(issue)
+        return self._from_issue(issue, version=1)
 
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
@@ -211,7 +211,7 @@ class IssueHandler:
         raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
 
     @staticmethod
-    def _from_issue(issue: Issue) -> StoredObject:
+    def _from_issue(issue: Issue, version: int|None = None) -> StoredObject:
         object_id = self.get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
@@ -221,7 +221,7 @@ class IssueHandler:
             issue_number=issue.number,  # Include issue number
             created_at=issue.created_at,
             updated_at=issue.updated_at,
-            version=self._get_version(issue)
+            version=version if version else self._get_version(issue)
         )
         
         return StoredObject(meta=meta, data=data)
