@@ -8,34 +8,34 @@ from unittest.mock import Mock
 from gh_store.core.constants import LabelNames
 
 
-def test_list_updated_since(store, mock_issue):
+def test_list_updated_since(store, mock_issue_factory):
     """Test fetching objects updated since timestamp"""
     timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
     object_id = "test-123"
     
     # Create mock issue updated after timestamp - include gh-store label
-    issue = mock_issue(
-        created_at=timestamp - timedelta(minutes=30),
-        updated_at=timestamp + timedelta(minutes=30),
-        labels=["gh-store", "stored-object", f"UID:{object_id}"],
+    issue = mock_issue_factory(
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}{object_id}"],
+        updated_at = timestamp + timedelta(minutes=30),
+        created_at = timestamp - timedelta(minutes=30),
     )
     store.repo.get_issues.return_value = [issue]
     
     # Mock object retrieval
-    mock_obj = Mock()
-    mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
-    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    # mock_obj = Mock()
+    # mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    # store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test listing
-    updated = store.list_updated_since(timestamp)
+    updated = list(store.list_updated_since(timestamp))
     
     # Verify
     store.repo.get_issues.assert_called_once()
     call_kwargs = store.repo.get_issues.call_args[1]
     assert call_kwargs["since"] == timestamp
-    assert call_kwargs["labels"] == ["gh-store", "stored-object"]  # Query by stored-object for active objects
+    assert call_kwargs["labels"] == [LabelNames.GH_STORE, LabelNames.STORED_OBJECT]  # Query by stored-object for active objects
     assert len(updated) == 1
-    assert mock_obj in updated.values()
+    assert updated[0].meta.object_id == object_id
 
 def test_list_updated_since_no_updates(store, mock_issue):
     """Test when no updates since timestamp"""
@@ -55,7 +55,7 @@ def test_list_updated_since_no_updates(store, mock_issue):
     store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
     
     # Test listing
-    updated = store.list_updated_since(timestamp)
+    updated = list(store.list_updated_since(timestamp))
     
     # Verify no updates found
     assert len(updated) == 0
@@ -87,7 +87,7 @@ def test_list_all_objects(store, mock_issue, mock_label_factory):
     )
     
     # Test listing all
-    objects = store.list_all()
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
     
     # Verify
     assert len(objects) == 2
@@ -130,9 +130,10 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = store.list_all()
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
     
     # Verify only active object listed
+    # 
     assert len(objects) == 1
     assert "test-2" in objects
     assert "test-1" not in objects
@@ -165,7 +166,7 @@ def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
     )
     
     # Test listing
-    objects = store.list_all()
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
     
     # Verify only valid object listed
     assert len(objects) == 1

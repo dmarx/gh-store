@@ -1,5 +1,6 @@
 # gh_store/core/store.py
 
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 import importlib.resources
@@ -93,69 +94,62 @@ class GitHubStore:
         
         return obj
     
-    def list_all(self) -> dict[str, StoredObject]:
+    def list_all(self) -> Iterator[StoredObject]:
         """List all objects in the store, indexed by object ID"""
         logger.info("Fetching all stored objects")
         
         # Get all closed issues with base label (active objects)
-        issues = list(self.repo.get_issues(
+        issues_generator = self.repo.get_issues(
             state="closed",
             labels=[LabelNames.GH_STORE, self.config.store.base_label]
-        ))
+        )
         
-        objects = {}
-        for issue in issues:
-            # Skip archived objects
+        for idx, issue in enumerate(issues_generator):
             if any(label.name == "archived" for label in issue.labels):
                 continue
-                
             try:
-                # Get object ID from labels
-                object_id = self.issue_handler.get_object_id_from_labels(issue)
-                
-                # Load object
-                obj = self.issue_handler.get_object_by_number(issue.number)
-                objects[object_id] = obj
-                
+                yield StoredObject.from_issue(issue)
             except ValueError as e:
-                logger.warning(f"Skipping issue #{issue.number}: {e}")
-        
-        logger.info(f"Found {len(objects)} stored objects")
-        return objects
-    
-    def list_updated_since(self, timestamp: datetime) -> dict[str, StoredObject]:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")        
+        logger.info(f"Found {idx+1} stored objects")
+
+    def list_updated_since(self, timestamp: datetime) -> Iterator[StoredObject]:
         """List objects updated since given timestamp"""
         logger.info(f"Fetching objects updated since {timestamp}")
         
         # Get all objects with base label that are closed (active objects)
-        issues = list(self.repo.get_issues(
+        # on the `since` parameter:
+        #     "Only show results that were last updated after the given time. This is a timestamp in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ."
+        # https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
+        issues_generator = self.repo.get_issues(
             state="closed",
             labels=[LabelNames.GH_STORE, self.config.store.base_label],
-            since=timestamp  # GitHub API's since parameter
-        ))
+            since=timestamp 
+        )
+
+        # Get object ID from labels - strip prefix to get bare ID
+        # object_id = self.issue_handler.get_object_id_from_labels(issue)
         
-        objects = {}
-        for issue in issues:
-            # Skip archived objects
+        # # Load object
+        # obj = self.issue_handler.get_object_by_number(issue.number)
+                
+        for idx, issue in enumerate(issues_generator):
             if any(label.name == "archived" for label in issue.labels):
                 continue
-                
             try:
-                # Get object ID from labels - strip prefix to get bare ID
-                object_id = self.issue_handler.get_object_id_from_labels(issue)
-                
-                # Load object
-                obj = self.issue_handler.get_object_by_number(issue.number)
-                
+                obj = StoredObject.from_issue(issue)
                 # Double check the timestamp (since GitHub's since parameter includes issue comments)
+                # ....except, I think we want those, no? or do we only want objects whose updates have been "processed" into the view on the object?
+                # Isn't this the function we use to figure out which comments need to be processed???
+                # ...can't be, right? Because we're only querying for closed issues. 
+                # So this must be for delta updating the snapshot.
                 if obj.meta.updated_at > timestamp:
-                    objects[object_id] = obj
+                    yield obj
+                logger.info(f"Skipping issue #{issue.number}: failed `obj.meta.updated_at > timestamp` check.") 
                 
             except ValueError as e:
-                logger.warning(f"Skipping issue #{issue.number}: {e}")
-        
-        logger.info(f"Found {len(objects)} updated objects")
-        return objects
+                logger.warning(f"Skipping issue #{issue.number}: {e}")        
+        logger.info(f"Found {idx+1} stored objects")
     
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object"""

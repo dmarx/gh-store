@@ -5,16 +5,14 @@ from datetime import datetime, timezone
 import pytest
 from unittest.mock import Mock
 
+from gh_store.core.constants import LabelNames
 from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
 from gh_store.core.version import CLIENT_VERSION
 
-def test_process_update(store):
+def test_process_update(store, mock_issue_factory):
     """Test processing an update"""
     test_data = {"name": "test", "value": 42}
-    mock_issue = Mock()
-    mock_issue.body = json.dumps(test_data)
-    mock_issue.get_comments = Mock(return_value=[])
-    mock_issue.number = 123
+    mock_issue = mock_issue_factory(body=test_data, number=123, labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}:test-obj"])
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
@@ -38,9 +36,9 @@ def test_process_update(store):
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
 
-def test_concurrent_update_prevention(store):
+def test_concurrent_update_prevention(store, mock_issue_factory):
     """Test that concurrent updates are prevented"""
-    mock_issue = Mock()
+    mock_issue = mock_issue_factory(state="open")
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
@@ -52,14 +50,19 @@ def test_concurrent_update_prevention(store):
     with pytest.raises(ConcurrentUpdateError):
         store.update("test-obj", {"value": 43})
 
-def test_update_metadata_structure(store):
+def test_update_metadata_structure(store, mock_issue_factory):
     """Test that updates include properly structured metadata"""
-    mock_issue = Mock()
-    mock_issue.body = json.dumps({"initial": "data"})
-    mock_issue.get_comments = Mock(return_value=[])
-    mock_issue.number = 123
-    mock_issue.user = Mock()
-    mock_issue.user.login = "repo-owner"  # Set authorized user
+    # mock_issue = Mock()
+    # mock_issue.body = json.dumps({"initial": "data"})
+    # mock_issue.get_comments = Mock(return_value=[])
+    # mock_issue.number = 123
+    # mock_issue.user = Mock()
+    # mock_issue.user.login = "repo-owner"  # Set authorized user
+    mock_issue = mock_issue_factory(
+        number = 123,
+        body={"initial": "data"}, 
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
+    )
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":

@@ -1,9 +1,9 @@
 # gh_store/handlers/issue.py
 
-import json
 from datetime import datetime, timezone
 from loguru import logger
-from github import Repository
+from github import Repository, Issue
+import json
 from omegaconf import DictConfig
 
 from ..core.constants import LabelNames
@@ -16,13 +16,14 @@ from .comment import CommentHandler
 from time import sleep
 from github.GithubException import RateLimitExceededException
 
+
 class IssueHandler:
     """Handles GitHub Issue operations for stored objects"""
     
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.base_label = config.store.base_label if config.store.base_label else LabelNames.STORED_OBJECT # could this be an OR?
+        self.base_label = LabelNames.STORED_OBJECT # could this be an OR?
             
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
@@ -57,21 +58,23 @@ class IssueHandler:
         # Mark as processed to prevent update processing
         comment.create_reaction(self.config.store.reactions.processed)
         comment.create_reaction(self.config.store.reactions.initial_state)
-        
-        # Create metadata
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=uid_label,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=1
-        )
-        
+
         # Close issue immediately to indicate no processing needed
         issue.edit(state="closed")
+
+        # # Create metadata
+        # meta = ObjectMeta(
+        #     object_id=object_id,
+        #     label=uid_label,
+        #     issue_number=issue.number,  # Include issue number
+        #     created_at=issue.created_at,
+        #     updated_at=issue.updated_at,
+        #     version=1
+        # )
         
-        return StoredObject(meta=meta, data=data)
+        # return StoredObject(meta=meta, data=data)
+    
+        return StoredObject.from_issue(issue, version=1)
 
     def _ensure_labels_exist(self, labels: list[str]) -> None:
         """Create labels if they don't exist"""
@@ -122,18 +125,7 @@ class IssueHandler:
             )
         
         issue = issues[0]
-        data = json.loads(issue.body)
-        
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=uid_label,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=self._get_version(issue)
-        )
-        
-        return StoredObject(meta=meta, data=data)
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
 
     def get_object_history(self, object_id: str) -> list[dict]:
         """Get complete history of an object, including initial state"""
@@ -194,49 +186,14 @@ class IssueHandler:
                 logger.warning(f"Skipping comment {comment.id}: {e}")
                 
         return history
-    
-    def get_object_id_from_labels(self, issue) -> str:
-        """
-        Extract bare object ID from issue labels, removing any prefix.
-        
-        Args:
-            issue: GitHub issue object with labels attribute
-            
-        Returns:
-            str: Object ID without prefix
-            
-        Raises:
-            ValueError: If no matching label is found
-        """
-        for label in issue.labels:
-            # Get the actual label name, handling both string and Mock objects
-            label_name = getattr(label, 'name', label)
-            
-            if (label_name != self.base_label and 
-                isinstance(label_name, str) and 
-                label_name.startswith(LabelNames.UID_PREFIX)):
-                return label_name[len(LabelNames.UID_PREFIX):]
-                
-        raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
         
     def get_object_by_number(self, issue_number: int) -> StoredObject:
         """Retrieve an object by issue number"""
         logger.info(f"Retrieving object by issue #{issue_number}")
         
         issue = self.repo.get_issue(issue_number)
-        object_id = self.get_object_id_from_labels(issue)
-        data = json.loads(issue.body)
-        
-        meta = ObjectMeta(
-            object_id=object_id,
-            label=object_id,
-            issue_number=issue.number,  # Include issue number
-            created_at=issue.created_at,
-            updated_at=issue.updated_at,
-            version=self._get_version(issue)
-        )
-        
-        return StoredObject(meta=meta, data=data)
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
+
 
     def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
         """Update the issue body with new object state"""
