@@ -165,7 +165,7 @@ class TestCLIErrorHandling:
     
     def test_file_not_found(self, mock_cli, caplog):
         """Test handling of missing snapshot file"""
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(FileNotFoundError) as exc_info:
             mock_cli.update_snapshot("/nonexistent/path")
             
         assert exc_info.value.code == 1
