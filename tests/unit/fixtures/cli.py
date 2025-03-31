@@ -164,27 +164,57 @@ def mock_stored_objects():
     return objects
 
 @pytest.fixture
-def mock_snapshot_file(tmp_path, mock_stored_objects):
-    """Create a mock snapshot file for testing."""
-    snapshot_path = tmp_path / "test_snapshot.json"
-    
-    # Convert objects to serializable format
-    snapshot_data = {
-        "snapshot_time": datetime(2025, 1, 1, tzinfo=timezone.utc).isoformat(),
-        "repository": "owner/repo",
-        "objects": {
-            obj_id: {
+def mock_snapshot_file_factory(tmp_path, mock_stored_objects):
+    """Factory for creating snapshot files with configurable timestamps."""
+    def _create_snapshot(snapshot_time=None, include_objects=None):
+        """
+        Create a mock snapshot file with configurable timestamp and objects.
+        
+        Args:
+            snapshot_time: Custom snapshot timestamp (defaults to 1 day ago)
+            include_objects: List of indices from mock_stored_objects to include
+                            (defaults to all objects)
+        
+        Returns:
+            Path to the created snapshot file
+        """
+        # Default timestamp is 1 day ago
+        if snapshot_time is None:
+            snapshot_time = datetime.now(timezone.utc) - timedelta(days=1)
+        
+        snapshot_path = tmp_path / f"snapshot_{int(datetime.now().timestamp())}.json"
+        
+        # Convert objects to serializable format
+        snapshot_data = {
+            "snapshot_time": snapshot_time.isoformat(),
+            "repository": "owner/repo",
+            "objects": {}
+        }
+        
+        # Determine which objects to include
+        objects_to_include = mock_stored_objects
+        if include_objects is not None:
+            objects_to_include = [mock_stored_objects[i] for i in include_objects if i < len(mock_stored_objects)]
+        
+        # Add objects to snapshot
+        for obj in objects_to_include:
+            snapshot_data["objects"][obj.meta.object_id] = {
                 "data": obj.data,
                 "meta": {
+                    "object_id": obj.meta.object_id,
+                    "issue_number": obj.meta.issue_number,
                     "created_at": obj.meta.created_at.isoformat(),
                     "updated_at": obj.meta.updated_at.isoformat(),
-                    "version": obj.meta.version,
-                    "issue_number": obj.meta.issue_number  # Added issue_number
+                    "version": obj.meta.version
                 }
             }
-            for obj_id, obj in mock_stored_objects.items()
-        }
-    }
+        
+        snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+        return snapshot_path
     
-    snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
-    return snapshot_path
+    return _create_snapshot
+
+@pytest.fixture
+def mock_snapshot_file(mock_snapshot_file_factory):
+    """Create a default mock snapshot file for testing."""
+    return mock_snapshot_file_factory()
