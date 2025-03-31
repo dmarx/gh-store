@@ -18,7 +18,7 @@ def test_create_object_with_initial_state(store, mock_label_factory, mock_commen
     # Mock existing labels
     store.repo.get_labels.return_value = [
         mock_label_factory(name=LabelNames.GH_STORE),
-        mock_label_factory(name=LabelNames.STORED_OPBJECT),
+        mock_label_factory(name=LabelNames.STORED_OBJECT),
     ]
     
     # Mock issue creation
