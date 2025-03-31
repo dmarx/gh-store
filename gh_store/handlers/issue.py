@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from loguru import logger
 from github import Repository, Issue
+import json
 from omegaconf import DictConfig
 
 from ..core.constants import LabelNames
