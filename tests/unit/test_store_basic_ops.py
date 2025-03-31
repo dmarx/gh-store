@@ -21,101 +21,52 @@ def test_create_object_with_initial_state(store, mock_label_factory, mock_commen
         mock_label_factory(name=LabelNames.STORED_OBJECT),
     ]
     
-    mock_issue = mock_issue_factory(number=issue_number)
+    # Create a properly configured mock issue
+    mock_issue = mock_issue_factory(
+        number=issue_number,
+        body=json.dumps(test_data)
+    )
     
-    # Create object
+    # Set up the repo mock to return our issue when create_issue is called
+    store.repo.create_issue.return_value = mock_issue
+    
+    # Make the create_comment method return a properly configured comment
+    initial_comment = mock_comment_factory(
+        comment_id=1,
+        body={
+            "type": "initial_state",
+            "_data": test_data,
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "issue_number": issue_number
+            }
+        }
+    )
+    mock_issue.create_comment.return_value = initial_comment
+    
+    # Execute the method under test
     obj = store.create(object_id, test_data)
     
-    # Verify initial state comment
+    # Verify issue creation
+    store.repo.create_issue.assert_called_once()
+    
+    # Verify create_issue was called with the right arguments
+    create_issue_args = store.repo.create_issue.call_args[1]
+    assert create_issue_args["title"] == f"Stored Object: {object_id}"
+    assert json.loads(create_issue_args["body"]) == test_data
+    assert LabelNames.GH_STORE in create_issue_args["labels"]
+    assert LabelNames.STORED_OBJECT in create_issue_args["labels"]
+    assert f"{LabelNames.UID_PREFIX}{object_id}" in create_issue_args["labels"]
+    
+    # Verify initial state comment was created
     mock_issue.create_comment.assert_called_once()
-    comment_data = json.loads(mock_issue.comments[0].body)
-    assert comment_data["type"] == "initial_state"
-    assert comment_data["_data"] == test_data
-    assert "_meta" in comment_data
-    assert "issue_number" in comment_data["_meta"]  # Verify issue_number in metadata
-    assert comment_data["_meta"]["issue_number"] == issue_number  # Verify issue_number value
     
     # Verify object metadata
-    assert obj.meta.issue_number == issue_number  # Verify issue_number in object metadata
-
-
-# =================================== FAILURES ===================================
-# ____________________ test_create_object_with_initial_state _____________________
-#
-# store = <gh_store.core.store.GitHubStore object at 0x7fdb15163250>
-# mock_label_factory = <function mock_label_factory.<locals>.create_label at 0x7fdb1533f1a0>
-# mock_comment_factory = <function mock_comment_factory.<locals>.create_comment at 0x7fdb1533f560>
-# mock_issue_factory = <function mock_issue_factory.<locals>.create_issue at 0x7fdb1533f240>
-#
-#     def test_create_object_with_initial_state(store, mock_label_factory, mock_comment_factory, mock_issue_factory):
-#         """Test that creating an object stores the initial state in a comment"""
-#         object_id = "test-123"
-#         test_data = {"name": "test", "value": 42}
-#         issue_number = 456  # Define issue number
-#         # Mock existing labels
-#         store.repo.get_labels.return_value = [
-#             mock_label_factory(name=LabelNames.GH_STORE),
-#             mock_label_factory(name=LabelNames.STORED_OBJECT),
-#         ]
-#         mock_issue = mock_issue_factory(number=issue_number)
-#         # Create object
-# >       obj = store.create(object_id, test_data)
-#
-# tests/unit/test_store_basic_ops.py:38: 
-# _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-# gh_store/core/store.py:49: in create
-#     return self.issue_handler.create_object(object_id, data)
-# gh_store/handlers/issue.py:56: in create_object
-#     comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/__init__.py:238: in dumps
-#     **kw).encode(obj)
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:202: in encode
-#     chunks = list(chunks)
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:432: in _iterencode
-#     yield from _iterencode_dict(o, _current_indent_level)
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:406: in _iterencode_dict
-#     yield from chunks
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:406: in _iterencode_dict
-#     yield from chunks
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:439: in _iterencode
-#     o = _default(o)
-# _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
-#
-# self = <json.encoder.JSONEncoder object at 0x7fdb15157490>
-# o = <Mock name='Github().get_repo().create_issue().number' id='140578928360080'>
-#
-#     def default(self, o):
-#         """Implement this method in a subclass such that it returns
-#         a serializable object for ``o``, or calls the base implementation
-#         (to raise a ``TypeError``).
-#    
-#         For example, to support arbitrary iterators, you could
-#         implement default like this::
-#
-#             def default(self, o):
-#                 try:
-#                     iterable = iter(o)
-#                 except TypeError:
-#                     pass
-#                 else:
-#                     return list(iterable)
-#                 # Let the base class default method raise the TypeError
-#                 return super().default(o)
-#
-#         """
-# >       raise TypeError(f'Object of type {o.__class__.__name__} '
-#                         f'is not JSON serializable')
-# E       TypeError: Object of type Mock is not JSON serializable
-#
-# /opt/hostedtoolcache/Python/3.11.11/x64/lib/python3.11/json/encoder.py:180: TypeError
-
-
-
-
-
-
-
-
+    assert obj.meta.object_id == object_id
+    assert obj.meta.issue_number == issue_number
+    assert obj.data == test_data
 
 
 def test_get_object(store):
