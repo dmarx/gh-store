@@ -8,13 +8,10 @@ from unittest.mock import Mock
 from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
 from gh_store.core.version import CLIENT_VERSION
 
-def test_process_update(store):
+def test_process_update(store, mock_issue_factory):
     """Test processing an update"""
     test_data = {"name": "test", "value": 42}
-    mock_issue = Mock()
-    mock_issue.body = json.dumps(test_data)
-    mock_issue.get_comments = Mock(return_value=[])
-    mock_issue.number = 123
+    mock_issue = mock_issue_factory(body=test_data, number=123, labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}:test-obj"])
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
