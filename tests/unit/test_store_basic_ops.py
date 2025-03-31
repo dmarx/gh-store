@@ -14,17 +14,20 @@ def test_create_object_with_initial_state(store, mock_label_factory, mock_commen
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
     issue_number = 456  # Define issue number
-    
-    # Mock existing labels
-    store.repo.get_labels.return_value = [
+    labels=[
         mock_label_factory(name=LabelNames.GH_STORE),
         mock_label_factory(name=LabelNames.STORED_OBJECT),
     ]
     
+    # Mock existing labels
+    store.repo.get_labels.return_value = labels
+
+    # .... I think this test might be mocked to the point of being useless.
     # Create a properly configured mock issue
     mock_issue = mock_issue_factory(
         number=issue_number,
-        body=json.dumps(test_data)
+        body=json.dumps(test_data),
+        labels=labels+[f"{LabelNames.UID_PREFIX}{object_id}"],
     )
     
     # Set up the repo mock to return our issue when create_issue is called
