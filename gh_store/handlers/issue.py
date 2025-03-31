@@ -16,6 +16,32 @@ from .comment import CommentHandler
 from time import sleep
 from github.GithubException import RateLimitExceededException
 
+
+# TODO: let's move the whole _from_issue method onto StoredObject
+def get_object_id_from_labels(issue) -> str:
+    """
+    Extract bare object ID from issue labels, removing any prefix.
+    
+    Args:
+        issue: GitHub issue object with labels attribute
+        
+    Returns:
+        str: Object ID without prefix
+        
+    Raises:
+        ValueError: If no matching label is found
+    """
+    for label in issue.labels:
+        # Get the actual label name, handling both string and Mock objects
+        # ... or are we just mocking poorly?
+        label_name = getattr(label, 'name', label)
+        
+        if (isinstance(label_name, str) and label_name.startswith(LabelNames.UID_PREFIX)):
+            return label_name[len(LabelNames.UID_PREFIX):]
+            
+    raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
+
+
 class IssueHandler:
     """Handles GitHub Issue operations for stored objects"""
     
@@ -185,34 +211,10 @@ class IssueHandler:
                 logger.warning(f"Skipping comment {comment.id}: {e}")
                 
         return history
-    
-    def get_object_id_from_labels(self, issue) -> str:
-        """
-        Extract bare object ID from issue labels, removing any prefix.
-        
-        Args:
-            issue: GitHub issue object with labels attribute
-            
-        Returns:
-            str: Object ID without prefix
-            
-        Raises:
-            ValueError: If no matching label is found
-        """
-        for label in issue.labels:
-            # Get the actual label name, handling both string and Mock objects
-            label_name = getattr(label, 'name', label)
-            
-            if (label_name != self.base_label and 
-                isinstance(label_name, str) and 
-                label_name.startswith(LabelNames.UID_PREFIX)):
-                return label_name[len(LabelNames.UID_PREFIX):]
-                
-        raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
 
     @staticmethod
     def _from_issue(issue: Issue, version: int|None = None) -> StoredObject:
-        object_id = self.get_object_id_from_labels(issue)
+        object_id = get_object_id_from_labels(issue)
         data = json.loads(issue.body)
         
         meta = ObjectMeta(
