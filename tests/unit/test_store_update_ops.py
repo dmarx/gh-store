@@ -36,9 +36,9 @@ def test_process_update(store, mock_issue_factory):
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
 
-def test_concurrent_update_prevention(store):
+def test_concurrent_update_prevention(store, mock_issue_factory):
     """Test that concurrent updates are prevented"""
-    mock_issue = Mock()
+    mock_issue = mock_issue_factory(state="open")
     
     def get_issues_side_effect(**kwargs):
         if kwargs.get("state") == "open":
