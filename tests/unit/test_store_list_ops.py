@@ -135,7 +135,7 @@ def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
     # Verify only active object listed
     # 
     assert len(objects) == 1
-    assert "test-2" in object_id
+    assert "test-2" in objects
     assert "test-1" not in objects
 
 def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
