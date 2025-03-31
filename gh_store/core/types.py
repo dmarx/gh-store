@@ -3,9 +3,11 @@
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from typing import Self, TypeAlias
-
 import json
+
 from github import Issue
+
+from .constants import LabelNames
 
 Json: TypeAlias = dict[str, "Json"] | list["Json"] | str | int | float | bool | None
 
