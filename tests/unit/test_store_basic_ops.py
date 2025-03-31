@@ -9,28 +9,30 @@ from gh_store.core.constants import LabelNames
 from gh_store.core.exceptions import ObjectNotFound
 
 
-def test_create_object_with_initial_state(store):
+def test_create_object_with_initial_state(store, mock_label_factory, mock_comment_factory, mock_issue_factory):
     """Test that creating an object stores the initial state in a comment"""
     object_id = "test-123"
     test_data = {"name": "test", "value": 42}
     issue_number = 456  # Define issue number
     
     # Mock existing labels
-    mock_base_label = Mock()
-    mock_base_label.name = "stored-object"
-    store.repo.get_labels.return_value = [mock_base_label]
+    store.repo.get_labels.return_value = [
+        mock_label_factory(name=LabelNames.GH_STORE),
+        mock_label_factory(name=LabelNames.STORED_OPBJECT),
+    ]
     
     # Mock issue creation
-    mock_issue = Mock()
-    mock_issue.number = issue_number  # Set issue number
-    mock_comment = Mock()
-    store.repo.create_issue.return_value = mock_issue
-    mock_issue.create_comment.return_value = mock_comment
+    # mock_issue = Mock()
+    # mock_issue.number = issue_number  # Set issue number
+    # mock_comment = Mock()
+    # store.repo.create_issue.return_value = mock_issue
+    # mock_issue.create_comment.return_value = mock_comment
     
-    # Set up required attributes
-    mock_issue.created_at = datetime.now(timezone.utc)
-    mock_issue.updated_at = datetime.now(timezone.utc)
-    mock_issue.get_comments = Mock(return_value=[])
+    # # Set up required attributes
+    # mock_issue.created_at = datetime.now(timezone.utc)
+    # mock_issue.updated_at = datetime.now(timezone.utc)
+    # mock_issue.get_comments = Mock(return_value=[])
+    mock_issue = mock_issue_factory(number=issue_number)
     
     # Create object
     obj = store.create(object_id, test_data)
