@@ -152,8 +152,6 @@ def get_history(
         logger.exception("Failed to get object history")
         raise
 
-# Adding to gh_store/cli/commands.py
-
 def process_updates(
     issue: int,
     token: str | None = None,
@@ -218,9 +216,6 @@ def snapshot(
         # Add objects to snapshot
         object_count = 0
         for obj in store.list_all():
-            ### DEBUG
-            print(obj)
-            ### /DEBUG
             object_count += 1
             snapshot_data["objects"][obj.meta.object_id] = {
                 "data": obj.data,
