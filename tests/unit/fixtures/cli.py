@@ -146,7 +146,7 @@ def mock_store_response():
 @pytest.fixture
 def mock_stored_objects():
     """Create mock stored objects for testing."""
-    objects = {}
+    objects = []
     for i in range(1, 3):
         mock_obj = Mock()
         mock_obj.meta = Mock(
@@ -160,7 +160,7 @@ def mock_stored_objects():
             "name": f"test{i}",
             "value": i * 42
         }
-        objects[f"test-obj-{i}"] = mock_obj
+        objects.append(mock_obj)
     return objects
 
 @pytest.fixture
@@ -194,6 +194,7 @@ def mock_snapshot_file_factory(tmp_path, mock_stored_objects):
         # Determine which objects to include
         objects_to_include = mock_stored_objects
         if include_objects is not None:
+            # sort of a weird way to go about this...
             objects_to_include = [mock_stored_objects[i] for i in include_objects if i < len(mock_stored_objects)]
         
         # Add objects to snapshot
