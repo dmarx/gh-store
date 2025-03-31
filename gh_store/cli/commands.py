@@ -172,6 +172,7 @@ def process_updates(
     except Exception as e:
         logger.exception("Unexpected error occurred")
         raise SystemExit(1)
+
 def snapshot(
     token: str | None = None,
     repo: str | None = None,
@@ -195,9 +196,6 @@ def snapshot(
         except Exception as e:
             logger.warning(f"Error initializing canonical store: {e}")
         
-        # Get all stored objects
-        objects = store.list_all()
-        
         # Create snapshot data
         snapshot_data = {
             "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
@@ -218,13 +216,17 @@ def snapshot(
                 logger.warning(f"Error finding aliases: {e}")
         
         # Add objects to snapshot
-        for obj_id, obj in objects.items():
-            snapshot_data["objects"][obj_id] = {
+        object_count = 0
+        for obj in store.list_all():
+            object_count += 1
+            snapshot_data["objects"][obj.meta.object_id] = {
                 "data": obj.data,
                 "meta": {
+                    "issue_number": obj.meta.issue_number,
+                    "object_id": obj.meta.object_id, # there's also an obj.meta.label field we can probably just drop?
                     "created_at": obj.meta.created_at.isoformat(),
                     "updated_at": obj.meta.updated_at.isoformat(),
-                    "version": obj.meta.version
+                    "version": obj.meta.version,
                 }
             }
         
@@ -232,7 +234,7 @@ def snapshot(
         output_path = Path(output)
         output_path.write_text(json.dumps(snapshot_data, indent=2))
         logger.info(f"Snapshot written to {output_path}")
-        logger.info(f"Captured {len(objects)} objects")
+        logger.info(f"Captured {object_count} objects")
         
         if has_canonical and "relationships" in snapshot_data:
             aliases_count = len(snapshot_data["relationships"].get("aliases", {}))
@@ -267,32 +269,33 @@ def update_snapshot(
         last_snapshot = datetime.fromisoformat(snapshot_data["snapshot_time"])
         logger.info(f"Updating snapshot from {last_snapshot}")
         
-        # Get updated objects
-        updated_objects = store.list_updated_since(last_snapshot)
+        # Track updated objects count
+        updated_count = 0
         
-        if not updated_objects:
-            logger.info("No updates found since last snapshot")
-            return
-        
-        # Update snapshot data
-        snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
-        for obj_id, obj in updated_objects.items():
-            snapshot_data["objects"][obj_id] = {
+        # Get updated objects and add them to snapshot
+        for obj in store.list_updated_since(last_snapshot):
+            updated_count += 1
+            snapshot_data["objects"][obj.meta.object_id] = {
                 "data": obj.data,
                 "meta": {
+                    "issue_number": obj.meta.issue_number,
+                    "object_id": obj.meta.object_id, # there's also an obj.meta.label field we can probably just drop?
                     "created_at": obj.meta.created_at.isoformat(),
                     "updated_at": obj.meta.updated_at.isoformat(),
-                    "version": obj.meta.version
+                    "version": obj.meta.version,
                 }
             }
         
+        # Update snapshot timestamp
+        snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
+        
         # Write updated snapshot
         snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
-        logger.info(f"Updated {len(updated_objects)} objects in snapshot")
+        logger.info(f"Updated {updated_count} objects in snapshot")
         
     except GitHubStoreError as e:
         logger.error(f"Failed to update snapshot: {e}")
-        raise SystemExit(1)
+        raise e
     except Exception as e:
         logger.exception("Unexpected error occurred")
-        raise SystemExit(1)
+        raise e
