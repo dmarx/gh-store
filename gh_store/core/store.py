@@ -69,7 +69,8 @@ class GitHubStore:
             break
         
         if open_issue: # count open comments, check against self.max_concurrent_updates
-            issue_number = open_issue.meta.issue_number
+            #issue_number = open_issue.meta.issue_number # lol... meta is for StoredObjects, not issues.
+            issue_number = open_issue.number
             n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
             if n_concurrent_updates > self.max_concurrent_updates:
                 raise ConcurrentUpdateError(
