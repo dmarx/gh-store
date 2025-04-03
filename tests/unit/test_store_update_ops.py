@@ -36,34 +36,50 @@ def test_process_update(store, mock_issue_factory):
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
 
-def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_factory):
+# tests/unit/test_store_update_ops.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
+from gh_store.core.version import CLIENT_VERSION
+
+def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_handler, setup_unprocessed_updates_count):
     """Test that concurrent updates are prevented"""
-    def open_issue_with_n_comments(n):
-        return mock_issue_factory(
-            state="open",
-            comments=[
-                mock_comment_factory(
-                    body={"value": 42},
-                    comment_id=i
-                ) for i in range(n)]
-        )
-
-    def set_store_with_issue_n_comments(n):
-        mock_issue = open_issue_with_n_comments(n)
-        def get_issues_side_effect(**kwargs):
-            if kwargs.get("state") == "open":
-                return [mock_issue]  # Return open issue to simulate processing
-            return []
-        
-        store.repo.get_issues.side_effect = get_issues_side_effect
-
-    set_store_with_issue_n_comments(1)
-    store.update("test-obj", {"value": 43})
-    set_store_with_issue_n_comments(2)
-    store.update("test-obj", {"value": 43})
-    set_store_with_issue_n_comments(3)
-    with pytest.raises(ConcurrentUpdateError):
+    # Create a mock issue to return for get_issues with open state
+    mock_issue = mock_issue_factory(
+        state="open",
+        number=123,
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
+    )
+    
+    # Configure get_issues to return our mock issue for open state
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return [mock_issue]  # Return open issue to simulate processing
+        return []
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
+    
+    # First attempt should work (one update in progress)
+    with patch.object(store.comment_handler, 'get_unprocessed_updates', 
+                     return_value=setup_unprocessed_updates_count(1)(123)):
         store.update("test-obj", {"value": 43})
+    
+    # Second attempt should work (two updates in progress)
+    with patch.object(store.comment_handler, 'get_unprocessed_updates', 
+                     return_value=setup_unprocessed_updates_count(2)(123)):
+        store.update("test-obj", {"value": 44})
+    
+    # Third attempt should fail (three updates exceeds threshold)
+    with patch.object(store.comment_handler, 'get_unprocessed_updates', 
+                     return_value=setup_unprocessed_updates_count(3)(123)):
+        with pytest.raises(ConcurrentUpdateError):
+            store.update("test-obj", {"value": 45})
 
 def test_update_metadata_structure(store, mock_issue_factory):
     """Test that updates include properly structured metadata"""
