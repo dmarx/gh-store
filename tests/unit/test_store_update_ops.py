@@ -49,58 +49,49 @@ from gh_store.core.version import CLIENT_VERSION
 
 def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_factory):
     """Test that concurrent updates are prevented"""
-    # Create mock comments that will be returned by the get_comments method
-    mock_comments_1 = [
-        mock_comment_factory(
-            body={"value": 42},
-            comment_id=1,
-            # Make sure these comments don't appear "processed" by not having the processed reaction
-            reactions=[]
+    # Create mock comments with no "processed" reactions so they'll be considered unprocessed
+    def create_unprocessed_comments(count):
+        return [
+            mock_comment_factory(
+                body={"value": 42},
+                comment_id=i+1,
+                reactions=[]  # No processed reaction
+            ) for i in range(count)
+        ]
+    
+    # Create a mock open issue with the configured number of comments
+    def create_and_configure_mock_issue(comment_count):
+        comments = create_unprocessed_comments(comment_count)
+        mock_issue = mock_issue_factory(
+            state="open",
+            number=123,
+            comments=comments,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
         )
-    ]
+        return mock_issue
     
-    mock_comments_2 = [
-        mock_comment_factory(
-            body={"value": 42},
-            comment_id=i,
-            reactions=[]
-        ) for i in range(1, 3)  # 2 comments
-    ]
+    # Setup for get_issues to return our mock issue
+    def configure_get_issues(mock_issue):
+        def get_issues_side_effect(**kwargs):
+            if kwargs.get("state") == "open":
+                return [mock_issue]
+            return []
+        store.repo.get_issues.side_effect = get_issues_side_effect
+        store.repo.get_issue.return_value = mock_issue
     
-    mock_comments_3 = [
-        mock_comment_factory(
-            body={"value": 42},
-            comment_id=i,
-            reactions=[]
-        ) for i in range(1, 4)  # 3 comments
-    ]
-    
-    # Create a mock issue that will be returned by get_issue
-    mock_issue = mock_issue_factory(
-        state="open",
-        number=123,
-        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
-    )
-    
-    # Setup for get_issues to return the open issue
-    def get_issues_side_effect(**kwargs):
-        if kwargs.get("state") == "open":
-            return [mock_issue]
-        return []
-    
-    store.repo.get_issues.side_effect = get_issues_side_effect
-    
-    # First attempt: 1 comment pending processing
-    mock_issue.get_comments.return_value = mock_comments_1
-    store.repo.get_issue.return_value = mock_issue
+    # First attempt: 1 comment pending processing - should work
+    mock_issue_1 = create_and_configure_mock_issue(1)
+    configure_get_issues(mock_issue_1)
     store.update("test-obj", {"value": 43})
     
-    # Second attempt: 2 comments pending processing 
-    mock_issue.get_comments.return_value = mock_comments_2
+    # Second attempt: 2 comments pending processing - should work
+    mock_issue_2 = create_and_configure_mock_issue(2)
+    configure_get_issues(mock_issue_2)
     store.update("test-obj", {"value": 44})
     
     # Third attempt: 3 comments pending processing - should exceed threshold and fail
-    mock_issue.get_comments.return_value = mock_comments_3
+    mock_issue_3 = create_and_configure_mock_issue(3)
+    configure_get_issues(mock_issue_3)
     with pytest.raises(ConcurrentUpdateError):
         store.update("test-obj", {"value": 45})
 
