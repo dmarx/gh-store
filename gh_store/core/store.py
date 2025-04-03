@@ -62,10 +62,10 @@ class GitHubStore:
     def update(self, object_id: str, changes: Json) -> StoredObject:
         """Update an existing object"""
         # Check if object is already being processed
-        open_issue = next(self.repo.get_issues(
+        open_issue = self.repo.get_issues(
             labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
             state="open"
-        ))
+        )[0] # TODO: use canonicalization machinery?
 
         if open_issue:
             issue_number = open_issue.meta.issue_number
