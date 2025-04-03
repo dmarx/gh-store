@@ -36,20 +36,9 @@ def test_process_update(store, mock_issue_factory):
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
 
-
 def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_factory):
-    """Test that concurrent updates are prevented using enhanced repo fixture"""
-    # Create a mock issue with configurable unprocessed comments
-    mock_issue = mock_issue_factory(
-        state="open",
-        number=123,
-        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
-    )
-    
-    # Add the issue to the repo to ensure get_issue returns the same instance
-    store.repo.add_issue(mock_issue)
-    
-    # First attempt: 1 unprocessed comment
+    """Test that concurrent updates are prevented with minimal changes"""
+    # Create a mock issue with one unprocessed comment
     comments_1 = [
         mock_comment_factory(
             body={"value": 42},
@@ -57,12 +46,28 @@ def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_fa
             reactions=[]
         )
     ]
+    
+    mock_issue = mock_issue_factory(
+        state="open",
+        number=123,
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
+    )
     mock_issue.get_comments.return_value = comments_1
     
-    # First update should succeed
+    # Configure both get_issues and get_issue to use our mock issue
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return [mock_issue]
+        return []
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    # The critical line - ensure get_issue returns the same mock object
+    store.repo.get_issue.return_value = mock_issue
+    
+    # First update should work (1 comment)
     store.update("test-obj", {"value": 43})
     
-    # Second attempt: 2 unprocessed comments
+    # Update the same mock to have 2 comments
     comments_2 = [
         mock_comment_factory(
             body={"value": 42},
@@ -72,10 +77,10 @@ def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_fa
     ]
     mock_issue.get_comments.return_value = comments_2
     
-    # Second update should succeed
+    # Second update should work (2 comments)
     store.update("test-obj", {"value": 44})
     
-    # Third attempt: 3 unprocessed comments (exceeds max_concurrent_updates)
+    # Update the same mock to have 3 comments (exceeding limit)
     comments_3 = [
         mock_comment_factory(
             body={"value": 42},
@@ -88,7 +93,6 @@ def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_fa
     # Third update should fail
     with pytest.raises(ConcurrentUpdateError):
         store.update("test-obj", {"value": 45})
-        
 
 def test_update_metadata_structure(store, mock_issue_factory):
     """Test that updates include properly structured metadata"""
