@@ -65,7 +65,7 @@ class GitHubStore:
         open_issue = None
         for open_issue in self.repo.get_issues(
             labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
-            state="open") # TODO: use canonicalization machinery?
+            state="open"): # TODO: use canonicalization machinery?
             break
         
         if open_issue: # count open comments, check against self.max_concurrent_updates
