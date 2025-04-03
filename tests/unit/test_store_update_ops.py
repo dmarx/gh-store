@@ -45,7 +45,7 @@ def test_concurrent_update_prevention(store, mock_issue_factory):
                 mock_comment_factory(
                     body={"value": 42},
                     comment_id=i
-                ) for i in range n]
+                ) for i in range(n)]
         )
 
     def set_store_with_issue_n_comments(n):
