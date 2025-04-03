@@ -159,47 +159,6 @@ def mock_comment_factory():
 mock_comment = mock_comment_factory
 
 
-class MockPaginatedList:
-    """
-    Mock implementation of PyGithub's PaginatedList for testing.
-    
-    This class implements the iterator protocol to allow iteration over mock items
-    in tests, mimicking the behavior of PyGithub's PaginatedList class.
-    
-    Example usage:
-        comments = [mock_comment_factory(...), mock_comment_factory(...)]
-        issue.get_comments.return_value = MockPaginatedList(comments)
-        
-        # Now you can iterate over comments:
-        for comment in issue.get_comments():
-            # Do something with comment
-    """
-    def __init__(self, items):
-        """Initialize with list of items."""
-        self.items = items
-        
-    def __iter__(self):
-        """Make this class iterable."""
-        return iter(self.items)
-        
-    def __getitem__(self, index):
-        """Support indexing operations."""
-        return self.items[index]
-        
-    def __len__(self):
-        """Support len() function."""
-        return len(self.items)
-        
-    def get_page(self, page_number):
-        """Mock paginated access."""
-        # Simplified implementation - in real API this would use page size
-        return self.items
-        
-    def totalCount(self):
-        """Mock totalCount property of PaginatedList."""
-        return len(self.items)
-
-
 @pytest.fixture
 def mock_issue_factory(mock_comment_factory, mock_label_factory):
     """
@@ -272,10 +231,12 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         if labels:
             for label_name in labels:
                 issue.labels.append(mock_label_factory(label_name))
+                #issue.labels.append(label_name)
         
-        # Set up comments - use MockPaginatedList for proper iteration
+        
+        # Set up comments
         mock_comments = list(comments) if comments is not None else []
-        issue.get_comments = Mock(return_value=MockPaginatedList(mock_comments))
+        issue.get_comments = Mock(return_value=mock_comments)
         issue.create_comment = Mock()
 
         # Set up proper owner permissions
@@ -301,13 +262,13 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
 mock_issue = mock_issue_factory
 
 
-# tests/unit/fixtures/github.py - Enhanced mock_repo_factory
-
 @pytest.fixture
 def mock_repo_factory(mock_label_factory):
     """
-    Create GitHub repository mocks with standard structure that maintains
-    consistency between get_issues and get_issue.
+    Create GitHub repository mocks with standard structure.
+    
+    Note: Creates basic repository structure. Labels, issues, and permissions
+    should be explicitly set up in tests where they matter.
     """
     def create_repo(
         name: str = "owner/repo",
@@ -318,9 +279,7 @@ def mock_repo_factory(mock_label_factory):
         **kwargs
     ) -> Mock:
         """
-        Create a mock repository with GitHub-like structure that ensures
-        get_issue() returns the same object instances as those returned by get_issues().
-        
+        Create a mock repository with GitHub-like structure.
         Args:
             name: Repository name in owner/repo format
             owner_login: Repository owner's login
@@ -334,13 +293,13 @@ def mock_repo_factory(mock_label_factory):
         # Set basic attributes
         repo.full_name = name
         
-        # Set up owner
-        owner = Mock(spec=['login', 'type'])
+        # Set up owner - making it more explicit
+        owner = Mock(spec=['login', 'type'])  # Specify expected attributes
         owner.login = owner_login
         owner.type = owner_type
         repo.owner = owner
         
-        # Set up labels
+        # Set up labels - include gh-store by default unless specified otherwise
         repo_labels = []
         if labels:
             default_labels = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value] \
@@ -356,62 +315,17 @@ def mock_repo_factory(mock_label_factory):
             return label
         repo.create_label = Mock(side_effect=create_label)
         
-        # Store issues by number for consistent retrieval
+        # Set up issues
         repo_issues = issues or []
-        issue_dict = {issue.number: issue for issue in repo_issues}
-        
-        # Set up get_issue to return the same objects as those in get_issues
-        def get_issue_side_effect(number):
-            if number in issue_dict:
-                return issue_dict[number]
-            # If no matching issue found, create a default closed issue
+        def get_issue(number):
+            matching = [i for i in repo_issues if i.number == number]
+            if matching:
+                return matching[0]
             mock_issue = Mock()
             mock_issue.state = "closed"
-            mock_issue.number = number
-            # Setup empty comments list
-            mock_issue.get_comments = Mock(return_value=[])
             return mock_issue
-        
-        repo.get_issue = Mock(side_effect=get_issue_side_effect)
-        
-        # Enhanced get_issues that filters based on params and maintains consistency
-        def get_issues_side_effect(**kwargs):
-            filtered_issues = list(repo_issues)  # Start with all issues
-            
-            # Filter by state if specified
-            if 'state' in kwargs:
-                filtered_issues = [i for i in filtered_issues if i.state == kwargs['state']]
-            
-            # Filter by labels if specified
-            if 'labels' in kwargs and kwargs['labels']:
-                # For each issue, check if it has all the required labels
-                label_filtered = []
-                for issue in filtered_issues:
-                    issue_label_names = [getattr(label, 'name', label) for label in issue.labels]
-                    if all(label in issue_label_names for label in kwargs['labels']):
-                        label_filtered.append(issue)
-                filtered_issues = label_filtered
-            
-            # Apply 'since' filter if specified
-            if 'since' in kwargs and kwargs['since']:
-                since = kwargs['since']
-                filtered_issues = [i for i in filtered_issues if getattr(i, 'updated_at', datetime.now()) > since]
-            
-            return filtered_issues
-        
-        repo.get_issues = Mock(side_effect=get_issues_side_effect)
-        
-        # Method to add issues consistently to both the list and dictionary
-        def add_issue(issue):
-            repo_issues.append(issue)
-            issue_dict[issue.number] = issue
-        
-        # Add this method to the repo mock for test use
-        repo.add_issue = add_issue
-        
-        # Add issues if provided
-        for issue in repo_issues:
-            issue_dict[issue.number] = issue
+        repo.get_issue = Mock(side_effect=get_issue)
+        repo.get_issues = Mock(return_value=repo_issues)
         
         # Set up CODEOWNERS handling
         def get_contents(path: str) -> Mock:
