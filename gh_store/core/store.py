@@ -22,11 +22,18 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 class GitHubStore:
     """Interface for storing and retrieving objects using GitHub Issues"""
     
-    def __init__(self, repo: str, token: str|None = None,  config_path: Path | None = None):
+    def __init__(
+        self, 
+        repo: str, 
+        token: str|None = None,
+        config_path: Path | None = None,
+        max_concurrent_updates: int = 2, # upper limit number of comments to be processed on an issue before we stop adding updates
+    ):
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
         self.access_control = AccessControl(self.repo)
+        self.max_concurrent_updates = max_concurrent_updates
         
         config_path = config_path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
@@ -55,13 +62,19 @@ class GitHubStore:
     def update(self, object_id: str, changes: Json) -> StoredObject:
         """Update an existing object"""
         # Check if object is already being processed
-        issues = list(self.repo.get_issues(
+        open_issue = next(self.repo.get_issues(
             labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
             state="open"
         ))
-        
-        if issues:
-            raise ConcurrentUpdateError(f"Object {object_id} is currently being processed")
+
+        if open_issue:
+            issue_number = open_issue.meta.issue_number
+            # count open comments, check against self.max_concurrent_updates
+            n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
+            if n_concurrent_updates > self.max_concurrent_updates:
+                raise ConcurrentUpdateError(
+                    f"Object {object_id} already has {n_concurrent_updates} updates queued to be processed"
+                )
         
         return self.issue_handler.update_object(object_id, changes)
 
