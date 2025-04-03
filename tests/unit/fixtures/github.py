@@ -159,6 +159,47 @@ def mock_comment_factory():
 mock_comment = mock_comment_factory
 
 
+class MockPaginatedList:
+    """
+    Mock implementation of PyGithub's PaginatedList for testing.
+    
+    This class implements the iterator protocol to allow iteration over mock items
+    in tests, mimicking the behavior of PyGithub's PaginatedList class.
+    
+    Example usage:
+        comments = [mock_comment_factory(...), mock_comment_factory(...)]
+        issue.get_comments.return_value = MockPaginatedList(comments)
+        
+        # Now you can iterate over comments:
+        for comment in issue.get_comments():
+            # Do something with comment
+    """
+    def __init__(self, items):
+        """Initialize with list of items."""
+        self.items = items
+        
+    def __iter__(self):
+        """Make this class iterable."""
+        return iter(self.items)
+        
+    def __getitem__(self, index):
+        """Support indexing operations."""
+        return self.items[index]
+        
+    def __len__(self):
+        """Support len() function."""
+        return len(self.items)
+        
+    def get_page(self, page_number):
+        """Mock paginated access."""
+        # Simplified implementation - in real API this would use page size
+        return self.items
+        
+    def totalCount(self):
+        """Mock totalCount property of PaginatedList."""
+        return len(self.items)
+
+
 @pytest.fixture
 def mock_issue_factory(mock_comment_factory, mock_label_factory):
     """
@@ -231,12 +272,10 @@ def mock_issue_factory(mock_comment_factory, mock_label_factory):
         if labels:
             for label_name in labels:
                 issue.labels.append(mock_label_factory(label_name))
-                #issue.labels.append(label_name)
         
-        
-        # Set up comments
+        # Set up comments - use MockPaginatedList for proper iteration
         mock_comments = list(comments) if comments is not None else []
-        issue.get_comments = Mock(return_value=mock_comments)
+        issue.get_comments = Mock(return_value=MockPaginatedList(mock_comments))
         issue.create_comment = Mock()
 
         # Set up proper owner permissions
