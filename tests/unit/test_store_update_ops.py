@@ -36,7 +36,7 @@ def test_process_update(store, mock_issue_factory):
     # Verify issue reopened
     mock_issue.edit.assert_called_with(state="open")
 
-def test_concurrent_update_prevention(store, mock_issue_factory):
+def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_factory):
     """Test that concurrent updates are prevented"""
     def open_issue_with_n_comments(n):
         return mock_issue_factory(
