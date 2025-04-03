@@ -61,6 +61,7 @@ def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_fa
         return []
     
     store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issues.return_value = [mock_issue]
     # The critical line - ensure get_issue returns the same mock object
     store.repo.get_issue.return_value = mock_issue
     
