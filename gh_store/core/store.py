@@ -62,14 +62,14 @@ class GitHubStore:
     def update(self, object_id: str, changes: Json) -> StoredObject:
         """Update an existing object"""
         # Check if object is already being processed
-        open_issue = self.repo.get_issues(
+        open_issue = None
+        for open_issue in self.repo.get_issues(
             labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
-            state="open"
-        )[0] # TODO: use canonicalization machinery?
-
-        if open_issue:
+            state="open") # TODO: use canonicalization machinery?
+            break
+        
+        if open_issue: # count open comments, check against self.max_concurrent_updates
             issue_number = open_issue.meta.issue_number
-            # count open comments, check against self.max_concurrent_updates
             n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
             if n_concurrent_updates > self.max_concurrent_updates:
                 raise ConcurrentUpdateError(
