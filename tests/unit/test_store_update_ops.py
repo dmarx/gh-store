@@ -38,15 +38,30 @@ def test_process_update(store, mock_issue_factory):
 
 def test_concurrent_update_prevention(store, mock_issue_factory):
     """Test that concurrent updates are prevented"""
-    mock_issue = mock_issue_factory(state="open")
-    
-    def get_issues_side_effect(**kwargs):
-        if kwargs.get("state") == "open":
-            return [mock_issue]  # Return open issue to simulate processing
-        return []
-    
-    store.repo.get_issues.side_effect = get_issues_side_effect
-    
+    def open_issue_with_n_comments(n):
+        return mock_issue_factory(
+            state="open",
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=i
+                ) for i in range n]
+        )
+
+    def set_store_with_issue_n_comments(n):
+        mock_issue = open_issue_with_n_comments(n)
+        def get_issues_side_effect(**kwargs):
+            if kwargs.get("state") == "open":
+                return [mock_issue]  # Return open issue to simulate processing
+            return []
+        
+        store.repo.get_issues.side_effect = get_issues_side_effect
+
+    set_store_with_issue_n_comments(1)
+    store.update("test-obj", {"value": 43})
+    set_store_with_issue_n_comments(2)
+    store.update("test-obj", {"value": 43})
+    set_store_with_issue_n_comments(3)
     with pytest.raises(ConcurrentUpdateError):
         store.update("test-obj", {"value": 43})
 
