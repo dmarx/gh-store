@@ -1,0 +1,546 @@
+---
+File: gh_store/core/access.py
+---
+# gh_store/core/access.py
+
+from typing import TypedDict, Set
+from pathlib import Path
+import re
+from github import Repository, Issue, IssueComment, GithubException
+from loguru import logger
+
+class UserInfo(TypedDict):
+    login: str
+    type: str
+
+class AccessControl:
+    """Handles access control validation for GitHub store operations"""
+    
+    CODEOWNERS_PATHS = [
+        '.github/CODEOWNERS',
+        'docs/CODEOWNERS',
+        'CODEOWNERS'
+    ]
+    
+    def __init__(self, repo: Repository.Repository):
+        self.repo = repo
+        self._owner_info: UserInfo | None = None
+        self._codeowners: Set[str] | None = None
+
+    def _get_owner_info(self) -> UserInfo:
+        """Get repository owner information, caching the result"""
+        if not self._owner_info:
+            #owner = self.repo._owner
+            owner = self.repo.owner
+            # PyGithub returns ValuedAttribute objects, so we need to get their values
+            self._owner_info = {
+                'login': str(owner.login),  # Convert to string to ensure we have a plain value
+                'type': str(owner.type)
+            }
+        return self._owner_info
+
+    def _get_codeowners(self) -> Set[str]:
+        """Parse CODEOWNERS file and extract authorized users"""
+        if self._codeowners is not None:
+            return self._codeowners
+
+        content = self._find_codeowners_file()
+        if not content:
+            return set()
+
+        self._codeowners = self._parse_codeowners_content(content)
+        return self._codeowners
+    
+    def _find_codeowners_file(self) -> str | None:
+        """Find and read the CODEOWNERS file content"""
+        for path in self.CODEOWNERS_PATHS:
+            try:
+                content = self.repo.get_contents(path)
+                if content:
+                    return content.decoded_content.decode('utf-8')
+            except GithubException:
+                logger.debug(f"No CODEOWNERS found at {path}")
+        return None
+    
+    def _parse_codeowners_content(self, content: str) -> Set[str]:
+        """Parse CODEOWNERS content and extract authorized users"""
+        codeowners = set()
+        
+        for line in content.splitlines():
+            if self._should_skip_line(line):
+                continue
+                
+            codeowners.update(self._extract_users_from_line(line))
+                
+        return codeowners
+    
+    def _should_skip_line(self, line: str) -> bool:
+        """Check if line should be skipped (empty or comment)"""
+        line = line.strip()
+        return not line or line.startswith('#')
+    
+    def _extract_users_from_line(self, line: str) -> Set[str]:
+        """Extract user and team names from a CODEOWNERS line"""
+        users = set()
+        parts = line.split()
+        
+        # Skip the path (first element)
+        for part in parts[1:]:
+            if part.startswith('@'):
+                owner = part[1:]  # Remove @ prefix
+                if '/' in owner:
+                    # Handle team syntax (@org/team)
+                    users.update(self._get_team_members(owner))
+                else:
+                    users.add(owner)
+                    
+        return users
+    
+    def _get_team_members(self, team_spec: str) -> Set[str]:
+        """Get members of a team from GitHub API"""
+        try:
+            org, team = team_spec.split('/')
+            team_obj = self.repo.organization.get_team_by_slug(team)
+            return {member.login for member in team_obj.get_members()}
+        except Exception as e:
+            logger.warning(f"Failed to fetch team members for {team_spec}: {e}")
+            return set()
+
+    def _is_authorized(self, username: str | None) -> bool:
+        """Check if a user is authorized (owner or in CODEOWNERS)"""
+        if not username:
+            return False
+            
+        # Repository owner is always authorized
+        owner = self._get_owner_info()
+        if username == owner['login']:
+            return True
+            
+        # Check CODEOWNERS
+        codeowners = self._get_codeowners()
+        return username in codeowners
+
+    def validate_issue_creator(self, issue: Issue.Issue) -> bool:
+        """Check if issue was created by authorized user"""
+        creator = issue.user.login if issue.user else None
+        
+        if not self._is_authorized(creator):
+            logger.warning(
+                f"Unauthorized creator for issue #{issue.number}: {creator}"
+            )
+            return False
+            
+        return True
+
+    def validate_comment_author(self, comment: IssueComment.IssueComment) -> bool:
+        """Check if comment was created by authorized user"""
+        author = comment.user.login if comment.user else None
+        
+        if not self._is_authorized(author):
+            logger.warning(
+                f"Unauthorized author for comment {comment.id}: {author}"
+            )
+            return False
+            
+        return True
+
+    def clear_cache(self) -> None:
+        """Clear cached owner and CODEOWNERS information"""
+        self._owner_info = None
+        self._codeowners = None
+
+
+
+---
+File: gh_store/core/constants.py
+---
+# gh_store/core/constants.py
+
+from enum import StrEnum # python 3.11
+
+class LabelNames(StrEnum):
+    """
+    Constants for label names used by the gh-store system.
+    
+    Using str as a base class allows the enum values to be used directly as strings
+    while still maintaining the benefits of an enumeration.
+    """
+    GH_STORE = "gh-store"  # System namespace label
+    STORED_OBJECT = "stored-object"  # Active object label
+    DEPRECATED = "deprecated-object"  # Deprecated object label
+    UID_PREFIX = "UID:"  # Prefix for unique identifier labels
+    ALIAS_TO_PREFIX = "ALIAS-TO:"  # Prefix for alias labels
+    MERGED_INTO_PREFIX = "MERGED-INTO:"  # Prefix for merged object labels
+    DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # Prefix for referencing canonical issue
+    DELETED = "archived"
+    
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
+
+
+class DeprecationReason(StrEnum):
+    """Constants for deprecation reasons stored in metadata."""
+    DUPLICATE = "duplicate"
+    MERGED = "merged"
+    REPLACED = "replaced"
+    
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
+
+
+
+---
+File: gh_store/core/exceptions.py
+---
+# gh_store/core/exceptions.py
+
+class GitHubStoreError(Exception):
+    """Base exception for GitHub store errors"""
+    pass
+
+class ObjectNotFound(GitHubStoreError):
+    """Raised when attempting to access a non-existent object"""
+    pass
+
+class InvalidUpdate(GitHubStoreError):
+    """Raised when an update comment contains invalid JSON or schema"""
+    pass
+
+class ConcurrentUpdateError(GitHubStoreError):
+    """Raised when concurrent updates are detected"""
+    pass
+
+class ConfigurationError(GitHubStoreError):
+    """Raised when there's an error in the store configuration"""
+    pass
+
+class DuplicateUIDError(GitHubStoreError):
+    """Raised when multiple issues have the same UID label"""
+    pass
+
+class AccessDeniedError(GitHubStoreError):
+    pass
+
+
+
+---
+File: gh_store/core/store.py
+---
+# gh_store/core/store.py
+
+from collections.abc import Iterator
+from datetime import datetime
+from pathlib import Path
+import importlib.resources
+
+from loguru import logger
+from github import Github
+from omegaconf import OmegaConf
+
+from ..core.access import AccessControl
+from ..core.constants import LabelNames
+from ..handlers.issue import IssueHandler
+from ..handlers.comment import CommentHandler
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
+from .types import StoredObject, Update, Json
+
+
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
+
+class GitHubStore:
+    """Interface for storing and retrieving objects using GitHub Issues"""
+    
+    def __init__(
+        self, 
+        repo: str, 
+        token: str|None = None,
+        config_path: Path | None = None,
+        max_concurrent_updates: int = 2, # upper limit number of comments to be processed on an issue before we stop adding updates
+    ):
+        """Initialize the store with GitHub credentials and optional config"""
+        self.gh = Github(token)
+        self.repo = self.gh.get_repo(repo)
+        self.access_control = AccessControl(self.repo)
+        self.max_concurrent_updates = max_concurrent_updates
+        
+        config_path = config_path or DEFAULT_CONFIG_PATH
+        if not config_path.exists():
+            # If default config doesn't exist, but we have a packaged default, use that
+            if config_path == DEFAULT_CONFIG_PATH:
+                with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as f:
+                    self.config = OmegaConf.load(f)
+            else:
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+        else:
+            self.config = OmegaConf.load(config_path)
+        
+        self.issue_handler = IssueHandler(self.repo, self.config)
+        self.comment_handler = CommentHandler(self.repo, self.config)
+        
+        logger.info(f"Initialized GitHub store for repository: {repo}")
+
+    def create(self, object_id: str, data: Json) -> StoredObject:
+        """Create a new object in the store"""
+        return self.issue_handler.create_object(object_id, data)
+
+    def get(self, object_id: str) -> StoredObject:
+        """Retrieve an object from the store"""
+        return self.issue_handler.get_object(object_id)
+
+    def update(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an existing object"""
+        # Check if object is already being processed
+        open_issue = None
+        for open_issue in self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
+            state="open"): # TODO: use canonicalization machinery?
+            break
+        
+        if open_issue: # count open comments, check against self.max_concurrent_updates
+            issue_number = open_issue.meta.issue_number
+            n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
+            if n_concurrent_updates > self.max_concurrent_updates:
+                raise ConcurrentUpdateError(
+                    f"Object {object_id} already has {n_concurrent_updates} updates queued to be processed"
+                )
+        
+        return self.issue_handler.update_object(object_id, changes)
+
+    def delete(self, object_id: str) -> None:
+        """Delete an object from the store"""
+        self.issue_handler.delete_object(object_id)
+        
+    def process_updates(self, issue_number: int) -> StoredObject:
+        """Process any unhandled updates on an issue"""
+        logger.info(f"Processing updates for issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        if not self.access_control.validate_issue_creator(issue):
+            raise AccessDeniedError(
+                "Updates can only be processed for issues created by "
+                "repository owner or authorized CODEOWNERS"
+            )
+        
+        # Get all unprocessed comments - this handles comment-level auth
+        updates = self.comment_handler.get_unprocessed_updates(issue_number)
+        
+        # Apply updates in sequence
+        obj = self.issue_handler.get_object_by_number(issue_number)
+        for update in updates:
+            obj = self.comment_handler.apply_update(obj, update)
+        
+        # Persist final state and mark comments as processed
+        self.issue_handler.update_issue_body(issue_number, obj)
+        self.comment_handler.mark_processed(issue_number, updates)
+        
+        return obj
+    
+    def list_all(self) -> Iterator[StoredObject]:
+        """List all objects in the store, indexed by object ID"""
+        logger.info("Fetching all stored objects")
+        
+        # Get all closed issues with base label (active objects)
+        issues_generator = self.repo.get_issues(
+            state="closed",
+            labels=[LabelNames.GH_STORE, self.config.store.base_label]
+        )
+        
+        for idx, issue in enumerate(issues_generator):
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+            try:
+                yield StoredObject.from_issue(issue)
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")        
+        logger.info(f"Found {idx+1} stored objects")
+    
+    def list_updated_since(self, timestamp: datetime) -> Iterator[StoredObject]:
+        """
+        List objects updated since given timestamp.
+
+        The main purpose of this function is for delta updating snapshots.
+        The use of "updated" here specifically refers to updates *which have already been processed*
+        with respect to the "view" on the object provided by the issue description body, i.e. it
+        only fetches closed issued.
+        
+        Issues that have updates pending processing (i.e. which are open and have unreacted update comments) 
+        are processed on an issue-by-issue basis by `GitHubStore.process_updates`.
+        """
+        logger.info(f"Fetching objects updated since {timestamp}")
+        
+        # Get all objects with base label that are closed (active objects)
+        # on the `since` parameter:
+        #     "Only show results that were last updated after the given time. This is a timestamp in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ."
+        # https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
+        issues_generator = self.repo.get_issues(
+            state="closed",
+            labels=[LabelNames.GH_STORE, self.config.store.base_label],
+            since=timestamp 
+        )
+    
+        found_count = 0
+        yielded_count = 0
+                    
+        for idx, issue in enumerate(issues_generator):
+            found_count += 1
+            # Skip archived issues
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+                
+            try:
+                obj = StoredObject.from_issue(issue)
+                # Double check the timestamp (since GitHub's since parameter includes issues with comments after the timestamp)
+                if obj.meta.updated_at > timestamp:
+                    yielded_count += 1
+                    yield obj
+                else:
+                    logger.debug(f"Skipping issue #{issue.number}: last updated at {obj.meta.updated_at}, before {timestamp}")
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {found_count} issues, yielded {yielded_count} updated objects")
+        
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object"""
+        return self.issue_handler.get_object_history(object_id)
+
+
+
+---
+File: gh_store/core/types.py
+---
+# gh_store/core/types.py
+
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Self, TypeAlias
+import json
+
+from github import Issue
+
+from .constants import LabelNames
+
+Json: TypeAlias = dict[str, "Json"] | list["Json"] | str | int | float | bool | None
+
+
+# This one method feels like it belongs on the IssueHandler, but really it pairs with StoredObject.from_issue
+def get_object_id_from_labels(issue: Issue) -> str:
+    """
+    Extract bare object ID from issue labels, removing any prefix.
+    
+    Args:
+        issue: GitHub issue object with labels attribute
+        
+    Returns:
+        str: Object ID without prefix
+        
+    Raises:
+        ValueError: If no matching label is found
+    """
+    for label in issue.labels:
+        # Get the actual label name, handling both string and Mock objects
+        # ... or are we just mocking poorly?
+        label_name = getattr(label, 'name', label)
+        
+        if (isinstance(label_name, str) and label_name.startswith(LabelNames.UID_PREFIX)):
+            return label_name[len(LabelNames.UID_PREFIX):]
+            
+    raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
+
+@dataclass
+class ObjectMeta:
+    """Metadata for a stored object"""
+    object_id: str
+    label: str
+    issue_number: int  # Added field to track GitHub issue number
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+@dataclass
+class StoredObject:
+    """An object stored in the GitHub Issues store"""
+    meta: ObjectMeta
+    data: Json
+
+    @classmethod
+    def from_issue(cls, issue: Issue, version: int = 1) -> Self:
+        object_id = get_object_id_from_labels(issue)
+        data = json.loads(issue.body)
+        meta = ObjectMeta(
+            object_id=object_id,
+            label=object_id,
+            issue_number=issue.number,  # Include issue number
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            version=version,
+        )
+        return cls(meta=meta, data=data)
+
+@dataclass
+class Update:
+    """An update to be applied to a stored object"""
+    comment_id: int
+    timestamp: datetime
+    changes: Json
+
+@dataclass
+class CommentMeta:
+    """Metadata included with each comment"""
+    client_version: str
+    timestamp: str
+    update_mode: str
+    issue_number: int  # Added field to track GitHub issue number
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
+
+@dataclass
+class CommentPayload:
+    """Full comment payload structure"""
+    _data: Json
+    _meta: CommentMeta
+    type: str | None = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "_data": self._data,
+            "_meta": self._meta.to_dict(),
+            **({"type": self.type} if self.type is not None else {})
+        }
+
+
+
+---
+File: gh_store/core/version.py
+---
+# gh_store/core/version.py
+import importlib.metadata
+import os
+from pathlib import Path
+
+def get_version() -> str:
+    """Get version from pyproject.toml metadata or fallback to manual version"""
+    try:
+        return importlib.metadata.version("gh-store")
+    except importlib.metadata.PackageNotFoundError:
+        # During development, read directly from pyproject.toml
+        root_dir = Path(__file__).parent.parent.parent
+        pyproject_path = root_dir / "pyproject.toml"
+        
+        if pyproject_path.exists():
+            import tomli
+            with open(pyproject_path, "rb") as f:
+                pyproject = tomli.load(f)
+                return pyproject["project"]["version"]
+        
+        return "0.5.1"  # Fallback version
+
+__version__ = get_version()
+CLIENT_VERSION = __version__
+
+

@@ -1,0 +1,793 @@
+---
+File: .github/workflows/deduplicate.yml
+---
+# .github/workflows/deduplicate.yml
+# Workflow to automatically find and deduplicate objects in gh-store
+
+
+name: Deduplicate Objects
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Run daily at 2:00 UTC
+  push:
+    branches: [ canonicalizer-newlabels ]
+    paths: [ ".github/workflows/deduplicate.yml" ]
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no changes)'
+        type: boolean
+        default: false
+      specific_object:
+        description: 'Process specific object ID only (leave blank for all)'
+        type: string
+        required: false
+
+jobs:
+  deduplicate:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Needed to modify issues
+      contents: read  # Needed to read code
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      
+      - name: Run deduplication tool
+        id: deduplicate
+        run: |
+          echo "Running deduplication process..."
+          
+          # Set up basic command
+          CMD="python -m gh_store.tools.canonicalize --token ${{ secrets.GITHUB_TOKEN }} --repo ${{ github.repository }}"
+          
+          # Check if dry run
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            CMD="$CMD --dry-run"
+            echo "::notice::Running in dry-run mode - no changes will be made"
+          fi
+          
+          # Check if specific object requested
+          if [[ "${{ github.event.inputs.specific_object }}" != "" ]]; then
+            OBJECT_ID="${{ github.event.inputs.specific_object }}"
+            CMD="$CMD --object-id $OBJECT_ID"
+            echo "::notice::Processing specific object: $OBJECT_ID"
+          fi
+          
+          # First find duplicates and capture output
+          echo "Finding duplicates..."
+          FIND_OUTPUT=$(eval "$CMD --find-duplicates" 2>&1)
+          echo "$FIND_OUTPUT"
+          
+          # Check if duplicates found
+          if [[ "$FIND_OUTPUT" == *"No duplicate objects found"* ]]; then
+            echo "::notice::No duplicate objects found!"
+            echo "duplicates_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "duplicates_found=true" >> $GITHUB_OUTPUT
+          fi
+          
+          # Process duplicates
+          echo "Processing duplicates..."
+          DEDUP_OUTPUT=$(eval "$CMD --deduplicate" 2>&1)
+          echo "$DEDUP_OUTPUT"
+          
+          # Extract metrics
+          OBJECTS_PROCESSED=$(echo "$DEDUP_OUTPUT" | grep -o "Processed [0-9]* objects" | grep -o "[0-9]*")
+          if [[ -z "$OBJECTS_PROCESSED" ]]; then
+            OBJECTS_PROCESSED=0
+          fi
+          
+          echo "objects_processed=$OBJECTS_PROCESSED" >> $GITHUB_OUTPUT
+      
+      - name: Create summary
+        if: steps.deduplicate.outputs.duplicates_found == 'true'
+        run: |
+          echo "# Deduplication Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            echo "**DRY RUN** - No changes were made" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "Found duplicates for ${{ steps.deduplicate.outputs.objects_processed }} objects" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deduplication process:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Identified objects with multiple issues" >> $GITHUB_STEP_SUMMARY
+          echo "2. Selected the oldest issue as canonical for each object" >> $GITHUB_STEP_SUMMARY
+          echo "3. Marked other issues as deprecated duplicates" >> $GITHUB_STEP_SUMMARY
+          echo "4. Processed virtual merges to ensure data consistency" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Handle no duplicates
+        if: steps.deduplicate.outputs.duplicates_found == 'false'
+        run: |
+          echo "# Deduplication Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ No duplicate objects found in the repository." >> $GITHUB_STEP_SUMMARY
+
+
+
+---
+File: .github/workflows/lint.yml
+---
+name: Lint
+
+on:
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Check formatting with ruff
+      run: ruff format --check .
+        
+    - name: Lint with ruff
+      run: ruff check .
+        
+    - name: Type check with mypy
+      run: mypy github_store
+
+
+
+---
+File: .github/workflows/live-test.yml
+---
+name: Live Test
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  store-data:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Required for creating/updating issues
+      contents: read # Required for checkout
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        
+    - name: Generate and store random data
+      run: |
+        python - <<EOF
+        from gh_store.core.store import GitHubStore
+        import random
+        from datetime import datetime, timezone
+        import os
+
+        # Initialize store with GitHub token
+        store = GitHubStore(
+            token=os.environ["GITHUB_TOKEN"],
+            repo=os.environ["GITHUB_REPOSITORY"]
+        )
+
+        # Generate random data
+        data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "temperature": round(random.uniform(15.0, 25.0), 2),
+                "humidity": round(random.uniform(40.0, 60.0), 2),
+                "pressure": round(random.uniform(980.0, 1020.0), 2),
+            },
+            "counters": {
+                "visitors": random.randint(100, 1000),
+                "actions": random.randint(500, 5000),
+                "errors": random.randint(0, 50)
+            },
+            "status": random.choice(["green", "yellow", "red"])
+        }
+
+        # Create or update the object
+        try:
+            # Try to update if exists
+            store.update("daily-metrics123", data)
+        except:
+            # Create new if doesn't exist
+            store.create("daily-metrics123", data)
+
+        print("Successfully stored random data")
+        EOF
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  test-public-mode:
+    needs: store-data
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Only need read permissions
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install TypeScript client
+      run: |
+        cd typescript
+        npm install
+        npm run build
+        
+    - name: Run public mode retrieval test
+      run: |
+        cd typescript
+        cat > test-public-mode.cjs << 'EOF'
+        const fs = require('fs');
+        const path = require('path');
+        
+        // Dynamically import the ESM module
+        async function main() {
+          // Use dynamic import to load the ESM module
+          const { GitHubStoreClient } = await import('./dist/index.mjs');
+          
+          try {
+            // Initialize client with null token (public mode)
+            const client = new GitHubStoreClient(null, process.env.GITHUB_REPOSITORY);
+            
+            console.log('Running in public mode:', client.isPublic());
+            
+            // Try to retrieve the object we just created/updated
+            const object = await client.getObject('daily-metrics123');
+            
+            console.log('Successfully retrieved object:');
+            console.log('Object ID:', object.meta.objectId);
+            console.log('Created at:', object.meta.createdAt);
+            console.log('Version:', object.meta.version);
+            console.log('Data sample:', JSON.stringify(object.data).substring(0, 200) + '...');
+            
+            // Try to get object history
+            const history = await client.getObjectHistory('daily-metrics123');
+            console.log('History entries:', history.length);
+            
+            // Validate we received data
+            if (!object.data || !object.meta) {
+              throw new Error('Retrieved object is missing data or metadata');
+            }
+            
+            console.log('Public mode retrieval test passed!');
+            process.exit(0);
+          } catch (error) {
+            console.error('Public mode test failed:', error);
+            process.exit(1);
+          }
+        }
+        
+        main().catch(err => {
+          console.error(err);
+          process.exit(1);
+        });
+        EOF
+        
+        node --experimental-vm-modules test-public-mode.cjs
+
+
+
+---
+File: .github/workflows/llamero-summary.yml
+---
+name: Llamero Summarization
+
+on:
+  #push:
+  workflow_dispatch:
+
+jobs:
+  generate-summaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install llamero
+      run: pip install llamero
+
+    - name: Generate summaries
+      run: llamero summarize all
+
+
+
+---
+File: .github/workflows/merge-objects.yml
+---
+# .github/workflows/merge-objects.yml
+# Workflow for manually merging/aliasing objects in gh-store
+
+name: Merge or Alias Objects
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation type'
+        required: true
+        type: choice
+        options:
+          - create-alias
+          - deprecate-duplicate
+          - deprecate-merged
+          - deprecate-replaced
+      source_id:
+        description: 'Source object ID'
+        required: true
+        type: string
+      target_id:
+        description: 'Target object ID'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (no changes)'
+        type: boolean
+        default: false
+
+jobs:
+  manage-objects:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write  # Needed to modify issues
+      contents: read  # Needed to read code
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      
+      - name: Run object operation
+        id: object_operation
+        run: |
+          echo "Running ${{ github.event.inputs.operation }} on ${{ github.event.inputs.source_id }} -> ${{ github.event.inputs.target_id }}"
+          
+          # Set up basic command
+          CMD="python -m gh_store.tools.canonicalize --token ${{ secrets.GITHUB_TOKEN }} --repo ${{ github.repository }}"
+          CMD="$CMD --source-id ${{ github.event.inputs.source_id }} --target-id ${{ github.event.inputs.target_id }}"
+          
+          # Check if dry run
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            CMD="$CMD --dry-run"
+            echo "::notice::Running in dry-run mode - no changes will be made"
+          fi
+          
+          # Map operation type to command
+          case "${{ github.event.inputs.operation }}" in
+            "create-alias")
+              CMD="$CMD --create-alias"
+              OPERATION_DESC="Creating alias from ${{ github.event.inputs.source_id }} to ${{ github.event.inputs.target_id }}"
+              ;;
+              
+            "deprecate-duplicate")
+              CMD="$CMD --deprecate --reason duplicate"
+              OPERATION_DESC="Deprecating ${{ github.event.inputs.source_id }} as duplicate of ${{ github.event.inputs.target_id }}"
+              ;;
+              
+            "deprecate-merged")
+              CMD="$CMD --deprecate --reason merged"
+              OPERATION_DESC="Deprecating ${{ github.event.inputs.source_id }} as merged into ${{ github.event.inputs.target_id }}"
+              ;;
+              
+            "deprecate-replaced")
+              CMD="$CMD --deprecate --reason replaced"
+              OPERATION_DESC="Deprecating ${{ github.event.inputs.source_id }} as replaced by ${{ github.event.inputs.target_id }}"
+              ;;
+              
+            *)
+              echo "::error::Invalid operation type: ${{ github.event.inputs.operation }}"
+              exit 1
+              ;;
+          esac
+          
+          echo "$OPERATION_DESC"
+          echo "operation_desc=$OPERATION_DESC" >> $GITHUB_OUTPUT
+          
+          # Execute command
+          echo "Executing: $CMD"
+          OUTPUT=$(eval "$CMD" 2>&1)
+          echo "$OUTPUT"
+          
+          # Check for success
+          if [[ "$OUTPUT" == *"success"*"true"* ]]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create summary
+        run: |
+          echo "# Object Operation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            echo "**DRY RUN** - No changes were made" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "Operation: ${{ steps.object_operation.outputs.operation_desc }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.object_operation.outputs.success }}" == "true" ]]; then
+            echo "✅ **Success!** The operation was completed successfully." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Failed!** The operation encountered an error." >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+
+---
+File: .github/workflows/process_update.yml
+---
+# .github/workflows/process_update.yml
+
+name: Process Object Updates
+
+on:
+  issues:
+    types: [reopened]
+
+jobs:
+  process-updates:
+    runs-on: ubuntu-latest
+    if: contains(github.event.issue.labels.*.name, 'stored-object')
+    permissions:
+      issues: write 
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          
+      - name: Process Updates
+        run: |
+          python -m gh_store process-updates \
+            --issue ${{ github.event.issue.number }} \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }}
+
+
+
+---
+File: .github/workflows/release.yml
+---
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release:
+    if: ${{ !startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine tomli
+
+    - name: Verify version sync
+      run: |
+        echo "Checking Python version sync..."
+        pkg_version=$(python -c "import tomli; print(tomli.load(open('pyproject.toml', 'rb'))['project']['version'])")
+        code_version=$(python -c "from gh_store.core.version import __version__; print(__version__)")
+        
+        if [ "$pkg_version" != "$code_version" ]; then
+          echo "Version mismatch: pyproject.toml ($pkg_version) != version.py ($code_version)"
+          exit 1
+        fi
+
+    - name: Build package
+      run: python -m build
+        
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+
+
+---
+File: .github/workflows/snapshot.yml
+---
+name: Snapshot Management
+
+on:
+  # schedule:
+  #   # Run daily at midnight UTC
+  #   - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+    inputs:
+      force_new:
+        description: 'Force creation of new snapshot'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SNAPSHOT_PATH: data/snapshots/store-snapshot.json
+  CONFIG_PATH: config.yml
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed for pushing snapshot changes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Check for existing snapshot
+        id: check_snapshot
+        run: |
+          if [ -f "${{ env.SNAPSHOT_PATH }}" ] && [ "${{ github.event.inputs.force_new }}" != "true" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create new snapshot
+        if: steps.check_snapshot.outputs.exists == 'false'
+        run: |
+          # Ensure directory exists
+          mkdir -p $(dirname ${{ env.SNAPSHOT_PATH }})
+          
+          # Create snapshot using CLI
+          python -m gh_store snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --output ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+
+      - name: Update existing snapshot
+        if: steps.check_snapshot.outputs.exists == 'true'
+        run: |
+          python -m gh_store update-snapshot \
+            --token ${{ secrets.GITHUB_TOKEN }} \
+            --repo ${{ github.repository }} \
+            --snapshot-path ${{ env.SNAPSHOT_PATH }} \
+            --config ${{ env.CONFIG_PATH }}
+            
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "${{ steps.check_snapshot.outputs.exists == 'true' && 'chore: Update data store snapshot' || 'chore: Create initial data store snapshot' }}"
+          file_pattern: "${{ env.SNAPSHOT_PATH }}"
+
+
+
+---
+File: .github/workflows/test.yml
+---
+name: Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+        experimental: [false]
+        include:
+          - python-version: 3.13
+            experimental: true
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        
+    - name: Run tests
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        pytest tests/unit
+
+
+
+---
+File: .github/workflows/typescript.yml
+---
+# .github/workflows/typescript.yml
+name: TypeScript Client
+
+on:
+  push:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main, ts ]
+  pull_request:
+    paths:
+      - 'typescript/**'
+      - '.github/workflows/typescript.yml'
+    branches: [ main ]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    # Skip this job for non-TypeScript releases
+    if: ${{ !github.event.release || startsWith(github.ref_name, 'ts-') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    # Initial clean npm install to generate package-lock.json
+    - name: Initialize npm
+      run: |
+        # Force rebuild of package-lock.json if it exists
+        if [ -f "package-lock.json" ]; then
+          rm -f package-lock.json
+        fi
+        npm install --package-lock-only --no-audit
+        git status
+    
+    # Now setup Node with caching
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+        cache-dependency-path: './typescript/package-lock.json'
+        
+    - name: Install dependencies
+      run: npm ci --prefer-offline
+
+    - name: Sync version
+      run: npm run prebuild
+        
+    - name: Type check
+      run: npm run type-check
+        
+    - name: Lint
+      run: npm run lint
+        
+    - name: Test
+      run: npm run test
+        
+    - name: Build
+      run: npm run build
+
+    # Show build outputs for debugging
+    - name: Show dist contents
+      run: |
+        echo "Dist directory contents:"
+        ls -la dist/
+        echo "Package exports:"
+        cat package.json | jq '.exports'
+
+    # Run packaging test after build
+    - name: Test packaging
+      run: |
+        if [ ! -f "scripts/test-packaging.js" ]; then
+          echo "Error: packaging test script not found"
+          exit 1
+        fi
+        # Run packaging tests after build
+        npm run test:packaging
+    
+    # Only run publish step on releases with a tag starting with 'ts-v'
+    - name: Publish to npm
+      if: ${{ github.event.release && startsWith(github.ref_name, 'ts-') }}
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+

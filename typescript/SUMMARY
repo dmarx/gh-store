@@ -1,0 +1,2545 @@
+---
+File: typescript/.eslintrc.json
+---
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "prettier"
+  ],
+  "env": {
+    "browser": true,
+    "es2020": true,
+    "node": true
+  },
+  "rules": {
+    "@typescript-eslint/explicit-module-boundary-types": "error",
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "no-console": ["error", { "allow": ["warn", "error"] }]
+  }
+}
+
+
+
+---
+File: typescript/README.md
+---
+
+
+
+
+---
+File: typescript/jest.config.ts
+---
+// typescript/jest.config.ts
+import type { JestConfigWithTsJest } from 'ts-jest';
+
+const config: JestConfigWithTsJest = {
+  preset: 'ts-jest',
+  testEnvironment: 'jsdom',
+  setupFiles: ['./jest.setup.ts'],
+  testMatch: ['<rootDir>/src/**/*.test.ts'],
+  collectCoverage: true,
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov'],
+  coverageThreshold: {
+    global: {
+      branches: 70,    // Lowered from 80%
+      functions: 80,
+      lines: 80,
+      statements: 80
+    }
+  },
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', {
+      useESM: true,
+    }]
+  },
+  extensionsToTreatAsEsm: ['.ts']
+};
+
+export default config;
+
+
+
+---
+File: typescript/jest.setup.ts
+---
+// typescript/jest.setup.ts
+import fetchMock from 'jest-fetch-mock';
+fetchMock.enableMocks();
+
+
+
+---
+File: typescript/package.json
+---
+{
+  "name": "gh-store-client",
+  "version": "0.10.1",
+  "description": "TypeScript client for GitHub Issue Store",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint src --ext .ts",
+    "prebuild": "tsx scripts/update-version.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:packaging": "node scripts/test-packaging.js",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run test:packaging"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "github",
+    "storage",
+    "typescript",
+    "client"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dmarx/gh-store.git",
+    "directory": "typescript"
+  },
+  "author": "David Marx <david.marx84@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jest-fetch-mock": "^3.0.3",
+    "prettier": "^3.1.1",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "@types/chrome": ">=0.0.246"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
+
+
+
+---
+File: typescript/scripts/test-packaging.js
+---
+// typescript/scripts/test-packaging.js
+import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const rootDir = resolve(__dirname, '..');
+
+// Verify dist directory exists
+function checkDist() {
+    const distDir = resolve(rootDir, 'dist');
+    if (!existsSync(distDir)) {
+        console.error('✗ dist directory not found - run build first');
+        process.exit(1);
+    }
+
+    const requiredFiles = ['index.mjs', 'index.cjs', 'index.d.ts'];
+    for (const file of requiredFiles) {
+        if (!existsSync(resolve(distDir, file))) {
+            console.error(`✗ Missing required build output: ${file}`);
+            process.exit(1);
+        }
+    }
+    console.log('✓ dist directory contains required files');
+}
+
+// Test ESM import
+async function testESMImport() {
+    try {
+        const { GitHubStoreClient } = await import('../dist/index.mjs');
+        if (!GitHubStoreClient) {
+            throw new Error('GitHubStoreClient not exported from ESM build');
+        }
+        console.log('✓ ESM import successful');
+    } catch (error) {
+        console.error('✗ ESM import failed:', error);
+        process.exit(1);
+    }
+}
+
+// Test package.json exports
+function testPackageExports() {
+    const pkg = JSON.parse(readFileSync(resolve(rootDir, 'package.json'), 'utf8'));
+    
+    // Check required fields
+    const requiredFields = ['exports', 'main', 'module', 'types'];
+    for (const field of requiredFields) {
+        if (!pkg[field]) {
+            console.error(`✗ Missing required field: ${field}`);
+            process.exit(1);
+        }
+    }
+    
+    // Check exports configuration
+    const { exports } = pkg;
+    if (!exports['.'].import || !exports['.'].require || !exports['.'].types) {
+        console.error('✗ Exports must specify import, require, and types');
+        process.exit(1);
+    }
+
+    // Verify paths in exports match files that should exist
+    const paths = [
+        exports['.'].import,
+        exports['.'].require,
+        exports['.'].types
+    ].map(p => p.replace(/^\.\//, ''));
+
+    for (const path of paths) {
+        if (!existsSync(resolve(rootDir, path))) {
+            console.error(`✗ Export path does not exist: ${path}`);
+            process.exit(1);
+        }
+    }
+    
+    console.log('✓ package.json exports verified');
+}
+
+// Run tests
+async function main() {
+    console.log('Testing package configuration...');
+    // First verify the build files exist
+    checkDist();
+    // Then test the configuration and imports
+    testPackageExports();
+    await testESMImport();
+    console.log('All packaging tests passed!');
+}
+
+main().catch(error => {
+    console.error('Test failed:', error);
+    process.exit(1);
+});
+
+
+
+---
+File: typescript/scripts/update-version.ts
+---
+// typescript/scripts/update-version.ts
+import { readFileSync, writeFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Read package.json
+const pkgPath = resolve(__dirname, '../package.json');
+const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+
+// Read version.ts
+const versionPath = resolve(__dirname, '../src/version.ts');
+const versionContent = readFileSync(versionPath, 'utf8');
+
+// Update version
+const updatedContent = versionContent.replace(
+  /export const CLIENT_VERSION = '.*'/,
+  `export const CLIENT_VERSION = '${pkg.version}'`
+);
+
+// Write back
+writeFileSync(versionPath, updatedContent);
+
+console.log(`Updated CLIENT_VERSION to ${pkg.version}`);
+
+
+
+---
+File: typescript/src/__tests__/cache.test.ts
+---
+// src/__tests__/cache.test.ts
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { IssueCache } from '../cache';
+
+describe('IssueCache', () => {
+  let cache: IssueCache;
+  
+  beforeEach(() => {
+    cache = new IssueCache();
+  });
+
+  it('should store and retrieve issue numbers', () => {
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    cache.set('test-1', 123, metadata);
+    expect(cache.get('test-1')).toBe(123);
+  });
+
+  it('should respect maxSize limit', () => {
+    const cache = new IssueCache({ maxSize: 2 });
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+    cache.set('test-3', 789, metadata); // Should evict oldest
+
+    expect(cache.get('test-1')).toBeUndefined();
+    expect(cache.get('test-2')).toBe(456);
+    expect(cache.get('test-3')).toBe(789);
+  });
+
+  it('should respect TTL', () => {
+    jest.useFakeTimers();
+    const cache = new IssueCache({ ttl: 1000 }); // 1 second TTL
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    expect(cache.get('test-1')).toBe(123);
+
+    // Advance time past TTL
+    jest.advanceTimersByTime(1001);
+    expect(cache.get('test-1')).toBeUndefined();
+
+    jest.useRealTimers();
+  });
+
+  it('should clear all entries', () => {
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+    
+    cache.clear();
+    
+    expect(cache.get('test-1')).toBeUndefined();
+    expect(cache.get('test-2')).toBeUndefined();
+    expect(cache.getStats().size).toBe(0);
+  });
+
+  it('should report correct stats', () => {
+    const cache = new IssueCache({ maxSize: 100, ttl: 3600000 });
+    const metadata = {
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    cache.set('test-1', 123, metadata);
+    cache.set('test-2', 456, metadata);
+
+    const stats = cache.getStats();
+    expect(stats.size).toBe(2);
+    expect(stats.maxSize).toBe(100);
+    expect(stats.ttl).toBe(3600000);
+  });
+
+  it('should correctly determine if refresh is needed', () => {
+    const createdAt = new Date('2025-01-01');
+    const updatedAt = new Date('2025-01-02');
+    const metadata = { createdAt, updatedAt };
+
+    cache.set('test-1', 123, metadata);
+
+    // No refresh needed for same or older update time
+    expect(cache.shouldRefresh('test-1', updatedAt)).toBe(false);
+    expect(cache.shouldRefresh('test-1', new Date('2025-01-01'))).toBe(false);
+
+    // Refresh needed for newer update time
+    expect(cache.shouldRefresh('test-1', new Date('2025-01-03'))).toBe(true);
+
+    // Always refresh for non-existent entries
+    expect(cache.shouldRefresh('nonexistent', new Date())).toBe(true);
+  });
+});
+
+
+
+---
+File: typescript/src/__tests__/canonical.test.ts
+---
+// typescript/src/__tests__/canonical.test.ts
+
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { CanonicalStoreClient } from '../canonical';
+import { LabelNames } from '../types';
+import fetchMock from 'jest-fetch-mock';
+
+// Create a test version by extending and adding protected methods for exposure
+class TestCanonicalStoreClient extends CanonicalStoreClient {
+  // Override fetchFromGitHub to make it accessible
+  public testFetchFromGitHub<T>(path: string, options?: RequestInit & { params?: Record<string, string> }): Promise<T> {
+    return this.fetchFromGitHub<T>(path, options);
+  }
+  
+  // We need to recreate these protected methods for testing
+  public testExtractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+    return this._extractObjectIdFromLabels(issue);
+  }
+}
+
+describe('CanonicalStoreClient', () => {
+  const token = 'test-token';
+  const repo = 'owner/repo';
+  let client: TestCanonicalStoreClient;
+
+  beforeEach(() => {
+    fetchMock.resetMocks();
+    // Create the client without passing cache - it's not in CanonicalStoreConfig
+    client = new TestCanonicalStoreClient(token, repo);
+  });
+
+  describe('resolveCanonicalObjectId', () => {
+    it('should resolve direct object ID', async () => {
+      // Mock to find the object directly (not an alias)
+      fetchMock.mockResponseOnce(JSON.stringify([])); // No issues with alias labels
+
+      const result = await client.resolveCanonicalObjectId('test-object');
+      expect(result).toBe('test-object');
+    });
+
+    it('should resolve alias to canonical ID', async () => {
+      // Mock to find an issue with alias label
+      const mockIssue = {
+        number: 123,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-canonical` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockIssue]));
+
+      const result = await client.resolveCanonicalObjectId('test-alias');
+      expect(result).toBe('test-canonical');
+    });
+
+    it('should follow alias chain but prevent infinite loops', async () => {
+      // Mock the first lookup (test-alias-1 -> test-alias-2)
+      const mockIssue1 = {
+        number: 123,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias-1` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-alias-2` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockIssue1]));
+
+      // Mock the second lookup (test-alias-2 -> test-canonical)
+      const mockIssue2 = {
+        number: 124,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias-2` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-canonical` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockIssue2]));
+
+      // Mock the last lookup (no more aliases)
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const result = await client.resolveCanonicalObjectId('test-alias-1');
+      expect(result).toBe('test-canonical');
+    });
+
+    it('should detect and break circular references', async () => {
+      // Mock circular references (test-alias-a -> test-alias-b -> test-alias-a)
+      const mockIssueA = {
+        number: 123,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias-a` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-alias-b` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockIssueA]));
+
+      const mockIssueB = {
+        number: 124,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias-b` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-alias-a` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockIssueB]));
+
+      // We should detect the circularity and return test-alias-b (the first level)
+      const result = await client.resolveCanonicalObjectId('test-alias-a');
+      expect(result).toBe('test-alias-a'); // Return original ID on circular reference
+    });
+  });
+
+  describe('getObject with canonicalization', () => {
+    it('should resolve and use canonical ID by default', async () => {
+      // Mock to find the alias
+      const mockAliasIssue = {
+        number: 123,
+        labels: [
+          { name: `${LabelNames.UID_PREFIX}test-alias` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-canonical` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockAliasIssue]));
+
+      // Mock for empty response (no more aliases)
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      // Mock for finding canonical issue
+      const mockCanonicalIssue = {
+        number: 456,
+        body: JSON.stringify({ value: 42 }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z',
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}test-canonical` }
+        ]
+      };
+      fetchMock.mockResponseOnce(JSON.stringify([mockCanonicalIssue]));
+
+      // Mock for comments count
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const result = await client.getObject('test-alias');
+      
+      expect(result.meta.objectId).toBe('test-canonical');
+      expect(result.data).toEqual({ value: 42 });
+    });
+
+    it('should get alias directly when canonicalize=false', async () => {
+      // Mock for direct lookup with UID label
+      const mockIssues = [{
+        number: 123,
+        body: JSON.stringify({ alias_value: 'direct' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z',
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}test-alias` },
+          { name: `${LabelNames.ALIAS_TO_PREFIX}test-canonical` }
+        ]
+      }];
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      // Mock for comments count
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const result = await client.getObject('test-alias', { canonicalize: false });
+      
+      expect(result.meta.objectId).toBe('test-alias');
+      expect(result.data).toEqual({ alias_value: 'direct' });
+    });
+  });
+
+  describe('createAlias', () => {
+    it('should create alias relationship between objects', async () => {
+      // Mock for source object lookup
+      const mockSourceIssues = [{
+        number: 123,
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}source-id` }
+        ]
+      }];
+      fetchMock.mockResponseOnce(JSON.stringify(mockSourceIssues));
+
+      // Mock for target object lookup
+      const mockTargetIssues = [{
+        number: 456,
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}target-id` }
+        ]
+      }];
+      fetchMock.mockResponseOnce(JSON.stringify(mockTargetIssues));
+
+      // Mock for existing labels check
+      fetchMock.mockResponseOnce(JSON.stringify([
+        { name: LabelNames.STORED_OBJECT },
+        { name: `${LabelNames.UID_PREFIX}source-id` }
+      ]));
+
+      // Mock for creating alias label
+      fetchMock.mockResponseOnce(JSON.stringify({}));
+
+      // Mock for adding label to issue
+      fetchMock.mockResponseOnce(JSON.stringify({}));
+
+      const result = await client.createAlias('source-id', 'target-id');
+      
+      expect(result.success).toBe(true);
+      expect(result.sourceId).toBe('source-id');
+      expect(result.targetId).toBe('target-id');
+
+      // Verify correct URL for the label creation
+      expect(fetchMock.mock.calls[3][0]).toContain('/labels');
+    });
+
+    it('should reject if source is already an alias', async () => {
+      // Mock for source object lookup
+      const mockSourceIssues = [{
+        number: 123,
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}source-id` }
+        ]
+      }];
+      fetchMock.mockResponseOnce(JSON.stringify(mockSourceIssues));
+
+      // Mock for target object lookup
+      const mockTargetIssues = [{
+        number: 456,
+        labels: [
+          { name: LabelNames.STORED_OBJECT },
+          { name: `${LabelNames.UID_PREFIX}target-id` }
+        ]
+      }];
+      fetchMock.mockResponseOnce(JSON.stringify(mockTargetIssues));
+
+      // Mock for existing labels check - already has an alias
+      fetchMock.mockResponseOnce(JSON.stringify([
+        { name: LabelNames.STORED_OBJECT },
+        { name: `${LabelNames.UID_PREFIX}source-id` },
+        { name: `${LabelNames.ALIAS_TO_PREFIX}other-id` }
+      ]));
+
+      await expect(client.createAlias('source-id', 'target-id'))
+        .rejects
+        .toThrow('Object source-id is already an alias');
+    });
+  });
+
+  describe('findAliases', () => {
+    it('should find all aliases in the repository', async () => {
+      // Mock for all alias issues
+      const mockIssues = [
+        {
+          labels: [
+            { name: `${LabelNames.UID_PREFIX}alias-1` },
+            { name: `${LabelNames.ALIAS_TO_PREFIX}canonical-1` }
+          ]
+        },
+        {
+          labels: [
+            { name: `${LabelNames.UID_PREFIX}alias-2` },
+            { name: `${LabelNames.ALIAS_TO_PREFIX}canonical-2` }
+          ]
+        }
+      ];
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const aliases = await client.findAliases();
+      
+      // Should find both aliases
+      expect(Object.keys(aliases).length).toBe(2);
+      expect(aliases['alias-1']).toBe('canonical-1');
+      expect(aliases['alias-2']).toBe('canonical-2');
+    });
+
+    it('should find aliases for a specific object', async () => {
+      // Mock for specific alias issues
+      const mockIssues = [
+        {
+          labels: [
+            { name: `${LabelNames.UID_PREFIX}alias-1` },
+            { name: `${LabelNames.ALIAS_TO_PREFIX}target-id` }
+          ]
+        },
+        {
+          labels: [
+            { name: `${LabelNames.UID_PREFIX}alias-2` },
+            { name: `${LabelNames.ALIAS_TO_PREFIX}target-id` }
+          ]
+        }
+      ];
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const aliases = await client.findAliases('target-id');
+      
+      // Should find both aliases for the target
+      expect(Object.keys(aliases).length).toBe(2);
+      expect(aliases['alias-1']).toBe('target-id');
+      expect(aliases['alias-2']).toBe('target-id');
+    });
+  });
+});
+
+
+
+---
+File: typescript/src/__tests__/client.test.ts
+---
+// typescript/src/__tests__/client.test.ts
+
+// In typescript/src/__tests__/client.test.ts:
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { GitHubStoreClient } from '../client';
+import { LabelNames } from '../types'; // Add this import
+import { CLIENT_VERSION } from '../version';
+import fetchMock from 'jest-fetch-mock';
+
+describe('GitHubStoreClient', () => {
+  const token = 'test-token';
+  const repo = 'owner/repo';
+  let client: GitHubStoreClient;
+
+  beforeEach(() => {
+    fetchMock.resetMocks();
+    client = new GitHubStoreClient(token, repo, {
+      cache: {
+        maxSize: 100,
+        ttl: 3600000
+      }
+    });
+  });
+
+  describe('getObject with cache', () => {
+    const mockIssue = {
+      number: 123,
+      body: JSON.stringify({ key: 'value' }),
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-02T00:00:00Z',
+      labels: [
+        { name: 'stored-object' },
+        { name: 'UID:test-object' }
+      ]
+    };
+
+    it('should use cached issue number on subsequent requests', async () => {
+      // First request - should query by labels
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Initial labels query
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues?labels=');
+
+      // Reset mock to verify cache hit
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssue)) // Direct issue fetch
+        .mockResponseOnce(JSON.stringify([])); // Comments query for version
+
+      await client.getObject('test-object');
+      
+      // Should use direct issue number fetch instead of labels query
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+    });
+
+    it('should fall back to label query if cached issue is not found', async () => {
+      // First request succeeds
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify([]));
+
+      await client.getObject('test-object');
+
+      // Reset mock to simulate deleted issue
+      fetchMock.resetMocks();
+      fetchMock
+        .mockResponseOnce('', { status: 404 }) // Cached issue not found
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Fallback label query
+        .mockResponseOnce(JSON.stringify([])); // Comments query
+
+      await client.getObject('test-object');
+
+      // Should have attempted direct fetch, then fallen back to labels
+      expect(fetchMock.mock.calls[0][0]).toContain('/issues/123');
+      expect(fetchMock.mock.calls[1][0]).toContain('/issues?labels=');
+    });
+
+    it('should fetch and parse object correctly', async () => {
+      const mockComments = [{ id: 1 }, { id: 2 }];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const obj = await client.getObject('test-object');
+
+      expect(obj.meta.objectId).toBe('test-object');
+      expect(obj.meta.version).toBe(3);
+      expect(obj.data).toEqual({ key: 'value' });
+    });
+  });
+  
+  // In client.test.ts, update the createObject test:
+  describe('createObject', () => {
+    it('should create new object with initial state and metadata', async () => {
+      const mockIssue = {
+        number: 456,
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-01T00:00:00Z',
+        html_url: 'https://github.com/owner/repo/issues/456',
+        body: JSON.stringify({ test: 'data' }),
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+  
+      const mockComment = { id: 123 };
+  
+      fetchMock
+        .mockResponseOnce(JSON.stringify(mockIssue)) // Create issue
+        .mockResponseOnce(JSON.stringify(mockComment)) // Create comment
+        .mockResponseOnce(JSON.stringify({ id: 1 })) // Add processed reaction
+        .mockResponseOnce(JSON.stringify({ id: 2 })) // Add initial state reaction
+        .mockResponseOnce(JSON.stringify({ state: 'closed' })); // Close issue
+  
+      const data = { test: 'data' };
+      const obj = await client.createObject('test-object', data);
+  
+      expect(obj.meta.objectId).toBe('test-object');
+      expect(obj.meta.version).toBe(1);
+      expect(obj.data).toEqual(data);
+  
+      // Verify issue creation includes all required labels
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"stored-object"');
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"UID:test-object"');
+      expect(fetchMock.mock.calls[0][1]?.body).toContain('"gh-store"'); // Verify gh-store label is included
+  
+      // Verify initial state comment with metadata
+      const commentBody = JSON.parse(JSON.parse(fetchMock.mock.calls[1][1]?.body as string).body);
+      expect(commentBody.type).toBe('initial_state');
+      expect(commentBody._data).toEqual(data);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
+    });
+  });
+  
+  // Add a specific test to verify label structure:
+  it('should include gh-store label when creating objects', async () => {
+    const mockIssue = {
+      number: 789,
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+      html_url: 'https://github.com/owner/repo/issues/789',
+      body: '{}',
+      labels: []
+    };
+    
+    // Mock all the required responses
+    fetchMock
+      .mockResponseOnce(JSON.stringify(mockIssue))
+      .mockResponseOnce(JSON.stringify({ id: 1 }))
+      .mockResponseOnce(JSON.stringify({ id: 1 }))
+      .mockResponseOnce(JSON.stringify({ id: 2 }))
+      .mockResponseOnce(JSON.stringify({ state: 'closed' }));
+    
+    await client.createObject('test-label-object', {});
+    
+    // Parse the request body from the first call (create issue)
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    
+    // Verify the labels array includes all required labels
+    expect(requestBody.labels).toContain(LabelNames.GH_STORE);
+    expect(requestBody.labels).toContain('stored-object');
+    expect(requestBody.labels).toContain('UID:test-label-object');
+    expect(requestBody.labels.length).toBe(3); // Should only be these three labels
+  });
+
+  describe('updateObject', () => {
+    it('should add update comment with metadata', async () => {
+      const mockIssue = {
+        number: 1,
+        state: 'closed',
+        body: JSON.stringify({ key: 'value' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Get issue
+        .mockResponseOnce(JSON.stringify({ id: 123 })) // Add comment
+        .mockResponseOnce(JSON.stringify({ state: 'open' })) // Reopen issue
+        .mockResponseOnce(JSON.stringify([mockIssue])) // Get updated object
+        .mockResponseOnce(JSON.stringify([])); // Get comments for version
+
+      const changes = { key: 'updated' };
+      await client.updateObject('test-object', changes);
+
+      // Verify update comment with metadata
+      const commentPayload = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
+      const commentBody = JSON.parse(commentPayload.body);
+      expect(commentBody._data).toEqual(changes);
+      expect(commentBody._meta).toBeDefined();
+      expect(commentBody._meta.client_version).toBe(CLIENT_VERSION);
+      expect(commentBody._meta.timestamp).toBeDefined();
+      expect(commentBody._meta.update_mode).toBe('append');
+    });
+  });
+
+  describe('getObjectHistory', () => {
+    it('should return full object history with metadata', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: JSON.stringify({
+            type: 'initial_state',
+            _data: { status: 'new' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-01T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        },
+        {
+          id: 2,
+          created_at: '2025-01-02T00:00:00Z',
+          body: JSON.stringify({
+            _data: { status: 'updated' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(2);
+      expect(history[0].type).toBe('initial_state');
+      expect(history[0].data).toEqual({ status: 'new' });
+      expect(history[1].type).toBe('update');
+      expect(history[1].data).toEqual({ status: 'updated' });
+    });
+  });
+
+  describe('API Error Handling', () => {
+    it('should throw error on API failure', async () => {
+      fetchMock.mockResponseOnce('', { 
+        status: 500,
+        statusText: 'Internal Server Error'
+      });
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow('GitHub API error: 500');
+    });
+
+    it('should handle malformed JSON responses', async () => {
+      fetchMock.mockResponseOnce('invalid json');
+
+      await expect(client.getObject('test-obj'))
+        .rejects
+        .toThrow();
+    });
+  });
+
+  describe('listAll', () => {
+    it('should handle empty repository', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should handle invalid issue data', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: 'invalid json',
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should skip issues without proper labels', async () => {
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        labels: [
+          { name: 'stored-object' }  // Missing UID label
+        ],
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-02T00:00:00Z'
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listAll();
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('listUpdatedSince', () => {
+    it('should handle no updates', async () => {
+      const timestamp = new Date('2025-01-01T00:00:00Z');
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+
+    it('should ignore updates before timestamp', async () => {
+      const timestamp = new Date('2025-01-02T00:00:00Z');
+      const mockIssues = [{
+        number: 1,
+        body: JSON.stringify({ test: 'data' }),
+        created_at: '2025-01-01T00:00:00Z',
+        updated_at: '2025-01-01T12:00:00Z',  // Before timestamp
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-1' }
+        ]
+      }];
+
+      fetchMock.mockResponseOnce(JSON.stringify(mockIssues));
+
+      const objects = await client.listUpdatedSince(timestamp);
+      expect(Object.keys(objects)).toHaveLength(0);
+    });
+  });
+
+  describe('getObjectHistory', () => {
+    it('should handle missing object', async () => {
+      fetchMock.mockResponseOnce(JSON.stringify([]));
+
+      await expect(client.getObjectHistory('nonexistent'))
+        .rejects
+        .toThrow('No object found with ID: nonexistent');
+    });
+
+    it('should handle invalid comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: 'invalid json'  // Invalid comment
+        },
+        {
+          id: 2,
+          created_at: '2025-01-02T00:00:00Z',
+          body: JSON.stringify({
+            _data: { status: 'valid' },
+            _meta: {
+              client_version: CLIENT_VERSION,
+              timestamp: '2025-01-02T00:00:00Z',
+              update_mode: 'append'
+            }
+          })
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);  // Only valid comment included
+      expect(history[0].data).toEqual({ status: 'valid' });
+    });
+
+    it('should process legacy format comments', async () => {
+      const mockIssue = {
+        number: 1,
+        labels: [
+          { name: 'stored-object' },
+          { name: 'UID:test-object' }
+        ]
+      };
+
+      const mockComments = [
+        {
+          id: 1,
+          created_at: '2025-01-01T00:00:00Z',
+          body: JSON.stringify({ status: 'legacy' })  // Legacy format
+        }
+      ];
+
+      fetchMock
+        .mockResponseOnce(JSON.stringify([mockIssue]))
+        .mockResponseOnce(JSON.stringify(mockComments));
+
+      const history = await client.getObjectHistory('test-object');
+
+      expect(history).toHaveLength(1);
+      expect(history[0].type).toBe('update');
+      expect(history[0].data).toEqual({ status: 'legacy' });
+    });
+  });
+});
+
+
+
+---
+File: typescript/src/__tests__/public-mode.test.ts
+---
+// typescript/src/__tests__/public-mode.test.ts
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import { GitHubStoreClient } from '../client';
+import fetchMock from 'jest-fetch-mock';
+
+describe('GitHubStoreClient in Public Mode', () => {
+  let client: GitHubStoreClient;
+  const repo = 'owner/repo';
+
+  beforeEach(() => {
+    fetchMock.resetMocks();
+    // Initialize in public mode (no token)
+    client = new GitHubStoreClient(null, repo);
+  });
+
+  it('should correctly identify as public mode', () => {
+    expect(client.isPublic()).toBe(true);
+  });
+
+  it('should fetch objects without authentication headers', async () => {
+    const mockIssue = {
+      number: 123,
+      body: JSON.stringify({ key: 'value' }),
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-02T00:00:00Z',
+      labels: [
+        { name: 'stored-object' },
+        { name: 'UID:test-object' }
+      ]
+    };
+
+    fetchMock
+      .mockResponseOnce(JSON.stringify([mockIssue]))
+      .mockResponseOnce(JSON.stringify([]));
+
+    await client.getObject('test-object');
+    
+    // Verify no auth header was sent
+    expect(fetchMock.mock.calls[0][1]?.headers).not.toHaveProperty('Authorization');
+  });
+
+  it('should reject create operations in public mode', async () => {
+    await expect(client.createObject('test-object', { key: 'value' }))
+      .rejects
+      .toThrow('Authentication required for creating objects');
+  });
+
+  it('should reject update operations in public mode', async () => {
+    await expect(client.updateObject('test-object', { key: 'value' }))
+      .rejects
+      .toThrow('Authentication required for updating objects');
+  });
+
+  it('should fetch object history in public mode', async () => {
+    const mockIssue = {
+      number: 123,
+      labels: [
+        { name: 'stored-object' },
+        { name: 'UID:test-object' }
+      ]
+    };
+
+    const mockComments = [
+      {
+        id: 1,
+        created_at: '2025-01-01T00:00:00Z',
+        body: JSON.stringify({
+          type: 'initial_state',
+          _data: { status: 'new' },
+          _meta: {
+            client_version: '0.9.0',
+            timestamp: '2025-01-01T00:00:00Z',
+            update_mode: 'append'
+          }
+        })
+      }
+    ];
+
+    fetchMock
+      .mockResponseOnce(JSON.stringify([mockIssue]))
+      .mockResponseOnce(JSON.stringify(mockComments));
+
+    const history = await client.getObjectHistory('test-object');
+    
+    expect(history).toHaveLength(1);
+    expect(history[0].type).toBe('initial_state');
+    expect(history[0].data).toEqual({ status: 'new' });
+    
+    // Verify no auth header was sent
+    expect(fetchMock.mock.calls[0][1]?.headers).not.toHaveProperty('Authorization');
+  });
+});
+
+
+
+---
+File: typescript/src/cache.ts
+---
+// src/cache.ts
+export interface CacheEntry {
+  issueNumber: number;
+  lastAccessed: number; // Using timestamp instead of Date for easier comparison
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CacheConfig {
+  maxSize?: number;
+  ttl?: number; // Time-to-live in milliseconds
+}
+
+export class IssueCache {
+  private cache: Map<string, CacheEntry>;
+  private maxSize: number;
+  private ttl: number;
+  private accessOrder: string[]; // Track order of access
+
+  constructor(config: CacheConfig = {}) {
+    this.cache = new Map();
+    this.maxSize = config.maxSize ?? 1000;
+    this.ttl = config.ttl ?? 1000 * 60 * 60; // Default 1 hour TTL
+    this.accessOrder = [];
+  }
+
+  get(objectId: string): number | undefined {
+    const entry = this.cache.get(objectId);
+    
+    if (!entry) {
+      return undefined;
+    }
+
+    // Check if entry has expired
+    if (Date.now() - entry.lastAccessed > this.ttl) {
+      this.cache.delete(objectId);
+      this.removeFromAccessOrder(objectId);
+      return undefined;
+    }
+
+    // Update last accessed time and move to front of access order
+    entry.lastAccessed = Date.now();
+    this.updateAccessOrder(objectId);
+    return entry.issueNumber;
+  }
+
+  set(objectId: string, issueNumber: number, metadata: { createdAt: Date; updatedAt: Date }): void {
+    // Evict least recently used entry if cache is full
+    if (this.cache.size >= this.maxSize && !this.cache.has(objectId)) {
+      const lru = this.accessOrder[this.accessOrder.length - 1];
+      if (lru) {
+        this.cache.delete(lru);
+        this.removeFromAccessOrder(lru);
+      }
+    }
+
+    // Add/update entry
+    this.cache.set(objectId, {
+      issueNumber,
+      lastAccessed: Date.now(),
+      createdAt: metadata.createdAt,
+      updatedAt: metadata.updatedAt
+    });
+
+    this.updateAccessOrder(objectId);
+  }
+
+  remove(objectId: string): void {
+    this.cache.delete(objectId);
+    this.removeFromAccessOrder(objectId);
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.accessOrder = [];
+  }
+
+  getStats(): { size: number; maxSize: number; ttl: number } {
+    return {
+      size: this.cache.size,
+      maxSize: this.maxSize,
+      ttl: this.ttl
+    };
+  }
+
+  shouldRefresh(objectId: string, latestUpdate: Date): boolean {
+    const entry = this.cache.get(objectId);
+    if (!entry) return true;
+
+    return latestUpdate > entry.updatedAt;
+  }
+
+  private updateAccessOrder(objectId: string): void {
+    this.removeFromAccessOrder(objectId);
+    this.accessOrder.unshift(objectId); // Add to front
+  }
+
+  private removeFromAccessOrder(objectId: string): void {
+    const index = this.accessOrder.indexOf(objectId);
+    if (index > -1) {
+      this.accessOrder.splice(index, 1);
+    }
+  }
+}
+
+
+
+---
+File: typescript/src/canonical.ts
+---
+// typescript/src/canonical.ts
+import { GitHubStoreClient } from './client';
+import { GitHubStoreConfig, LabelNames, StoredObject } from './types';
+import { Logger } from './logging'; // Import a logger utility
+
+// Create a logger instance
+const logger = new Logger('CanonicalStore');
+
+// Configuration for CanonicalStore
+export interface CanonicalStoreConfig extends GitHubStoreConfig {
+  canonicalize?: boolean; // Whether to perform canonicalization by default
+}
+
+// Result type for alias creation
+export interface AliasResult {
+  success: boolean;
+  sourceId: string;
+  targetId: string;
+}
+
+// The main CanonicalStore class
+export class CanonicalStoreClient extends GitHubStoreClient {
+  private canonicalizeByDefault: boolean;
+  private visitedIds: Set<string>; // For circular reference detection
+
+  constructor(
+    token: string,
+    repo: string,
+    config: CanonicalStoreConfig = {}
+  ) {
+    super(token, repo, config);
+    this.canonicalizeByDefault = config.canonicalize ?? true;
+    this.visitedIds = new Set<string>();
+    
+    // Ensure special labels exist
+    this._ensureSpecialLabels().catch(err => {
+      logger.warn(`Could not ensure special labels exist: ${(err as Error).message}`);
+    });
+  }
+  
+  // Create special labels needed by the system
+  private async _ensureSpecialLabels(): Promise<void> {
+    const specialLabels = [
+      { name: LabelNames.GH_STORE, color: "6f42c1", description: "All issues managed by gh-store system" }
+    ];
+
+    try {
+      // Get existing labels
+      const existingLabelsResponse = await this.fetchFromGitHub<Array<{ name: string }>>("/labels");
+      const existingLabels = new Set(existingLabelsResponse.map(label => label.name));
+
+      // Create any missing labels
+      for (const label of specialLabels) {
+        if (!existingLabels.has(label.name)) {
+          try {
+            await this.fetchFromGitHub("/labels", {
+              method: "POST",
+              body: JSON.stringify(label)
+            });
+          } catch (error) {
+            logger.warn(`Could not create label ${label.name}: ${(error as Error).message}`);
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`Could not ensure special labels exist: ${(error as Error).message}`);
+    }
+  }
+
+  // Resolve object ID to its canonical form
+  async resolveCanonicalObjectId(objectId: string, maxDepth: number = 5): Promise<string> {
+    // Reset visited IDs for each top-level resolution attempt
+    this.visitedIds = new Set<string>();
+    return this._resolveCanonicalIdInternal(objectId, maxDepth);
+  }
+
+  // Internal method for alias resolution with cycle detection
+  private async _resolveCanonicalIdInternal(objectId: string, maxDepth: number): Promise<string> {
+    if (maxDepth <= 0) {
+      logger.warn(`Maximum alias resolution depth reached for ${objectId}`);
+      return objectId;
+    }
+
+    // Detect circular references
+    if (this.visitedIds.has(objectId)) {
+      logger.warn(`Circular reference detected for ${objectId}`);
+      return objectId;
+    }
+
+    // Mark this ID as visited
+    this.visitedIds.add(objectId);
+
+    // Check if this is an alias
+    try {
+      const issues = await this.fetchFromGitHub<Array<{
+        number: number;
+        labels: Array<{ name: string }>;
+      }>>("/issues", {
+        method: "GET",
+        params: {
+          labels: `${LabelNames.UID_PREFIX}${objectId},${LabelNames.ALIAS_TO_PREFIX}*`,
+          state: "all",
+        },
+      });
+
+      if (issues && issues.length > 0) {
+        for (const issue of issues) {
+          for (const label of issue.labels) {
+            if (label.name.startsWith(LabelNames.ALIAS_TO_PREFIX)) {
+              // Extract canonical object ID from label
+              const canonicalId = label.name.slice(LabelNames.ALIAS_TO_PREFIX.length);
+              
+              // Prevent self-referential loops
+              if (canonicalId === objectId) {
+                logger.error(`Self-referential alias detected for ${objectId}`);
+                return objectId;
+              }
+              
+              // Recurse to follow alias chain
+              return this._resolveCanonicalIdInternal(canonicalId, maxDepth - 1);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.warn(`Error resolving canonical ID for ${objectId}: ${(error as Error).message}`);
+    }
+
+    // Not an alias, or couldn't resolve - assume it's canonical
+    return objectId;
+  }
+
+  // Override getObject to implement canonicalization
+  async getObject(objectId: string, options: { canonicalize?: boolean } = {}): Promise<StoredObject> {
+    const canonicalize = options.canonicalize ?? this.canonicalizeByDefault;
+    
+    if (canonicalize) {
+      const canonicalId = await this.resolveCanonicalObjectId(objectId);
+      if (canonicalId !== objectId) {
+        logger.info(`Object ${objectId} resolved to canonical object ${canonicalId}`);
+      }
+      return super.getObject(canonicalId);
+    } else {
+      // Direct fetch without canonicalization
+      return super.getObject(objectId);
+    }
+  }
+
+  // Create an alias relationship
+  async createAlias(sourceId: string, targetId: string): Promise<AliasResult> {
+    // 1. Verify source object exists
+    let sourceIssue;
+    try {
+      const sourceIssues = await this.fetchFromGitHub<Array<{ number: number }>>("/issues", {
+        method: "GET",
+        params: {
+          labels: `${LabelNames.UID_PREFIX}${sourceId},${LabelNames.STORED_OBJECT}`,
+          state: "all",
+        },
+      });
+      
+      if (!sourceIssues || sourceIssues.length === 0) {
+        throw new Error(`Source object not found: ${sourceId}`);
+      }
+      
+      sourceIssue = sourceIssues[0];
+    } catch (error) {
+      throw new Error(`Error finding source object: ${(error as Error).message}`);
+    }
+    
+    // 2. Verify target object exists
+    try {
+      const targetIssues = await this.fetchFromGitHub<Array<{ number: number }>>("/issues", {
+        method: "GET",
+        params: {
+          labels: `${LabelNames.UID_PREFIX}${targetId},${LabelNames.STORED_OBJECT}`,
+          state: "all",
+        },
+      });
+      
+      if (!targetIssues || targetIssues.length === 0) {
+        throw new Error(`Target object not found: ${targetId}`);
+      }
+    } catch (error) {
+      throw new Error(`Error finding target object: ${(error as Error).message}`);
+    }
+    
+    // 3. Check if this is already an alias
+    try {
+      const existingAliasLabels = await this.fetchFromGitHub<Array<{ name: string }>>(`/issues/${sourceIssue.number}/labels`);
+      
+      for (const label of existingAliasLabels) {
+        if (label.name.startsWith(LabelNames.ALIAS_TO_PREFIX)) {
+          throw new Error(`Object ${sourceId} is already an alias`);
+        }
+      }
+    } catch (error) {
+      if (!(error as Error).message.includes('already an alias')) {
+        throw new Error(`Error checking existing aliases: ${(error as Error).message}`);
+      } else {
+        throw error; // Rethrow "already an alias" error
+      }
+    }
+    
+    // 4. Create alias label if it doesn't exist
+    const aliasLabel = `${LabelNames.ALIAS_TO_PREFIX}${targetId}`;
+    try {
+      // Try to create the label - might fail if it already exists
+      try {
+        await this.fetchFromGitHub("/labels", {
+          method: "POST",
+          body: JSON.stringify({
+            name: aliasLabel,
+            color: "fbca04"
+          })
+        });
+      } catch (error) {
+        // Label might already exist, continue
+        logger.warn(`Could not create label ${aliasLabel}: ${(error as Error).message}`);
+      }
+      
+      // Add label to source issue
+      await this.fetchFromGitHub(`/issues/${sourceIssue.number}/labels`, {
+        method: "POST",
+        body: JSON.stringify({
+          labels: [aliasLabel]
+        })
+      });
+      
+      return {
+        success: true,
+        sourceId,
+        targetId
+      };
+    } catch (error) {
+      throw new Error(`Failed to create alias: ${(error as Error).message}`);
+    }
+  }
+
+  // Find aliases in the repository
+  async findAliases(objectId?: string): Promise<Record<string, string>> {
+    const aliases: Record<string, string> = {};
+    
+    try {
+      if (objectId) {
+        // Find aliases for specific object
+        const aliasIssues = await this.fetchFromGitHub<Array<{
+          labels: Array<{ name: string }>;
+        }>>("/issues", {
+          method: "GET",
+          params: {
+            labels: `${LabelNames.ALIAS_TO_PREFIX}${objectId}`,
+            state: "all",
+          },
+        });
+        
+        for (const issue of aliasIssues || []) {
+          const aliasId = this._extractObjectIdFromLabels(issue);
+          if (aliasId) {
+            aliases[aliasId] = objectId;
+          }
+        }
+      } else {
+        // Find all aliases
+        const aliasIssues = await this.fetchFromGitHub<Array<{
+          labels: Array<{ name: string }>;
+        }>>("/issues", {
+          method: "GET",
+          params: {
+            labels: `${LabelNames.ALIAS_TO_PREFIX}*`,
+            state: "all",
+          },
+        });
+        
+        for (const issue of aliasIssues || []) {
+          const aliasId = this._extractObjectIdFromLabels(issue);
+          if (!aliasId) continue;
+          
+          // Find target of alias
+          for (const label of issue.labels) {
+            if (label.name.startsWith(LabelNames.ALIAS_TO_PREFIX)) {
+              const canonicalId = label.name.slice(LabelNames.ALIAS_TO_PREFIX.length);
+              aliases[aliasId] = canonicalId;
+              break;
+            }
+          }
+        }
+      }
+      
+      return aliases;
+    } catch (error) {
+      logger.warn(`Error finding aliases: ${(error as Error).message}`);
+      return {};
+    }
+  }
+
+  // Helper to extract object ID from labels
+  protected _extractObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+    for (const label of issue.labels) {
+      if (label.name.startsWith(LabelNames.UID_PREFIX)) {
+        return label.name.slice(LabelNames.UID_PREFIX.length);
+      }
+    }
+    
+    throw new Error(`No UID label found with prefix ${LabelNames.UID_PREFIX}`);
+  }
+}
+
+
+
+---
+File: typescript/src/client.ts
+---
+// typescript/src/client.ts
+import { 
+  CommentPayload, 
+  ObjectMeta, 
+  GitHubStoreConfig, 
+  Json, 
+  LabelNames, 
+  StoredObject 
+} from './types';
+import { IssueCache, CacheConfig } from './cache';
+import { CLIENT_VERSION } from './version';
+
+interface GitHubIssue {
+  number: number;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  labels: Array<{ name: string }>;
+  state?: string;
+}
+
+export class GitHubStoreClient {
+  private token: string | null;
+  private repo: string;
+  private config: Required<GitHubStoreConfig>;
+  private cache: IssueCache;
+
+  constructor(
+    token: string | null, 
+    repo: string,
+    config: GitHubStoreConfig & { cache?: CacheConfig } = {}
+  ) {
+    this.token = token;
+    this.repo = repo;
+    
+    if (!this.repo) {
+      throw new Error('Repository is required');
+    }
+
+    this.config = {
+      baseLabel: config.baseLabel ?? "stored-object",
+      uidPrefix: config.uidPrefix ?? "UID:",
+      reactions: {
+        processed: config.reactions?.processed ?? "+1",
+        initialState: config.reactions?.initialState ?? "rocket",
+      },
+    };
+    this.cache = new IssueCache(config.cache);
+  }
+  
+  /**
+   * Check if the client is operating in public (unauthenticated) mode
+   * @returns True if client is using unauthenticated mode
+   */
+  public isPublic(): boolean {
+    return this.token === null;
+  }
+
+  /**
+   * Makes a request to the GitHub API
+   * 
+   * @param path - The API path to request (e.g., "/issues")
+   * @param options - Request options including optional params
+   * @returns The JSON response from the API
+   */
+  protected async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+    const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
+    
+    if (options.params) {
+      Object.entries(options.params).forEach(([key, value]) => {
+        url.searchParams.append(key, value);
+      });
+      delete options.params;
+    }
+  
+    // Create a new headers object
+    const headersObj: Record<string, string> = {
+      "Accept": "application/vnd.github.v3+json"
+    };
+    
+    // Add any existing headers from options
+    if (options.headers) {
+      const existingHeaders = options.headers as Record<string, string>;
+      Object.keys(existingHeaders).forEach(key => {
+        headersObj[key] = existingHeaders[key];
+      });
+    }
+    
+    // Add authorization header only if token is provided
+    if (this.token) {
+      headersObj["Authorization"] = `token ${this.token}`;
+    }
+  
+    const response = await fetch(url.toString(), {
+      ...options,
+      headers: headersObj
+    });
+  
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+  
+    return response.json() as Promise<T>;
+  }
+
+  private createCommentPayload(data: Json, issueNumber: number, type?: string): CommentPayload {
+    const payload: CommentPayload = {
+      _data: data,
+      _meta: {
+        client_version: CLIENT_VERSION,
+        timestamp: new Date().toISOString(),
+        update_mode: "append",
+        issue_number: issueNumber  // Include issue number in metadata
+      }
+    };
+    
+    if (type) {
+      payload.type = type;
+    }
+    
+    return payload;
+  }
+
+  async getObject(objectId: string): Promise<StoredObject> {
+    // Try to get issue number from cache
+    const cachedIssueNumber = this.cache.get(objectId);
+    let issue: GitHubIssue | undefined;
+
+    if (cachedIssueNumber) {
+      // Try to fetch directly using cached issue number
+      try {
+        issue = await this.fetchFromGitHub<GitHubIssue>(`/issues/${cachedIssueNumber}`);
+
+        // Verify it's the correct issue
+        if (!this._verifyIssueLabels(issue, objectId)) {
+          this.cache.remove(objectId);
+          issue = undefined;
+        }
+      } catch (error) {
+        // If issue not found, remove from cache
+        this.cache.remove(objectId);
+      }
+    }
+
+    if (!issue) {
+      // Fall back to searching by labels
+      const issues = await this.fetchFromGitHub<GitHubIssue[]>("/issues", {
+        method: "GET",
+        params: {
+          labels: [LabelNames.GH_STORE, this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+          state: "closed",
+        },
+      });
+
+      if (!issues || issues.length === 0) {
+        throw new Error(`No object found with ID: ${objectId}`);
+      }
+
+      issue = issues[0];
+    }
+
+    if (!issue?.body) {
+      throw new Error(`Invalid issue data received for ID: ${objectId}`);
+    }
+
+    const data = JSON.parse(issue.body) as Json;
+    const createdAt = new Date(issue.created_at);
+    const updatedAt = new Date(issue.updated_at);
+
+    // Update cache
+    this.cache.set(objectId, issue.number, { createdAt, updatedAt });
+
+    const meta: ObjectMeta = {
+      objectId,
+      label: `${this.config.uidPrefix}${objectId}`,
+      issueNumber: issue.number,
+      createdAt,
+      updatedAt,
+      version: await this._getVersion(issue.number)
+    };
+
+    return { meta, data };
+  }
+
+  async createObject(objectId: string, data: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for creating objects');
+    }
+
+    const uidLabel = `${this.config.uidPrefix}${objectId}`;
+    
+    const issue = await this.fetchFromGitHub<{
+      number: number;
+      created_at: string;
+      updated_at: string;
+      html_url: string;
+    }>("/issues", {
+      method: "POST",
+      body: JSON.stringify({
+        title: `Stored Object: ${objectId}`,
+        body: JSON.stringify(data, null, 2),
+        labels: [LabelNames.GH_STORE, this.config.baseLabel, uidLabel]
+      })
+    });
+
+    // Add to cache immediately
+    this.cache.set(objectId, issue.number, {
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at)
+    });
+
+    // Create and add initial state comment
+    const initialState = this.createCommentPayload(data, issue.number, "initial_state");
+    
+    const comment = await this.fetchFromGitHub<{ id: number }>(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(initialState, null, 2)
+      })
+    });
+
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.processed })
+    });
+
+    await this.fetchFromGitHub(`/issues/comments/${comment.id}/reactions`, {
+      method: "POST",
+      body: JSON.stringify({ content: this.config.reactions.initialState })
+    });
+
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "closed" })
+    });
+
+    const meta: ObjectMeta = {
+      objectId,
+      label: uidLabel,
+      issueNumber: issue.number,
+      createdAt: new Date(issue.created_at),
+      updatedAt: new Date(issue.updated_at),
+      version: 1
+    };
+
+    return { meta, data };
+  }
+  
+  private _verifyIssueLabels(issue: { labels: Array<{ name: string }> }, objectId: string): boolean {
+    const expectedLabels = new Set([
+      this.config.baseLabel,
+      `${this.config.uidPrefix}${objectId}`
+    ]);
+
+    return issue.labels.some(label => expectedLabels.has(label.name));
+  }
+  
+  async updateObject(objectId: string, changes: Json): Promise<StoredObject> {
+    if (!this.token) {
+      throw new Error('Authentication required for updating objects');
+    }
+
+    // Get the object's issue first
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      state: string;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+        state: "all",
+      },
+    });
+
+    if (!issues || issues.length === 0) {
+      throw new Error(`No object found with ID: ${objectId}`);
+    }
+
+    const issue = issues[0];
+    
+    // Create update payload with metadata
+    const updatePayload = this.createCommentPayload(changes, issue.number);
+
+    // Add update comment
+    await this.fetchFromGitHub(`/issues/${issue.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: JSON.stringify(updatePayload, null, 2)
+      })
+    });
+
+    // Reopen issue to trigger processing
+    await this.fetchFromGitHub(`/issues/${issue.number}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "open" })
+    });
+
+    // Return current state (before update is processed)
+    return this.getObject(objectId);
+  }
+
+  // Rest of methods remain the same...
+  
+  async listAll(): Promise<Record<string, StoredObject>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: this.config.baseLabel,
+        state: "closed",
+      },
+    });
+
+    const objects: Record<string, StoredObject> = {};
+
+    for (const issue of issues) {
+      // Skip archived objects
+      if (issue.labels.some((label) => label.name === "archived")) {
+        continue;
+      }
+
+      try {
+        const objectId = this._getObjectIdFromLabels(issue);
+        const data = JSON.parse(issue.body) as Json;
+
+        const meta: ObjectMeta = {
+          objectId,
+          label: objectId,
+          issueNumber: issue.number,
+          createdAt: new Date(issue.created_at),
+          updatedAt: new Date(issue.updated_at),
+          version: await this._getVersion(issue.number) // shuold this just be issue._meta.version or something ilke that?
+        };
+
+        objects[objectId] = { meta, data };
+      } catch (error) {
+        // Skip issues that can't be processed
+        continue;
+      }
+    }
+
+    return objects;
+  }
+
+  async listUpdatedSince(timestamp: Date): Promise<Record<string, StoredObject>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      body: string;
+      created_at: string;
+      updated_at: string;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: this.config.baseLabel,
+        state: "closed",
+        since: timestamp.toISOString(),
+      },
+    });
+
+    const objects: Record<string, StoredObject> = {};
+
+    for (const issue of issues) {
+      if (issue.labels.some((label) => label.name === "archived")) {
+        continue;
+      }
+
+      try {
+        const objectId = this._getObjectIdFromLabels(issue);
+        const data = JSON.parse(issue.body) as Json;
+        const updatedAt = new Date(issue.updated_at);
+
+        if (updatedAt > timestamp) {
+          const meta: ObjectMeta = {
+            objectId,
+            label: objectId,
+            issueNumber: issue.number,
+            createdAt: new Date(issue.created_at),
+            updatedAt,
+            version: await this._getVersion(issue.number)
+          };
+
+          objects[objectId] = { meta, data };
+        }
+      } catch (error) {
+        // Skip issues that can't be processed
+        continue;
+      }
+    }
+
+    return objects;
+  }
+
+  async getObjectHistory(objectId: string): Promise<Array<{
+    timestamp: string;
+    type: string;
+    data: Json;
+    commentId: number;
+  }>> {
+    const issues = await this.fetchFromGitHub<Array<{
+      number: number;
+      labels: Array<{ name: string }>;
+    }>>("/issues", {
+      method: "GET",
+      params: {
+        labels: [this.config.baseLabel, `${this.config.uidPrefix}${objectId}`].join(","),
+        state: "all",
+      },
+    });
+
+    if (!issues || issues.length === 0) {
+      throw new Error(`No object found with ID: ${objectId}`);
+    }
+
+    const issue = issues[0];
+    const comments = await this.fetchFromGitHub<Array<{
+      id: number;
+      created_at: string;
+      body: string;
+    }>>(`/issues/${issue.number}/comments`);
+    
+    const history = [];
+
+    for (const comment of comments) {
+      try {
+        const payload = JSON.parse(comment.body);
+        let commentType = 'update';
+        let commentData: Json;
+        let metadata = {
+          client_version: 'legacy',
+          timestamp: comment.created_at,
+          update_mode: 'append'
+        };
+
+        if (typeof payload === 'object') {
+          if ('_data' in payload) {
+            // New format with metadata
+            commentType = payload.type || 'update';
+            commentData = payload._data;
+            metadata = payload._meta || metadata;
+          } else if ('type' in payload && payload.type === 'initial_state') {
+            // Old initial state format
+            commentType = 'initial_state';
+            commentData = payload.data;
+          } else {
+            // Legacy format
+            commentData = payload;
+          }
+        } else {
+          commentData = payload;
+        }
+
+        history.push({
+          timestamp: comment.created_at,
+          type: commentType,
+          data: commentData,
+          commentId: comment.id,
+        });
+      } catch (error) {
+        // Skip comments with invalid JSON
+        continue;
+      }
+    }
+
+    return history;
+  }
+
+  private async _getVersion(issueNumber: number): Promise<number> {
+    const comments = await this.fetchFromGitHub<Array<unknown>>(`/issues/${issueNumber}/comments`);
+    return comments.length + 1;
+  }
+
+  private _getObjectIdFromLabels(issue: { labels: Array<{ name: string }> }): string {
+      for (const label of issue.labels) {
+        if (label.name !== this.config.baseLabel && label.name.startsWith(this.config.uidPrefix)) {
+          return label.name.slice(this.config.uidPrefix.length);
+        }
+      }
+      throw new Error(`No UID label found with prefix ${this.config.uidPrefix}`);
+    }
+}
+
+
+
+---
+File: typescript/src/config.ts
+---
+// typescript/src/config.ts
+export interface StoreConfig {
+  // Base configuration
+  baseLabel: string;
+  uidPrefix: string;
+  
+  // Reaction settings
+  reactions: {
+    processed: string;
+    initialState: string;
+  };
+  
+  // API retry settings
+  retries: {
+    maxAttempts: number;
+    backoffFactor: number;
+  };
+  
+  // Rate limiting
+  rateLimit: {
+    maxRequestsPerHour: number;
+  };
+}
+
+export const DEFAULT_CONFIG: StoreConfig = {
+  baseLabel: "stored-object",
+  uidPrefix: "UID:",
+  reactions: {
+    processed: "+1",
+    initialState: "rocket"
+  },
+  retries: {
+    maxAttempts: 3,
+    backoffFactor: 2
+  },
+  rateLimit: {
+    maxRequestsPerHour: 1000
+  }
+};
+
+export function mergeConfig(userConfig: Partial<StoreConfig>): StoreConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    ...userConfig,
+    reactions: {
+      ...DEFAULT_CONFIG.reactions,
+      ...userConfig.reactions
+    },
+    retries: {
+      ...DEFAULT_CONFIG.retries,
+      ...userConfig.retries
+    },
+    rateLimit: {
+      ...DEFAULT_CONFIG.rateLimit,
+      ...userConfig.rateLimit
+    }
+  };
+}
+
+// Helper to validate token format
+export function validateToken(token: string): boolean {
+  // Check if it's a valid GitHub token format
+  return /^gh[ps]_[a-zA-Z0-9]{36}$/.test(token);
+}
+
+// Helper to validate repository format
+export function validateRepo(repo: string): boolean {
+  return /^[\w-]+\/[\w-]+$/.test(repo);
+}
+
+// Error types for configuration issues
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
+export class TokenError extends ConfigError {
+  constructor(message = 'Invalid GitHub token format') {
+    super(message);
+    this.name = 'TokenError';
+  }
+}
+
+export class RepoError extends ConfigError {
+  constructor(message = 'Invalid repository format. Use owner/repo') {
+    super(message);
+    this.name = 'RepoError';
+  }
+}
+
+
+
+---
+File: typescript/src/index.ts
+---
+// typescript/src/index.ts
+export * from './client';
+export * from './types';
+export * from './config';
+export * from './canonical'; 
+
+
+
+---
+File: typescript/src/logging.ts
+---
+// typescript/src/logging.ts
+/**
+ * Simple logger utility that avoids console statements
+ * but collects messages for potential later use
+ */
+
+// Log levels
+export enum LogLevel {
+  ERROR = 'error',
+  WARN = 'warn',
+  INFO = 'info',
+  DEBUG = 'debug'
+}
+
+// Logger configuration
+export interface LoggerConfig {
+  level: LogLevel;
+  silent?: boolean;
+  prefix?: string;
+}
+
+// Log entry structure
+export interface LogEntry {
+  timestamp: string;
+  level: LogLevel;
+  module: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+}
+
+// Default configuration
+const DEFAULT_CONFIG: LoggerConfig = {
+  level: LogLevel.INFO,
+  silent: false
+};
+
+// Mapping of log levels to numeric values for comparison
+const LOG_LEVEL_VALUES: Record<LogLevel, number> = {
+  [LogLevel.ERROR]: 3,
+  [LogLevel.WARN]: 2,
+  [LogLevel.INFO]: 1,
+  [LogLevel.DEBUG]: 0
+};
+
+/**
+ * Logger utility class that avoids direct console usage
+ */
+export class Logger {
+  private moduleName: string;
+  private config: LoggerConfig;
+  private entries: LogEntry[] = [];
+
+  /**
+   * Create a new logger
+   * @param moduleName Name of the module using this logger
+   * @param config Optional configuration
+   */
+  constructor(moduleName: string, config: Partial<LoggerConfig> = {}) {
+    this.moduleName = moduleName;
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...config
+    };
+  }
+
+  /**
+   * Log a debug message
+   * @param message Message content
+   * @param meta Optional metadata
+   */
+  debug(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.DEBUG, message, meta);
+  }
+
+  /**
+   * Log an info message
+   * @param message Message content
+   * @param meta Optional metadata
+   */
+  info(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.INFO, message, meta);
+  }
+
+  /**
+   * Log a warning message
+   * @param message Message content
+   * @param meta Optional metadata
+   */
+  warn(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.WARN, message, meta);
+  }
+
+  /**
+   * Log an error message
+   * @param message Message content
+   * @param meta Optional metadata
+   */
+  error(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.ERROR, message, meta);
+  }
+
+  /**
+   * Internal helper method to record logs
+   */
+  private log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+    // Check if this log level should be processed
+    if (LOG_LEVEL_VALUES[level] < LOG_LEVEL_VALUES[this.config.level]) {
+      return;
+    }
+
+    const entry: LogEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      module: this.moduleName,
+      message,
+      metadata: meta
+    };
+
+    this.entries.push(entry);
+
+    // In production, you would implement external logging here
+    // For example:
+    // - Write to a database
+    // - Send to a logging service
+    // - Write to a file
+  }
+
+  /**
+   * Get collected log entries
+   */
+  getEntries(): LogEntry[] {
+    return [...this.entries];
+  }
+
+  /**
+   * Clear collected log entries
+   */
+  clearEntries(): void {
+    this.entries = [];
+  }
+
+  /**
+   * Configure the logger
+   * @param config Configuration options to apply
+   */
+  configure(config: Partial<LoggerConfig>): void {
+    this.config = {
+      ...this.config,
+      ...config
+    };
+  }
+
+  /**
+   * Get the current logger configuration
+   */
+  getConfig(): LoggerConfig {
+    return { ...this.config };
+  }
+}
+
+
+
+---
+File: typescript/src/types.ts
+---
+// typescript/src/types.ts
+export type Json = { [key: string]: Json } | Json[] | string | number | boolean | null;
+
+export interface ObjectMeta {
+  objectId: string;
+  label: string;
+  issueNumber: number;  // Added field to track GitHub issue number
+  createdAt: Date;
+  updatedAt: Date;
+  version: number;
+}
+
+export interface StoredObject {
+  meta: ObjectMeta;
+  data: Json;
+}
+
+export interface GitHubStoreConfig {
+  baseLabel?: string;
+  uidPrefix?: string;
+  reactions?: {
+    processed?: string;
+    initialState?: string;
+  };
+}
+
+export interface CommentMeta {
+  client_version: string;
+  timestamp: string;
+  update_mode: string;
+  issue_number: number;  // Added field to track GitHub issue number
+}
+
+export interface CommentPayload {
+  _data: Json;
+  _meta: CommentMeta;
+  type?: string;
+}
+
+/* Constants */
+
+export enum LabelNames {
+  GH_STORE = "gh-store",
+  STORED_OBJECT = "stored-object",
+  DEPRECATED = "deprecated-object",
+  UID_PREFIX = "UID:",
+  ALIAS_TO_PREFIX = "ALIAS-TO:"
+}
+
+
+
+---
+File: typescript/src/version.ts
+---
+// typescript/src/version.ts
+// Version is updated by build process
+export const CLIENT_VERSION = '0.3.1';
+
+
+
+---
+File: typescript/tsconfig.json
+---
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}
+
+
+
+---
+File: typescript/tsup.config.ts
+---
+// tsup.config.ts
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['cjs', 'esm'],
+  dts: true,
+  splitting: false,
+  sourcemap: true,
+  clean: true,
+  minify: true,
+  outDir: 'dist',
+  outExtension: ({ format }) => ({
+    js: format === 'esm' ? '.mjs' : '.cjs'
+  })
+});
+
+

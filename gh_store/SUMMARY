@@ -1,0 +1,2391 @@
+---
+File: gh_store/__init__.py
+---
+
+
+
+
+---
+File: gh_store/__main__.py
+---
+# gh_store/__main__.py
+
+import fire
+from pathlib import Path
+from loguru import logger
+
+from .cli import commands
+
+class CLI:
+    """GitHub Issue Store CLI"""
+    
+    def __init__(self):
+        """Initialize CLI with default config path"""
+        self.default_config_path = Path.home() / ".config" / "gh-store" / "config.yml"
+    
+    def process_updates(
+        self,
+        issue: int,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Process pending updates for a stored object"""
+        return commands.process_updates(issue, token, repo, config)
+
+    def snapshot(
+        self,
+        token: str | None = None,
+        repo: str | None = None,
+        output: str = "snapshot.json",
+        config: str | None = None,
+    ) -> None:
+        """Create a full snapshot of all objects in the store"""
+        return commands.snapshot(token, repo, output, config)
+
+    def update_snapshot(
+        self,
+        snapshot_path: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Update an existing snapshot with changes since its creation"""
+        return commands.update_snapshot(snapshot_path, token, repo, config)
+
+    def init(
+        self,
+        config: str | None = None
+    ) -> None:
+        """Initialize a new configuration file"""
+        config_path = Path(config) if config else self.default_config_path
+        commands.ensure_config_exists(config_path)
+        logger.info(f"Configuration initialized at {config_path}")
+
+    def create(
+        self,
+        object_id: str,
+        data: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Create a new object in the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            data: JSON string containing object data
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.create(object_id, data, token, repo, config)
+
+    def get(
+        self,
+        object_id: str,
+        output: str | None = None,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Retrieve an object from the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            output: Path to write output (optional)
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.get(object_id, output, token, repo, config)
+
+    def update(
+        self,
+        object_id: str,
+        changes: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Update an existing object
+        
+        Args:
+            object_id: Unique identifier for the object
+            changes: JSON string containing update data
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.update(object_id, changes, token, repo, config)
+
+    def delete(
+        self,
+        object_id: str,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Delete an object from the store
+        
+        Args:
+            object_id: Unique identifier for the object
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.delete(object_id, token, repo, config)
+
+    def history(
+        self,
+        object_id: str,
+        output: str | None = None,
+        token: str | None = None,
+        repo: str | None = None,
+        config: str | None = None,
+    ) -> None:
+        """Get complete history of an object
+        
+        Args:
+            object_id: Unique identifier for the object
+            output: Path to write output (optional)
+            token: GitHub token (optional)
+            repo: GitHub repository (optional)
+            config: Path to config file (optional)
+        """
+        return commands.get_history(object_id, output, token, repo, config)
+
+def main():
+    fire.Fire(CLI)
+
+if __name__ == "__main__":
+    main()
+
+
+
+---
+File: gh_store/cli/commands.py
+---
+# gh_store/cli/commands.py
+
+import os
+import json
+from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import shutil
+import importlib.resources
+from typing import Any
+from loguru import logger
+
+from ..core.store import GitHubStore
+from ..core.exceptions import GitHubStoreError, ConfigurationError
+from ..core.types import Json
+
+
+def ensure_config_exists(config_path: Path) -> None:
+    """Create default config file if it doesn't exist"""
+    if not config_path.exists():
+        logger.info(f"Creating default configuration at {config_path}")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Copy default config from package
+        with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as src:
+            with open(config_path, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+        
+        logger.info("Default configuration created. You can modify it at any time.")
+
+def get_store(token: str | None = None, repo: str | None = None, config: str | None = None) -> GitHubStore:
+    """Helper to create GitHubStore instance with CLI parameters using keyword arguments"""
+    token = token or os.environ["GITHUB_TOKEN"]
+    repo = repo or os.environ["GITHUB_REPOSITORY"]
+    config_path = Path(config) if config else None
+    
+    if config_path:
+        ensure_config_exists(config_path)
+        
+    return GitHubStore(token=token, repo=repo, config_path=config_path)
+
+def get(
+    object_id: str,
+    output: str | None = None,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Retrieve an object from the store"""
+    try:
+        store = get_store(token=token, repo=repo, config=config)
+        obj = store.get(object_id)
+        
+        # Format output
+        result = {
+            "object_id": obj.meta.object_id,
+            "created_at": obj.meta.created_at.isoformat(),
+            "updated_at": obj.meta.updated_at.isoformat(),
+            "version": obj.meta.version,
+            "data": obj.data
+        }
+        
+        if output:
+            Path(output).write_text(json.dumps(result, indent=2))
+            logger.info(f"Object written to {output}")
+        else:
+            print(json.dumps(result, indent=2))
+            
+    except Exception as e:
+        logger.exception("Failed to get object")
+        raise
+
+def create(
+    object_id: str,
+    data: str,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Create a new object in the store"""
+    try:
+        store = get_store(token, repo, config)
+        # Parse data as JSON
+        data_dict = json.loads(data)
+        obj = store.create(object_id, data_dict)
+        logger.info(f"Created object {obj.meta.object_id}")
+        
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON data provided")
+        raise
+    except Exception as e:
+        logger.exception("Failed to create object")
+        raise
+
+def update(
+    object_id: str,
+    changes: str,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Update an existing object"""
+    try:
+        store = get_store(token, repo, config)
+        # Parse changes as JSON
+        changes_dict = json.loads(changes)
+        obj = store.update(object_id, changes_dict)
+        logger.info(f"Updated object {obj.meta.object_id}")
+        
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON changes provided")
+        raise
+    except Exception as e:
+        logger.exception("Failed to update object")
+        raise
+
+def delete(
+    object_id: str,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Delete an object from the store"""
+    try:
+        store = get_store(token, repo, config)
+        store.delete(object_id)
+        logger.info(f"Deleted object {object_id}")
+        
+    except Exception as e:
+        logger.exception("Failed to delete object")
+        raise
+
+def get_history(
+    object_id: str,
+    output: str | None = None,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Get complete history of an object"""
+    try:
+        store = get_store(token, repo, config)
+        history = store.get_object_history(object_id)
+        
+        if output:
+            Path(output).write_text(json.dumps(history, indent=2))
+            logger.info(f"History written to {output}")
+        else:
+            print(json.dumps(history, indent=2))
+            
+    except Exception as e:
+        logger.exception("Failed to get object history")
+        raise
+
+def process_updates(
+    issue: int,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Process pending updates for a stored object"""
+    try:
+        store = get_store(token, repo, config)
+        obj = store.process_updates(issue)
+        logger.info(f"Successfully processed updates for {obj.meta.object_id}")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to process updates: {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise SystemExit(1)
+
+def snapshot(
+    token: str | None = None,
+    repo: str | None = None,
+    output: str = "snapshot.json",
+    config: str | None = None,
+) -> None:
+    """Create a full snapshot of all objects in the store, including relationship info."""
+    try:
+        store = get_store(token, repo, config)
+        
+        # Use CanonicalStore if available for enhanced relationship handling
+        has_canonical = False
+        canonical_store = None
+        
+        try:
+            from gh_store.tools.canonicalize import CanonicalStore
+            canonical_store = CanonicalStore(token, repo, config_path=Path(config) if config else None)
+            has_canonical = True
+        except ImportError:
+            logger.warning("Canonical store functionality not available")
+        except Exception as e:
+            logger.warning(f"Error initializing canonical store: {e}")
+        
+        # Create snapshot data
+        snapshot_data = {
+            "snapshot_time": datetime.now(ZoneInfo("UTC")).isoformat(),
+            "repository": repo or os.environ.get("GITHUB_REPOSITORY", ""),
+            "objects": {},
+        }
+        
+        # Add relationships data if CanonicalStore is available
+        if has_canonical and canonical_store:
+            try:
+                # Find all aliases
+                aliases = canonical_store.find_aliases()
+                if aliases:
+                    snapshot_data["relationships"] = {
+                        "aliases": aliases
+                    }
+            except Exception as e:
+                logger.warning(f"Error finding aliases: {e}")
+        
+        # Add objects to snapshot
+        object_count = 0
+        for obj in store.list_all():
+            object_count += 1
+            snapshot_data["objects"][obj.meta.object_id] = {
+                "data": obj.data,
+                "meta": {
+                    "issue_number": obj.meta.issue_number,
+                    "object_id": obj.meta.object_id, # there's also an obj.meta.label field we can probably just drop?
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version,
+                }
+            }
+        
+        # Write to file
+        output_path = Path(output)
+        output_path.write_text(json.dumps(snapshot_data, indent=2))
+        logger.info(f"Snapshot written to {output_path}")
+        logger.info(f"Captured {object_count} objects")
+        
+        if has_canonical and "relationships" in snapshot_data:
+            aliases_count = len(snapshot_data["relationships"].get("aliases", {}))
+            logger.info(f"Included {aliases_count} alias relationships")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to create snapshot: {e}")
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise
+
+def update_snapshot(
+    snapshot_path: str,
+    token: str | None = None,
+    repo: str | None = None,
+    config: str | None = None,
+) -> None:
+    """Update an existing snapshot with changes since its creation"""
+    try:
+        store = get_store(token, repo, config)
+        
+        # Read existing snapshot
+        snapshot_path = Path(snapshot_path)
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"Snapshot file not found: {snapshot_path}")
+        
+        with open(snapshot_path) as f:
+            snapshot_data = json.loads(f.read())
+        
+        # Parse snapshot timestamp
+        last_snapshot = datetime.fromisoformat(snapshot_data["snapshot_time"])
+        logger.info(f"Updating snapshot from {last_snapshot}")
+        
+        # Track updated objects count
+        updated_count = 0
+        
+        # Get updated objects and add them to snapshot
+        for obj in store.list_updated_since(last_snapshot):
+            # We only get here if the object passed the timestamp check in list_updated_since
+            updated_count += 1
+            snapshot_data["objects"][obj.meta.object_id] = {
+                "data": obj.data,
+                "meta": {
+                    "issue_number": obj.meta.issue_number,
+                    "object_id": obj.meta.object_id, # there's also an obj.meta.label field we can probably just drop?
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version,
+                }
+            }
+        
+        # Only update snapshot timestamp if we actually updated objects
+        if updated_count > 0:
+            snapshot_data["snapshot_time"] = datetime.now(ZoneInfo("UTC")).isoformat()
+            
+            # Write updated snapshot
+            snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+            logger.info(f"Updated {updated_count} objects in snapshot")
+        else:
+            logger.info("No updates found since last snapshot")
+        
+    except GitHubStoreError as e:
+        logger.error(f"Failed to update snapshot: {e}")
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error occurred")
+        raise
+
+
+
+---
+File: gh_store/core/access.py
+---
+# gh_store/core/access.py
+
+from typing import TypedDict, Set
+from pathlib import Path
+import re
+from github import Repository, Issue, IssueComment, GithubException
+from loguru import logger
+
+class UserInfo(TypedDict):
+    login: str
+    type: str
+
+class AccessControl:
+    """Handles access control validation for GitHub store operations"""
+    
+    CODEOWNERS_PATHS = [
+        '.github/CODEOWNERS',
+        'docs/CODEOWNERS',
+        'CODEOWNERS'
+    ]
+    
+    def __init__(self, repo: Repository.Repository):
+        self.repo = repo
+        self._owner_info: UserInfo | None = None
+        self._codeowners: Set[str] | None = None
+
+    def _get_owner_info(self) -> UserInfo:
+        """Get repository owner information, caching the result"""
+        if not self._owner_info:
+            #owner = self.repo._owner
+            owner = self.repo.owner
+            # PyGithub returns ValuedAttribute objects, so we need to get their values
+            self._owner_info = {
+                'login': str(owner.login),  # Convert to string to ensure we have a plain value
+                'type': str(owner.type)
+            }
+        return self._owner_info
+
+    def _get_codeowners(self) -> Set[str]:
+        """Parse CODEOWNERS file and extract authorized users"""
+        if self._codeowners is not None:
+            return self._codeowners
+
+        content = self._find_codeowners_file()
+        if not content:
+            return set()
+
+        self._codeowners = self._parse_codeowners_content(content)
+        return self._codeowners
+    
+    def _find_codeowners_file(self) -> str | None:
+        """Find and read the CODEOWNERS file content"""
+        for path in self.CODEOWNERS_PATHS:
+            try:
+                content = self.repo.get_contents(path)
+                if content:
+                    return content.decoded_content.decode('utf-8')
+            except GithubException:
+                logger.debug(f"No CODEOWNERS found at {path}")
+        return None
+    
+    def _parse_codeowners_content(self, content: str) -> Set[str]:
+        """Parse CODEOWNERS content and extract authorized users"""
+        codeowners = set()
+        
+        for line in content.splitlines():
+            if self._should_skip_line(line):
+                continue
+                
+            codeowners.update(self._extract_users_from_line(line))
+                
+        return codeowners
+    
+    def _should_skip_line(self, line: str) -> bool:
+        """Check if line should be skipped (empty or comment)"""
+        line = line.strip()
+        return not line or line.startswith('#')
+    
+    def _extract_users_from_line(self, line: str) -> Set[str]:
+        """Extract user and team names from a CODEOWNERS line"""
+        users = set()
+        parts = line.split()
+        
+        # Skip the path (first element)
+        for part in parts[1:]:
+            if part.startswith('@'):
+                owner = part[1:]  # Remove @ prefix
+                if '/' in owner:
+                    # Handle team syntax (@org/team)
+                    users.update(self._get_team_members(owner))
+                else:
+                    users.add(owner)
+                    
+        return users
+    
+    def _get_team_members(self, team_spec: str) -> Set[str]:
+        """Get members of a team from GitHub API"""
+        try:
+            org, team = team_spec.split('/')
+            team_obj = self.repo.organization.get_team_by_slug(team)
+            return {member.login for member in team_obj.get_members()}
+        except Exception as e:
+            logger.warning(f"Failed to fetch team members for {team_spec}: {e}")
+            return set()
+
+    def _is_authorized(self, username: str | None) -> bool:
+        """Check if a user is authorized (owner or in CODEOWNERS)"""
+        if not username:
+            return False
+            
+        # Repository owner is always authorized
+        owner = self._get_owner_info()
+        if username == owner['login']:
+            return True
+            
+        # Check CODEOWNERS
+        codeowners = self._get_codeowners()
+        return username in codeowners
+
+    def validate_issue_creator(self, issue: Issue.Issue) -> bool:
+        """Check if issue was created by authorized user"""
+        creator = issue.user.login if issue.user else None
+        
+        if not self._is_authorized(creator):
+            logger.warning(
+                f"Unauthorized creator for issue #{issue.number}: {creator}"
+            )
+            return False
+            
+        return True
+
+    def validate_comment_author(self, comment: IssueComment.IssueComment) -> bool:
+        """Check if comment was created by authorized user"""
+        author = comment.user.login if comment.user else None
+        
+        if not self._is_authorized(author):
+            logger.warning(
+                f"Unauthorized author for comment {comment.id}: {author}"
+            )
+            return False
+            
+        return True
+
+    def clear_cache(self) -> None:
+        """Clear cached owner and CODEOWNERS information"""
+        self._owner_info = None
+        self._codeowners = None
+
+
+
+---
+File: gh_store/core/constants.py
+---
+# gh_store/core/constants.py
+
+from enum import StrEnum # python 3.11
+
+class LabelNames(StrEnum):
+    """
+    Constants for label names used by the gh-store system.
+    
+    Using str as a base class allows the enum values to be used directly as strings
+    while still maintaining the benefits of an enumeration.
+    """
+    GH_STORE = "gh-store"  # System namespace label
+    STORED_OBJECT = "stored-object"  # Active object label
+    DEPRECATED = "deprecated-object"  # Deprecated object label
+    UID_PREFIX = "UID:"  # Prefix for unique identifier labels
+    ALIAS_TO_PREFIX = "ALIAS-TO:"  # Prefix for alias labels
+    MERGED_INTO_PREFIX = "MERGED-INTO:"  # Prefix for merged object labels
+    DEPRECATED_BY_PREFIX = "DEPRECATED-BY:"  # Prefix for referencing canonical issue
+    DELETED = "archived"
+    
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
+
+
+class DeprecationReason(StrEnum):
+    """Constants for deprecation reasons stored in metadata."""
+    DUPLICATE = "duplicate"
+    MERGED = "merged"
+    REPLACED = "replaced"
+    
+    # def __str__(self) -> str:
+    #     """Allow direct string usage in string contexts."""
+    #     return self.value
+
+
+
+---
+File: gh_store/core/exceptions.py
+---
+# gh_store/core/exceptions.py
+
+class GitHubStoreError(Exception):
+    """Base exception for GitHub store errors"""
+    pass
+
+class ObjectNotFound(GitHubStoreError):
+    """Raised when attempting to access a non-existent object"""
+    pass
+
+class InvalidUpdate(GitHubStoreError):
+    """Raised when an update comment contains invalid JSON or schema"""
+    pass
+
+class ConcurrentUpdateError(GitHubStoreError):
+    """Raised when concurrent updates are detected"""
+    pass
+
+class ConfigurationError(GitHubStoreError):
+    """Raised when there's an error in the store configuration"""
+    pass
+
+class DuplicateUIDError(GitHubStoreError):
+    """Raised when multiple issues have the same UID label"""
+    pass
+
+class AccessDeniedError(GitHubStoreError):
+    pass
+
+
+
+---
+File: gh_store/core/store.py
+---
+# gh_store/core/store.py
+
+from collections.abc import Iterator
+from datetime import datetime
+from pathlib import Path
+import importlib.resources
+
+from loguru import logger
+from github import Github
+from omegaconf import OmegaConf
+
+from ..core.access import AccessControl
+from ..core.constants import LabelNames
+from ..handlers.issue import IssueHandler
+from ..handlers.comment import CommentHandler
+from .exceptions import AccessDeniedError, ConcurrentUpdateError
+from .types import StoredObject, Update, Json
+
+
+DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
+
+class GitHubStore:
+    """Interface for storing and retrieving objects using GitHub Issues"""
+    
+    def __init__(
+        self, 
+        repo: str, 
+        token: str|None = None,
+        config_path: Path | None = None,
+        max_concurrent_updates: int = 2, # upper limit number of comments to be processed on an issue before we stop adding updates
+    ):
+        """Initialize the store with GitHub credentials and optional config"""
+        self.gh = Github(token)
+        self.repo = self.gh.get_repo(repo)
+        self.access_control = AccessControl(self.repo)
+        self.max_concurrent_updates = max_concurrent_updates
+        
+        config_path = config_path or DEFAULT_CONFIG_PATH
+        if not config_path.exists():
+            # If default config doesn't exist, but we have a packaged default, use that
+            if config_path == DEFAULT_CONFIG_PATH:
+                with importlib.resources.files('gh_store').joinpath('default_config.yml').open('rb') as f:
+                    self.config = OmegaConf.load(f)
+            else:
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+        else:
+            self.config = OmegaConf.load(config_path)
+        
+        self.issue_handler = IssueHandler(self.repo, self.config)
+        self.comment_handler = CommentHandler(self.repo, self.config)
+        
+        logger.info(f"Initialized GitHub store for repository: {repo}")
+
+    def create(self, object_id: str, data: Json) -> StoredObject:
+        """Create a new object in the store"""
+        return self.issue_handler.create_object(object_id, data)
+
+    def get(self, object_id: str) -> StoredObject:
+        """Retrieve an object from the store"""
+        return self.issue_handler.get_object(object_id)
+
+    def update(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an existing object"""
+        # Check if object is already being processed
+        open_issue = None
+        for open_issue in self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
+            state="open"): # TODO: use canonicalization machinery?
+            break
+        
+        if open_issue: # count open comments, check against self.max_concurrent_updates
+            issue_number = open_issue.meta.issue_number
+            n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
+            if n_concurrent_updates > self.max_concurrent_updates:
+                raise ConcurrentUpdateError(
+                    f"Object {object_id} already has {n_concurrent_updates} updates queued to be processed"
+                )
+        
+        return self.issue_handler.update_object(object_id, changes)
+
+    def delete(self, object_id: str) -> None:
+        """Delete an object from the store"""
+        self.issue_handler.delete_object(object_id)
+        
+    def process_updates(self, issue_number: int) -> StoredObject:
+        """Process any unhandled updates on an issue"""
+        logger.info(f"Processing updates for issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        if not self.access_control.validate_issue_creator(issue):
+            raise AccessDeniedError(
+                "Updates can only be processed for issues created by "
+                "repository owner or authorized CODEOWNERS"
+            )
+        
+        # Get all unprocessed comments - this handles comment-level auth
+        updates = self.comment_handler.get_unprocessed_updates(issue_number)
+        
+        # Apply updates in sequence
+        obj = self.issue_handler.get_object_by_number(issue_number)
+        for update in updates:
+            obj = self.comment_handler.apply_update(obj, update)
+        
+        # Persist final state and mark comments as processed
+        self.issue_handler.update_issue_body(issue_number, obj)
+        self.comment_handler.mark_processed(issue_number, updates)
+        
+        return obj
+    
+    def list_all(self) -> Iterator[StoredObject]:
+        """List all objects in the store, indexed by object ID"""
+        logger.info("Fetching all stored objects")
+        
+        # Get all closed issues with base label (active objects)
+        issues_generator = self.repo.get_issues(
+            state="closed",
+            labels=[LabelNames.GH_STORE, self.config.store.base_label]
+        )
+        
+        for idx, issue in enumerate(issues_generator):
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+            try:
+                yield StoredObject.from_issue(issue)
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")        
+        logger.info(f"Found {idx+1} stored objects")
+    
+    def list_updated_since(self, timestamp: datetime) -> Iterator[StoredObject]:
+        """
+        List objects updated since given timestamp.
+
+        The main purpose of this function is for delta updating snapshots.
+        The use of "updated" here specifically refers to updates *which have already been processed*
+        with respect to the "view" on the object provided by the issue description body, i.e. it
+        only fetches closed issued.
+        
+        Issues that have updates pending processing (i.e. which are open and have unreacted update comments) 
+        are processed on an issue-by-issue basis by `GitHubStore.process_updates`.
+        """
+        logger.info(f"Fetching objects updated since {timestamp}")
+        
+        # Get all objects with base label that are closed (active objects)
+        # on the `since` parameter:
+        #     "Only show results that were last updated after the given time. This is a timestamp in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ."
+        # https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
+        issues_generator = self.repo.get_issues(
+            state="closed",
+            labels=[LabelNames.GH_STORE, self.config.store.base_label],
+            since=timestamp 
+        )
+    
+        found_count = 0
+        yielded_count = 0
+                    
+        for idx, issue in enumerate(issues_generator):
+            found_count += 1
+            # Skip archived issues
+            if any(label.name == "archived" for label in issue.labels):
+                continue
+                
+            try:
+                obj = StoredObject.from_issue(issue)
+                # Double check the timestamp (since GitHub's since parameter includes issues with comments after the timestamp)
+                if obj.meta.updated_at > timestamp:
+                    yielded_count += 1
+                    yield obj
+                else:
+                    logger.debug(f"Skipping issue #{issue.number}: last updated at {obj.meta.updated_at}, before {timestamp}")
+            except ValueError as e:
+                logger.warning(f"Skipping issue #{issue.number}: {e}")
+        
+        logger.info(f"Found {found_count} issues, yielded {yielded_count} updated objects")
+        
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object"""
+        return self.issue_handler.get_object_history(object_id)
+
+
+
+---
+File: gh_store/core/types.py
+---
+# gh_store/core/types.py
+
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Self, TypeAlias
+import json
+
+from github import Issue
+
+from .constants import LabelNames
+
+Json: TypeAlias = dict[str, "Json"] | list["Json"] | str | int | float | bool | None
+
+
+# This one method feels like it belongs on the IssueHandler, but really it pairs with StoredObject.from_issue
+def get_object_id_from_labels(issue: Issue) -> str:
+    """
+    Extract bare object ID from issue labels, removing any prefix.
+    
+    Args:
+        issue: GitHub issue object with labels attribute
+        
+    Returns:
+        str: Object ID without prefix
+        
+    Raises:
+        ValueError: If no matching label is found
+    """
+    for label in issue.labels:
+        # Get the actual label name, handling both string and Mock objects
+        # ... or are we just mocking poorly?
+        label_name = getattr(label, 'name', label)
+        
+        if (isinstance(label_name, str) and label_name.startswith(LabelNames.UID_PREFIX)):
+            return label_name[len(LabelNames.UID_PREFIX):]
+            
+    raise ValueError(f"No UID label found with prefix {LabelNames.UID_PREFIX}")
+
+@dataclass
+class ObjectMeta:
+    """Metadata for a stored object"""
+    object_id: str
+    label: str
+    issue_number: int  # Added field to track GitHub issue number
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+@dataclass
+class StoredObject:
+    """An object stored in the GitHub Issues store"""
+    meta: ObjectMeta
+    data: Json
+
+    @classmethod
+    def from_issue(cls, issue: Issue, version: int = 1) -> Self:
+        object_id = get_object_id_from_labels(issue)
+        data = json.loads(issue.body)
+        meta = ObjectMeta(
+            object_id=object_id,
+            label=object_id,
+            issue_number=issue.number,  # Include issue number
+            created_at=issue.created_at,
+            updated_at=issue.updated_at,
+            version=version,
+        )
+        return cls(meta=meta, data=data)
+
+@dataclass
+class Update:
+    """An update to be applied to a stored object"""
+    comment_id: int
+    timestamp: datetime
+    changes: Json
+
+@dataclass
+class CommentMeta:
+    """Metadata included with each comment"""
+    client_version: str
+    timestamp: str
+    update_mode: str
+    issue_number: int  # Added field to track GitHub issue number
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return asdict(self)
+
+@dataclass
+class CommentPayload:
+    """Full comment payload structure"""
+    _data: Json
+    _meta: CommentMeta
+    type: str | None = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "_data": self._data,
+            "_meta": self._meta.to_dict(),
+            **({"type": self.type} if self.type is not None else {})
+        }
+
+
+
+---
+File: gh_store/core/version.py
+---
+# gh_store/core/version.py
+import importlib.metadata
+import os
+from pathlib import Path
+
+def get_version() -> str:
+    """Get version from pyproject.toml metadata or fallback to manual version"""
+    try:
+        return importlib.metadata.version("gh-store")
+    except importlib.metadata.PackageNotFoundError:
+        # During development, read directly from pyproject.toml
+        root_dir = Path(__file__).parent.parent.parent
+        pyproject_path = root_dir / "pyproject.toml"
+        
+        if pyproject_path.exists():
+            import tomli
+            with open(pyproject_path, "rb") as f:
+                pyproject = tomli.load(f)
+                return pyproject["project"]["version"]
+        
+        return "0.5.1"  # Fallback version
+
+__version__ = get_version()
+CLIENT_VERSION = __version__
+
+
+
+---
+File: gh_store/default_config.yml
+---
+# gh_store/default_config.yml
+
+store:
+  # Base label for all stored objects
+  base_label: "stored-object"
+  
+  # Prefix for unique identifier labels
+  uid_prefix: "UID:"
+  
+  # Reaction settings
+  # Limited to: ["+1", "-1", "laugh", "confused", "heart", "hooray", "rocket", "eyes"]
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  
+  # Retry settings for GitHub API calls
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+    
+  # Rate limiting
+  rate_limit:
+    max_requests_per_hour: 1000
+    
+  # Logging
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+
+
+
+---
+File: gh_store/handlers/comment.py
+---
+# gh_store/handlers/comment.py
+
+import json
+from typing import Sequence
+from datetime import datetime, timezone
+from loguru import logger
+from github import Repository, IssueComment
+from omegaconf import DictConfig
+
+from ..core.types import StoredObject, Update, CommentPayload, CommentMeta
+from ..core.exceptions import InvalidUpdate
+from ..core.access import AccessControl
+from ..core.version import CLIENT_VERSION
+
+class CommentHandler:
+    """Handles processing of update comments"""
+    
+    def __init__(self, repo: Repository.Repository, config: DictConfig):
+        self.repo = repo
+        self.config = config
+        self.processed_reaction = config.store.reactions.processed
+        self.initial_state_reaction = config.store.reactions.initial_state
+        self.access_control = AccessControl(repo)
+
+    def _validate_metadata(self, metadata: dict) -> bool:
+        """Validate that metadata contains all required fields"""
+        return all(
+            key in metadata and metadata[key] is not None
+            for key in ['client_version', 'timestamp', 'update_mode']
+        )
+
+    def get_unprocessed_updates(self, issue_number: int) -> list[Update]:
+        """Get all unprocessed updates from issue comments"""
+        logger.info(f"Fetching unprocessed updates for issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        updates = []
+        
+        for comment in issue.get_comments():
+            if self._is_processed(comment):
+                continue
+                
+            try:
+                comment_payload = json.loads(comment.body)
+                
+                # Handle old format comments (backwards compatibility)
+                if not isinstance(comment_payload, dict) or ('_data' not in comment_payload):
+                    comment_payload = {
+                        '_data': comment_payload,
+                        '_meta': {
+                            'client_version': 'legacy',
+                            'timestamp': comment.created_at.isoformat(),
+                            'update_mode': 'append'
+                        }
+                    }
+                elif not self._validate_metadata(comment_payload.get('_meta', {})):
+                    logger.warning(f"Skipping comment {comment.id} due to invalid metadata")
+                    continue
+
+                # Skip initial state comments
+                if comment_payload.get('type') == 'initial_state':
+                    logger.debug(f"Skipping initial state comment {comment.id}")
+                    continue
+                    
+                # Skip comments from unauthorized users
+                if not self.access_control.validate_comment_author(comment):
+                    logger.debug(f"Skipping unauthorized comment {comment.id}")
+                    continue
+                    
+                updates.append(Update(
+                    comment_id=comment.id,
+                    timestamp=comment.created_at,
+                    changes=comment_payload['_data']
+                ))
+            except json.JSONDecodeError:
+                # Not JSON, skip it
+                logger.debug(f"Skipping non-JSON comment {comment.id}")
+                continue
+            except KeyError as e:
+                logger.warning(f"Malformed comment payload in {comment.id}: {e}")
+                continue
+        
+        return sorted(updates, key=lambda u: u.timestamp)
+
+    def apply_update(self, obj: StoredObject, update: Update) -> StoredObject:
+        """Apply an update to an object"""
+        logger.info(f"Applying update {update.comment_id} to {obj.meta.object_id}")
+        
+        # Deep merge the changes into the existing data
+        updated_data = self._deep_merge(obj.data, update.changes)
+        
+        # Create new object with updated data and incremented version
+        return StoredObject(
+            meta=obj.meta,
+            data=updated_data
+        )
+
+    def mark_processed(
+        self, 
+        issue_number: int,
+        updates: Sequence[Update]
+    ) -> None:
+        """Mark comments as processed by adding reactions"""
+        logger.info(f"Marking {len(updates)} comments as processed")
+        
+        issue = self.repo.get_issue(issue_number)
+        
+        for update in updates:
+            for comment in issue.get_comments():
+                if comment.id == update.comment_id:
+                    comment.create_reaction(self.processed_reaction)
+                    break
+
+    @staticmethod
+    def create_comment_payload(data: dict, issue_number: int, comment_type: str | None = None, update_mode: str = "append") -> CommentPayload:
+        """Create a properly structured comment payload"""
+        meta = CommentMeta(
+            client_version=CLIENT_VERSION,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            update_mode=update_mode,
+            issue_number=issue_number  # Include issue number in metadata
+        )
+        
+        return CommentPayload(
+            _data=data,
+            _meta=meta,
+            type=comment_type
+        )
+
+    def _is_processed(self, comment: IssueComment.IssueComment) -> bool:
+        """Check if a comment has been processed"""
+        for reaction in comment.get_reactions():
+            if reaction.content == self.processed_reaction:
+                return True
+        return False
+
+    def _deep_merge(self, base: dict, update: dict) -> dict:
+        """Deep merge two dictionaries"""
+        result = base.copy()
+        
+        for key, value in update.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+                
+        return result
+
+
+
+---
+File: gh_store/handlers/issue.py
+---
+# gh_store/handlers/issue.py
+
+from datetime import datetime, timezone
+from loguru import logger
+from github import Repository, Issue
+import json
+from omegaconf import DictConfig
+
+from ..core.constants import LabelNames
+from ..core.exceptions import ObjectNotFound, DuplicateUIDError
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
+from ..core.version import CLIENT_VERSION
+from .comment import CommentHandler
+
+
+from time import sleep
+from github.GithubException import RateLimitExceededException
+
+
+class IssueHandler:
+    """Handles GitHub Issue operations for stored objects"""
+    
+    def __init__(self, repo: Repository.Repository, config: DictConfig):
+        self.repo = repo
+        self.config = config
+        self.base_label = LabelNames.STORED_OBJECT # could this be an OR?
+            
+    def create_object(self, object_id: str, data: Json) -> StoredObject:
+        """Create a new issue to store an object"""
+        logger.info(f"Creating new object: {object_id}")
+        
+        # Create uid label with prefix
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
+        
+        # Get labels to apply - includes LabelNames.GH_STORE for system boundary
+        # Note: The str() conversion is handled automatically due to our __str__ method
+        labels_to_apply = [LabelNames.GH_STORE, self.base_label, uid_label]
+        
+        # Ensure required labels exist
+        self._ensure_labels_exist(labels_to_apply)
+        
+        # Create issue with object data and all required labels
+        issue = self.repo.create_issue(
+            title=f"Stored Object: {object_id}",
+            body=json.dumps(data, indent=2),
+            labels=labels_to_apply
+        )
+        
+        # Create initial state comment with metadata including issue number
+        initial_state_comment = CommentHandler.create_comment_payload(
+            data=data,
+            issue_number=issue.number,  # Include issue number
+            comment_type='initial_state'
+        )
+        
+        comment = issue.create_comment(json.dumps(initial_state_comment.to_dict(), indent=2))
+        
+        # Mark as processed to prevent update processing
+        comment.create_reaction(self.config.store.reactions.processed)
+        comment.create_reaction(self.config.store.reactions.initial_state)
+
+        # Close issue immediately to indicate no processing needed
+        issue.edit(state="closed")
+
+        # # Create metadata
+        # meta = ObjectMeta(
+        #     object_id=object_id,
+        #     label=uid_label,
+        #     issue_number=issue.number,  # Include issue number
+        #     created_at=issue.created_at,
+        #     updated_at=issue.updated_at,
+        #     version=1
+        # )
+        
+        # return StoredObject(meta=meta, data=data)
+    
+        return StoredObject.from_issue(issue, version=1)
+
+    def _ensure_labels_exist(self, labels: list[str]) -> None:
+        """Create labels if they don't exist"""
+        existing_labels = {label.name for label in self.repo.get_labels()}
+        
+        for label in labels:
+            if label not in existing_labels:
+                logger.info(f"Creating label: {label}")
+                self.repo.create_label(
+                    name=label,
+                    color="0366d6"  # GitHub's default blue
+                )
+
+    def _with_retry(self, func, *args, **kwargs):
+        """Execute a function with retries on rate limit"""
+        max_attempts = self.config.store.retries.max_attempts
+        backoff = self.config.store.retries.backoff_factor
+        
+        for attempt in range(max_attempts):
+            try:
+                return func(*args, **kwargs)
+            except RateLimitExceededException:
+                if attempt == max_attempts - 1:
+                    raise
+                sleep(backoff ** attempt)
+        
+        raise RuntimeError("Should not reach here")
+
+    def get_object(self, object_id: str) -> StoredObject:
+        """Retrieve an object by its ID"""
+        logger.info(f"Retrieving object: {object_id}")
+        
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
+        
+        # Query for issue with matching labels - must have stored-object (active)
+        issues = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
+            state="closed"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        elif len(issues) > 1:
+            issue_numbers = [i.number for i in issues]
+            raise DuplicateUIDError(
+                f"Found multiple issues ({issue_numbers}) with label: {uid_label}"
+            )
+        
+        issue = issues[0]
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
+
+    def get_object_history(self, object_id: str) -> list[dict]:
+        """Get complete history of an object, including initial state"""
+        logger.info(f"Retrieving history for object: {object_id}")
+        
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
+        
+        # Query for issue with matching labels
+        issues = list(self._with_retry(
+            self.repo.get_issues,
+            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+            
+        issue = issues[0]
+        history = []
+        
+        # Process all comments chronologically
+        for comment in issue.get_comments():
+            try:
+                comment_data = json.loads(comment.body)
+                
+                # Handle old format comments (backwards compatibility)
+                if isinstance(comment_data, dict) and 'type' in comment_data and comment_data['type'] == 'initial_state':
+                    # Old initial state format
+                    comment_type = 'initial_state'
+                    data = comment_data['data']
+                elif isinstance(comment_data, dict) and '_data' in comment_data:
+                    # New format
+                    comment_type = comment_data.get('type', 'update')
+                    data = comment_data['_data']
+                else:
+                    # Legacy update format (raw data)
+                    comment_type = 'update'
+                    data = comment_data
+
+                # Build metadata
+                if isinstance(comment_data, dict) and '_meta' in comment_data:
+                    metadata = comment_data['_meta']
+                else:
+                    metadata = {
+                        'client_version': 'legacy',
+                        'timestamp': comment.created_at.isoformat(),
+                        'update_mode': 'append'
+                    }
+                
+                history.append({
+                    "timestamp": comment.created_at.isoformat(),
+                    "type": comment_type,
+                    "data": data,
+                    "comment_id": comment.id,
+                    "metadata": metadata
+                })
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Skipping comment {comment.id}: {e}")
+                
+        return history
+        
+    def get_object_by_number(self, issue_number: int) -> StoredObject:
+        """Retrieve an object by issue number"""
+        logger.info(f"Retrieving object by issue #{issue_number}")
+        
+        issue = self.repo.get_issue(issue_number)
+        return StoredObject.from_issue(issue, version=self._get_version(issue))
+
+
+    def update_issue_body(self, issue_number: int, obj: StoredObject) -> None:
+        """Update the issue body with new object state"""
+        logger.info(f"Updating issue #{issue_number} with new state")
+        
+        issue = self.repo.get_issue(issue_number)
+        issue.edit(
+            body=json.dumps(obj.data, indent=2),
+            state="closed"
+        )
+
+    def update_object(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an object by adding a comment and reopening the issue"""
+        logger.info(f"Updating object: {object_id}")
+        
+        # Get the object's issue
+        issues = list(self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
+            state="closed"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        issue = issues[0]
+        
+        # Create update payload with metadata
+        update_payload = CommentPayload(
+            _data=changes,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                issue_number=issue.number,  # Include issue number
+                update_mode="append"
+            ),
+            type=None
+        )
+        
+        # Add update comment
+        issue.create_comment(json.dumps(update_payload.to_dict(), indent=2))
+        
+        # Reopen issue to trigger processing
+        issue.edit(state="open")
+        
+        # Return current state
+        return self.get_object(object_id)
+    
+    def delete_object(self, object_id: str) -> None:
+        """Delete an object by closing and archiving its issue"""
+        logger.info(f"Deleting object: {object_id}")
+        
+        issues = list(self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
+            state="all"
+        ))
+        
+        if not issues:
+            raise ObjectNotFound(f"No object found with ID: {object_id}")
+        
+        issue = issues[0]
+        issue.edit(
+            state="closed",
+            labels=[LabelNames.DELETED, LabelNames.GH_STORE, f"{LabelNames.UID_PREFIX}{object_id}"]
+        )
+        
+        # Remove stored-object label to mark as inactive
+        issue.remove_from_labels(self.base_label)
+
+    def _get_version(self, issue) -> int:
+        """Extract version number from issue"""
+        comments = list(issue.get_comments())
+        return len(comments) + 1
+
+
+
+---
+File: gh_store/tools/canonicalize.py
+---
+# gh_store/tools/canonicalize.py
+"""
+Tool for managing object canonicalization, aliasing, and deduplication in gh-store.
+
+This module provides functionality to:
+1. Find duplicate objects
+2. Establish canonical objects with aliases
+3. Handle virtual merging of data from multiple related issues
+"""
+
+import argparse
+import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Any, Tuple
+
+from loguru import logger
+from github import Github
+from github.Issue import Issue
+from github.Repository import Repository
+
+from ..core.constants import LabelNames, DeprecationReason
+from ..core.exceptions import ObjectNotFound
+from ..core.store import GitHubStore
+from ..core.types import StoredObject, ObjectMeta, Json, CommentPayload, CommentMeta
+from ..core.version import CLIENT_VERSION
+
+
+class CanonicalStore(GitHubStore):
+    """Extended GitHub store with canonicalization and aliasing support."""
+    
+    def __init__(self, token: str, repo: str, config_path: Path | None = None):
+        """Initialize with GitHub credentials."""
+        super().__init__(token, repo, config_path)
+        self._ensure_special_labels()
+    
+    def _ensure_special_labels(self) -> None:
+        """Create special labels used by the canonicalization system if needed."""
+        special_labels = [
+            (LabelNames.GH_STORE, "6f42c1", "All issues managed by gh-store system"),
+            (LabelNames.DEPRECATED, "999999", "Deprecated objects that have been merged into others"),
+            # Add others as needed
+        ]
+        
+        try:
+            existing_labels = {label.name for label in self.repo.get_labels()}
+            
+            for name, color, description in special_labels:
+                if name not in existing_labels:
+                    try:
+                        self.repo.create_label(name=name, color=color, description=description)
+                    except Exception as e:
+                        logger.warning(f"Could not create label {name}: {e}")
+        except Exception as e:
+            logger.warning(f"Could not ensure special labels exist: {e}")
+            # Continue anyway - this allows tests to run without proper mocking
+                
+    def resolve_canonical_object_id(self, object_id: str, max_depth: int = 5) -> str:
+        """
+        Resolve an object ID to its canonical object ID with loop prevention.
+        
+        Args:
+            object_id: Object ID to resolve
+            max_depth: Maximum depth to prevent infinite loops with circular references
+            
+        Returns:
+            The canonical object ID
+        """
+        if max_depth <= 0:
+            logger.warning(f"Maximum alias resolution depth reached for {object_id}")
+            return object_id
+            
+        # Check if this is an alias
+        uid_label = f"{LabelNames.UID_PREFIX}{object_id}"
+        alias_prefix = f"{LabelNames.ALIAS_TO_PREFIX}*"
+        
+        alias_issues = list(self.repo.get_issues(
+            labels=[uid_label, alias_prefix],
+            state="all"
+        ))
+        
+        if alias_issues:
+            for issue in alias_issues:
+                for label in issue.labels:
+                    # type protection for mocks
+                    if hasattr(label, 'name') and isinstance(label.name, str) and label.name.startswith(LabelNames.ALIAS_TO_PREFIX):
+                        # Extract canonical object ID from label
+                        canonical_id = label.name[len(LabelNames.ALIAS_TO_PREFIX):]
+                        
+                        # Prevent self-referential loops
+                        if canonical_id == object_id:
+                            logger.error(f"Self-referential alias detected for {object_id}")
+                            return object_id
+                            
+                        # Recurse to follow alias chain
+                        return self.resolve_canonical_object_id(canonical_id, max_depth - 1)
+        
+        # Not an alias, or couldn't resolve - assume it's canonical
+        return object_id
+    
+    def _extract_comment_metadata(self, comment, issue_number: int, object_id: str) -> dict:
+        """Extract metadata from a comment."""
+        try:
+            data = json.loads(comment.body)
+            
+            # Try to extract timestamp from metadata
+            timestamp = comment.created_at
+            if isinstance(data, dict) and '_meta' in data and 'timestamp' in data['_meta']:
+                try:
+                    ts_str = data['_meta']['timestamp']
+                    # Handle various ISO format variations
+                    if ts_str.endswith('Z'):
+                        ts_str = ts_str[:-1] + '+00:00'
+                    timestamp = datetime.fromisoformat(ts_str)
+                except (ValueError, AttributeError):
+                    pass
+            
+            return {
+                "data": data,
+                "created_at": comment.created_at,
+                "timestamp": timestamp,
+                "id": comment.id,
+                "source_issue": issue_number,
+                "source_object_id": object_id,
+                "body": comment.body,
+                "reactions": {r.content: r.id for r in comment.get_reactions()},
+            }
+        except json.JSONDecodeError:
+            # Skip non-JSON comments
+            logger.warning(f"Skipping non-JSON comment {comment.id} in issue #{issue_number}")
+            return None
+    
+    def collect_all_comments(self, object_id: str) -> List[Dict[str, Any]]:
+        """Collect comments from canonical issue and all aliases."""
+        canonical_id = self.resolve_canonical_object_id(object_id)
+        
+        # Get the canonical issue - look for stored-object label for active objects
+        canonical_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not canonical_issues:
+            raise ObjectNotFound(f"No canonical object found with ID: {canonical_id}")
+        
+        canonical_issue = canonical_issues[0]
+        comments = []
+        visited_issues = set() # sort of hacky way to make sure we only collect comments for a given issue once
+        
+        # Get comments from canonical issue
+        for comment in canonical_issue.get_comments():
+            metadata = self._extract_comment_metadata(comment, canonical_issue.number, canonical_id)
+            if metadata:
+                comments.append(metadata)
+        visited_issues.add(canonical_issue.id)
+        
+        # Get all aliases of this canonical object
+        alias_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.ALIAS_TO_PREFIX}{canonical_id}"],
+            state="all"
+        ))
+        
+        # Get comments from each alias
+        for alias_issue in alias_issues:
+            if alias_issue.id in visited_issues:
+                continue
+            visited_issues.add(alias_issue.id)
+            alias_id = None
+            for label in alias_issue.labels:
+                if label.name.startswith(LabelNames.UID_PREFIX):
+                    alias_id = label.name[len(LabelNames.UID_PREFIX):]
+                    break
+            
+            if not alias_id:
+                continue  # Skip aliases without proper UID
+                
+            for comment in alias_issue.get_comments():
+                metadata = self._extract_comment_metadata(comment, alias_issue.number, alias_id)
+                if metadata:
+                    comments.append(metadata)
+        
+        # Get deprecated issues (for virtual merging)
+        deprecated_issues = list(self.repo.get_issues(
+            labels=[LabelNames.GH_STORE, f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.DEPRECATED],
+            state="all"
+        ))
+        
+        # Get comments from deprecated issues
+        for dep_issue in deprecated_issues:
+            if dep_issue.id in visited_issues:
+                continue
+            visited_issues.add(dep_issue.id)
+            for comment in dep_issue.get_comments():
+                metadata = self._extract_comment_metadata(comment, dep_issue.number, canonical_id)
+                if metadata:
+                    comments.append(metadata)
+        
+        # Sort by metadata timestamp
+        return sorted(comments, key=lambda c: c["timestamp"])
+            
+    def process_with_virtual_merge(self, object_id: str) -> StoredObject:
+        """Process an object with virtual merging of related issues."""
+        canonical_id = self.resolve_canonical_object_id(object_id)
+        
+        # Collect all comments
+        all_comments = self.collect_all_comments(canonical_id)
+        
+        # Find initial state
+        initial_state = next(
+            (c for c in all_comments if c["data"].get("type") == "initial_state"),
+            None
+        )
+        
+        # If no initial state found, try to find data from issue body
+        if not initial_state:
+            # Get canonical issue
+            canonical_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            
+            if not canonical_issues:
+                raise ObjectNotFound(f"No canonical object found with ID: {canonical_id}")
+            
+            canonical_issue = canonical_issues[0]
+            
+            try:
+                body_data = json.loads(canonical_issue.body)
+                # Create a synthetic initial state
+                initial_state = {
+                    "data": {
+                        "type": "initial_state",
+                        "_data": body_data,
+                        "_meta": {
+                            "client_version": CLIENT_VERSION,
+                            "timestamp": canonical_issue.created_at.isoformat(),
+                            "update_mode": "append",
+                            "issue_number": canonical_issue.number,
+                        }
+                    },
+                    "timestamp": canonical_issue.created_at,
+                    "id": 0,  # Use 0 for synthetic initial state
+                    "source_issue": canonical_issue.number,
+                    "source_object_id": canonical_id
+                }
+            except (json.JSONDecodeError, AttributeError):
+                raise ValueError(f"No initial state found for {canonical_id}")
+        
+        # Start with initial data
+        current_state = initial_state["data"].get("_data", {})
+        
+        # Apply all updates in order
+        for comment in all_comments:
+            if comment["data"].get("type") == "initial_state":
+                continue
+            
+            # Skip system comments
+            # if comment["data"].get("type", "").startswith("system_"):
+            #     continue
+            # TODO: `type` should be a _meta attribute, not _data
+            
+            data = comment["data"]
+            if isinstance(data, dict) and "_data" in data:
+                update_data = data["_data"]
+                update_mode = data.get("_meta", {}).get("update_mode", "append")
+            else:
+                # Legacy format
+                update_data = data
+                update_mode = "append"
+            
+            if update_mode == "append":
+                current_state = self._deep_merge(current_state, update_data)
+            elif update_mode == "replace":
+                current_state = update_data
+        
+        # Get canonical issue for metadata
+        canonical_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not canonical_issues:
+            raise ObjectNotFound(f"No canonical object found with ID: {canonical_id}")
+        
+        canonical_issue = canonical_issues[0]
+        
+        # Create object metadata
+        meta = ObjectMeta(
+            object_id=canonical_id,
+            label=f"{LabelNames.UID_PREFIX}{canonical_id}",
+            created_at=canonical_issue.created_at,
+            issue_number=canonical_issue.number,
+            updated_at=max(c["timestamp"] for c in all_comments) if all_comments else canonical_issue.updated_at,
+            version=len(all_comments) if all_comments else 1
+        )
+        
+        # Update canonical issue body with current state if not in test mode
+        try:
+            canonical_issue.edit(body=json.dumps(current_state, indent=2))
+        except Exception as e:
+            logger.warning(f"Could not update canonical issue body: {e}")
+        
+        return StoredObject(meta=meta, data=current_state)
+    
+    def _deep_merge(self, base: dict, update: dict) -> dict:
+        """Deep merge two dictionaries."""
+        result = base.copy()
+        
+        for key, value in update.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+                
+        return result
+
+    
+    def get_object(self, object_id: str, canonicalize: bool = True) -> StoredObject:
+        """
+        Retrieve an object.
+        - If canonicalize=True (default), follow the alias chain and merge updates from all related issues.
+        - If canonicalize=False, return the object as stored for the given object_id without alias resolution.
+        """
+        canonical_id=None
+        if canonicalize:
+            canonical_id = self.resolve_canonical_object_id(object_id)
+            if canonical_id != object_id:
+                logger.info(f"Object {object_id} resolved to canonical object {canonical_id}")
+            return self.process_with_virtual_merge(canonical_id)
+        else:
+            # Direct fetch: use only the issue with the UID label matching object_id.
+            issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            if not issues:
+                # Check if it's a deprecated object
+                dep_issues = list(self.repo.get_issues(
+                    labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.DEPRECATED],
+                    state="all"
+                ))
+                if dep_issues:
+                    issue = dep_issues[0]
+                else:
+                    raise ObjectNotFound(f"No object found with ID: {object_id}")
+            else:
+                issue = issues[0]
+            
+            data = json.loads(issue.body)
+            meta = ObjectMeta(
+                object_id=object_id,
+                label=f"{LabelNames.UID_PREFIX}{object_id}",
+                issue_number=canonical_id,
+                created_at=issue.created_at,
+                updated_at=issue.updated_at,
+                version=len(list(issue.get_comments())) + 1
+            )
+            return StoredObject(meta=meta, data=data)
+    
+    
+    # In update_object, change the return so that we return the direct (alias‐preserving) object:
+    def update_object(self, object_id: str, changes: Json) -> StoredObject:
+        """Update an object by adding a comment to the appropriate issue."""
+        # (Existing deprecation checks omitted for brevity.)
+        # Check if this is an alias or direct match
+        alias_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+
+        if not alias_issues:
+            # Not a direct match, check for canonical object via aliases.
+            canonical_id = self.resolve_canonical_object_id(object_id)
+            canonical_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            if not canonical_issues:
+                raise ObjectNotFound(f"No object found with ID: {object_id}")
+            issue = canonical_issues[0]
+        else:
+            issue = alias_issues[0]
+        
+        # Create update payload with metadata
+        update_payload = CommentPayload(
+            _data=changes,
+            _meta=CommentMeta(
+                client_version=CLIENT_VERSION,
+                issue_number=issue.number,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                update_mode="append"
+            )
+        )
+        
+        # Add update comment and reopen issue
+        issue.create_comment(json.dumps(update_payload.to_dict(), indent=2))
+        issue.edit(state="open")
+        
+        # Return the updated object in direct mode so that the alias-specific state is preserved.
+        return self.get_object(object_id, canonicalize=False)
+
+    
+    def create_alias(self, source_id: str, target_id: str) -> dict:
+        """Create an alias from source_id to target_id."""
+        # Verify source object exists
+        source_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{source_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not source_issues:
+            raise ObjectNotFound(f"Source object not found: {source_id}")
+            
+        source_issue = source_issues[0]
+        
+        # Verify target object exists
+        target_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{target_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not target_issues:
+            raise ObjectNotFound(f"Target object not found: {target_id}")
+            
+        target_issue = target_issues[0]
+        
+        # Check if this is already an alias
+        for label in source_issue.labels:
+            if label.name.startswith(LabelNames.ALIAS_TO_PREFIX):
+                raise ValueError(f"Object {source_id} is already an alias")
+        
+        # Add alias label
+        alias_label = f"{LabelNames.ALIAS_TO_PREFIX}{target_id}"
+        
+        try:
+            # Create label if it doesn't exist
+            try:
+                self.repo.create_label(alias_label, "fbca04")
+            except:
+                pass  # Label already exists
+                
+            source_issue.add_to_labels(alias_label)
+        except Exception as e:
+            raise ValueError(f"Failed to create alias: {e}")
+        
+        # ... You know what? We don't actualy need these "system comments". 
+        # Adding labels is already tracked within github issues anyway.
+        # # Add system comments
+        # source_comment = {
+        #     "_data": {
+        #         "alias_to": target_id,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_alias"
+        # }
+        # source_issue.create_comment(json.dumps(source_comment, indent=2))
+        
+        # Add reference comment to target
+        # target_comment = {
+        #     "_data": {
+        #         "aliased_by": source_id,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_alias_reference"
+        # }
+        # target_issue.create_comment(json.dumps(target_comment, indent=2))
+        
+        return {
+            "success": True,
+            "source_id": source_id,
+            "target_id": target_id
+        }
+    
+    def deprecate_issue(self, issue_number: int, target_issue_number: int, reason: str) -> dict:
+        """
+        Deprecate a specific issue by making another issue canonical.
+        
+        Args:
+            issue_number: The number of the issue to deprecate
+            target_issue_number: The number of the canonical issue
+            reason: Reason for deprecation ("duplicate", "merged", "replaced")
+        """
+        # Get source issue
+        try:
+            source_issue = self.repo.get_issue(issue_number)
+        except Exception as e:
+            raise ValueError(f"Source issue #{issue_number} not found: {e}")
+        
+        # Get target issue
+        try:
+            target_issue = self.repo.get_issue(target_issue_number)
+        except Exception as e:
+            raise ValueError(f"Target issue #{target_issue_number} not found: {e}")
+            
+        # Get object IDs from both issues
+        source_object_id = self._get_object_id(source_issue)
+        target_object_id = self._get_object_id(target_issue)
+        
+        # Make sure GH_STORE label is on both issues
+        try:
+            if not any(label.name == LabelNames.GH_STORE for label in source_issue.labels):
+                source_issue.add_to_labels(LabelNames.GH_STORE)
+            if not any(label.name == LabelNames.GH_STORE for label in target_issue.labels):
+                target_issue.add_to_labels(LabelNames.GH_STORE)
+        except Exception as e:
+            logger.warning(f"Failed to ensure GH_STORE label: {e}")
+        
+        # Remove stored-object label from source
+        if any(label.name == LabelNames.STORED_OBJECT for label in source_issue.labels):
+            source_issue.remove_from_labels(LabelNames.STORED_OBJECT)
+        
+        # Add merge and deprecated labels
+        try:
+            # Create labels if they don't exist
+            merge_label = f"{LabelNames.MERGED_INTO_PREFIX}{target_object_id}"
+            deprecated_by_label = f"{LabelNames.DEPRECATED_BY_PREFIX}{target_issue_number}"
+            
+            try:
+                self.repo.create_label(merge_label, "d73a49")
+            except:
+                pass  # Label already exists
+                
+            try:
+                self.repo.create_label(deprecated_by_label, "d73a49")
+            except:
+                pass  # Label already exists
+                
+            try:
+                self.repo.create_label(LabelNames.DEPRECATED, "999999")
+            except:
+                pass  # Label already exists
+                
+            # Add labels to source issue
+            source_issue.add_to_labels(LabelNames.DEPRECATED, merge_label, deprecated_by_label)
+        except Exception as e:
+            # If we fail, try to restore stored-object label
+            try:
+                source_issue.add_to_labels(LabelNames.STORED_OBJECT)
+            except:
+                pass
+            raise ValueError(f"Failed to deprecate issue: {e}")
+        
+        # # Add system comments
+        # source_comment = {
+        #     "_data": {
+        #         "status": "deprecated",
+        #         "canonical_object_id": target_object_id,
+        #         "canonical_issue": target_issue_number,
+        #         "reason": reason,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_deprecation"
+        # }
+        # source_issue.create_comment(json.dumps(source_comment, indent=2))
+        
+        # # Add reference comment to target
+        # target_comment = {
+        #     "_data": {
+        #         "status": "merged_reference",
+        #         "merged_object_id": source_object_id,
+        #         "merged_issue": issue_number,
+        #         "reason": reason,
+        #         "timestamp": datetime.now(timezone.utc).isoformat()
+        #     },
+        #     "_meta": {
+        #         "client_version": CLIENT_VERSION,
+        #         "timestamp": datetime.now(timezone.utc).isoformat(),
+        #         "update_mode": "append",
+        #         "system": True
+        #     },
+        #     "type": "system_reference"
+        # }
+        # target_issue.create_comment(json.dumps(target_comment, indent=2))
+        
+        return {
+            "success": True,
+            "source_issue": issue_number,
+            "source_object_id": source_object_id,
+            "target_issue": target_issue_number, 
+            "target_object_id": target_object_id,
+            "reason": reason
+        }
+    
+    def deprecate_object(self, object_id: str, target_id: str, reason: str) -> dict:
+        """
+        Deprecate an object by merging it into a target object.
+        
+        Args:
+            object_id: The ID of the object to deprecate
+            target_id: The ID of the canonical object to merge into
+            reason: Reason for deprecation ("duplicate", "merged", "replaced")
+        """
+        # Verify objects exist
+        source_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not source_issues:
+            raise ObjectNotFound(f"Source object not found: {object_id}")
+            
+        source_issue = source_issues[0]
+        
+        # Verify target object exists
+        target_issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{target_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if not target_issues:
+            raise ObjectNotFound(f"Target object not found: {target_id}")
+            
+        target_issue = target_issues[0]
+        
+        # Validate that we're not trying to deprecate an object as itself
+        if object_id == target_id and source_issue.number == target_issue.number:
+            raise ValueError(f"Cannot deprecate an object as itself: {object_id}")
+        
+        # Use the issue-based deprecation function
+        return self.deprecate_issue(
+            issue_number=source_issue.number,
+            target_issue_number=target_issue.number,
+            reason=reason
+        )
+    
+    def deduplicate_object(self, object_id: str, canonical_id: str = None) -> dict:
+        """
+        Handle duplicate issues for an object ID by choosing one as canonical
+        and deprecating the others.
+        
+        Args:
+            object_id: The object ID to deduplicate
+            canonical_id: Optional specific canonical object ID to use
+                         (must match object_id unless aliasing)
+                         
+        Returns:
+            Dictionary with deduplication results
+        """
+        # Find all issues with this UID that are active (have stored-object label)
+        issues = list(self.repo.get_issues(
+            labels=[f"{LabelNames.UID_PREFIX}{object_id}", LabelNames.STORED_OBJECT],
+            state="all"
+        ))
+        
+        if len(issues) <= 1:
+            return {"success": True, "message": "No duplicates found"}
+        
+        # Sort issues by creation date (oldest first)
+        sorted_issues = sorted(issues, key=lambda i: i.created_at)
+        
+        # Select canonical issue
+        if canonical_id and canonical_id != object_id:
+            # If user specified a different canonical ID, find its issue
+            canonical_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.UID_PREFIX}{canonical_id}", LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            if not canonical_issues:
+                raise ValueError(f"Specified canonical object {canonical_id} not found")
+            canonical_issue = canonical_issues[0]
+        else:
+            # Default to oldest issue for this object ID
+            canonical_issue = sorted_issues[0]
+            canonical_id = object_id  # Keep same object ID unless aliasing
+        
+        canonical_issue_number = canonical_issue.number
+        logger.info(f"Selected issue #{canonical_issue_number} as canonical for {object_id}")
+        
+        # Process duplicates - compare by issue number, not object ID
+        results = []
+        for issue in sorted_issues:
+            # Skip the canonical issue
+            if issue.number == canonical_issue_number:
+                continue
+            
+            logger.info(f"Processing duplicate issue #{issue.number}")
+            
+            # Deprecate as duplicate - using issue numbers
+            result = self.deprecate_issue(
+                issue_number=issue.number,
+                target_issue_number=canonical_issue_number,
+                reason=DeprecationReason.DUPLICATE
+            )
+            results.append(result)
+        
+        return {
+            "success": True,
+            "canonical_object_id": self._get_object_id(canonical_issue),
+            "canonical_issue": canonical_issue_number,
+            "duplicates_processed": len(results),
+            "results": results
+        }
+    
+    def _get_object_id(self, issue) -> str:
+        """Extract object ID from an issue's labels."""
+        for label in issue.labels:
+            if label.name.startswith(LabelNames.UID_PREFIX):
+                return label.name[len(LabelNames.UID_PREFIX):]
+        return None
+        
+    def find_duplicates(self) -> Dict[str, List[Issue]]:
+        """Find all duplicate objects in the store."""
+        # Get all issues with a UID label and stored-object label
+        try:
+            all_issues = list(self.repo.get_issues(
+                labels=[LabelNames.STORED_OBJECT],
+                state="all"
+            ))
+            
+            # Group by UID
+            issues_by_uid = defaultdict(list)
+            
+            for issue in all_issues:
+                try:
+                    for label in issue.labels:
+                        # Check if this is a name attribute (real GitHub API object)
+                        # or a string (test mock)
+                        label_name = getattr(label, 'name', label)
+                        if isinstance(label_name, str) and label_name.startswith(LabelNames.UID_PREFIX):
+                            uid = label_name
+                            issues_by_uid[uid].append(issue)
+                            break
+                except (AttributeError, TypeError):
+                    # Skip issues that don't have proper label structure
+                    continue
+            
+            # Filter to only those with duplicates
+            duplicates = {uid: issues for uid, issues in issues_by_uid.items() if len(issues) > 1}
+            
+            return duplicates
+        except Exception as e:
+            logger.warning(f"Error finding duplicates: {e}")
+            return {}  # Return empty dict on error
+    
+    def find_aliases(self, object_id: str = None) -> Dict[str, str]:
+        """
+        Find all aliases, or aliases for a specific object.
+        
+        Args:
+            object_id: Optional object ID to find aliases for
+            
+        Returns:
+            Dictionary mapping alias_id -> canonical_id
+        """
+        aliases = {}
+        
+        if object_id:
+            # Find aliases for specific object
+            alias_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.ALIAS_TO_PREFIX}{object_id}"],
+                state="all"
+            ))
+            
+            for issue in alias_issues:
+                alias_id = self._get_object_id(issue)
+                if alias_id:
+                    aliases[alias_id] = object_id
+        else:
+            # Find all aliases
+            alias_issues = list(self.repo.get_issues(
+                labels=[f"{LabelNames.ALIAS_TO_PREFIX}*"],
+                state="all"
+            ))
+            
+            for issue in alias_issues:
+                alias_id = self._get_object_id(issue)
+                if not alias_id:
+                    continue
+                    
+                # Find target of alias
+                for label in issue.labels:
+                    if label.name.startswith(LabelNames.ALIAS_TO_PREFIX):
+                        canonical_id = label.name[len(LabelNames.ALIAS_TO_PREFIX):]
+                        aliases[alias_id] = canonical_id
+                        break
+        
+        return aliases
+
+
+def main():
+    """Command line interface for canonicalization tools."""
+    parser = argparse.ArgumentParser(description="Object Canonicalization and Alias Management")
+    
+    # Required credentials
+    parser.add_argument("--token", required=True, help="GitHub token")
+    parser.add_argument("--repo", required=True, help="Repository in owner/repo format")
+    
+    # Action groups
+    actions = parser.add_argument_group("Actions")
+    actions.add_argument("--find-duplicates", action="store_true", help="Find duplicate objects")
+    actions.add_argument("--deduplicate", action="store_true", help="Process all duplicates")
+    actions.add_argument("--create-alias", action="store_true", help="Create an alias relationship")
+    actions.add_argument("--deprecate", action="store_true", help="Deprecate and merge an object")
+    
+    # Object parameters
+    objects = parser.add_argument_group("Object Parameters")
+    objects.add_argument("--source-id", help="Source object ID for alias or deprecation")
+    objects.add_argument("--target-id", help="Target object ID for alias or deprecation")
+    objects.add_argument("--object-id", help="Object ID for operations on a single object")
+    objects.add_argument("--reason", default=DeprecationReason.DUPLICATE, 
+                        choices=[DeprecationReason.DUPLICATE, DeprecationReason.MERGED, DeprecationReason.REPLACED],
+                        help="Reason for deprecation")
+    
+    # Other options
+    parser.add_argument("--dry-run", action="store_true", help="Show actions without performing them")
+    
+    args = parser.parse_args()
+    
+    # Initialize store
+    store = CanonicalStore(token=args.token, repo=args.repo)
+    
+    # Handle actions
+    if args.find_duplicates:
+        duplicates = store.find_duplicates()
+        
+        if not duplicates:
+            logger.info("No duplicate objects found")
+            return
+            
+        logger.info(f"Found {len(duplicates)} objects with duplicates:")
+        
+        for uid, issues in duplicates.items():
+            object_id = uid[len(LabelNames.UID_PREFIX):]
+            issue_numbers = [i.number for i in issues]
+            logger.info(f"  Object {object_id}: {len(issues)} issues - {issue_numbers}")
+    
+    elif args.deduplicate:
+        if args.object_id:
+            # Deduplicate specific object
+            result = store.deduplicate_object(args.object_id)
+            logger.info(f"Deduplication result: {result}")
+        else:
+            # Find and deduplicate all
+            duplicates = store.find_duplicates()
+            
+            if not duplicates:
+                logger.info("No duplicate objects found")
+                return
+                
+            results = []
+            for uid, issues in duplicates.items():
+                object_id = uid[len(LabelNames.UID_PREFIX):]
+                logger.info(f"Deduplicating {object_id}...")
+                
+                if args.dry_run:
+                    logger.info(f"  [DRY RUN] Would deduplicate {len(issues)} issues")
+                    continue
+                    
+                result = store.deduplicate_object(object_id)
+                results.append(result)
+                logger.info(f"  Result: {result['duplicates_processed']} duplicates processed")
+            
+            logger.info(f"Processed {len(results)} objects with duplicates")
+    
+    elif args.create_alias:
+        if not args.source_id or not args.target_id:
+            logger.error("--source-id and --target-id are required for --create-alias")
+            return
+            
+        logger.info(f"Creating alias from {args.source_id} to {args.target_id}")
+        
+        if args.dry_run:
+            logger.info("[DRY RUN] Would create alias relationship")
+            return
+            
+        result = store.create_alias(args.source_id, args.target_id)
+        logger.info(f"Alias created: {result}")
+    
+    elif args.deprecate:
+        if not args.source_id or not args.target_id:
+            logger.error("--source-id and --target-id are required for --deprecate")
+            return
+            
+        logger.info(f"Deprecating {args.source_id} into {args.target_id} (reason: {args.reason})")
+        
+        if args.dry_run:
+            logger.info("[DRY RUN] Would deprecate object")
+            return
+            
+        result = store.deprecate_object(args.source_id, args.target_id, args.reason)
+        logger.info(f"Deprecation complete: {result}")
+
+
+if __name__ == "__main__":
+    main()
+
+

@@ -1,0 +1,3613 @@
+---
+File: tests/unit/conftest.py
+---
+# tests/unit/conftest.py
+"""Pytest configuration and shared fixtures for gh-store unit tests."""
+
+# Re-export all fixtures to make them available to tests
+from tests.unit.fixtures.config import *
+from tests.unit.fixtures.github import *
+from tests.unit.fixtures.cli import *
+from tests.unit.fixtures.store import *
+from tests.unit.fixtures.canonical import * 
+
+
+
+---
+File: tests/unit/fixtures/__init__.py
+---
+
+
+
+
+---
+File: tests/unit/fixtures/canonical.py
+---
+# tests/unit/fixtures/canonical.py
+"""Fixtures for canonicalization tests"""
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+
+from gh_store.tools.canonicalize import CanonicalStore, LabelNames
+
+@pytest.fixture
+def mock_canonical_store():
+    """Create a mock for CanonicalStore class."""
+    with patch('gh_store.cli.commands.CanonicalStore') as mock_canonical:
+        canonical_instance = Mock()
+        mock_canonical.return_value = canonical_instance
+        
+        # Mock commonly used methods
+        canonical_instance.find_aliases.return_value = {"alias-obj": "canonical-obj"}
+        
+        yield mock_canonical
+
+@pytest.fixture
+def mock_labels_response():
+    """Mock the response for get_labels to return iterable labels."""
+    labels = [
+        Mock(name="stored-object"),
+        Mock(name="deprecated-object"),
+        Mock(name="UID:test-123")
+    ]
+    return labels
+
+@pytest.fixture
+def canonical_store_with_mocks(mock_repo_factory, default_config, mock_labels_response):
+    """Create a CanonicalStore instance with mocked repo and methods."""
+    # Create mock repo
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=["stored-object", "deprecated-object"]
+    )
+    
+    # Setup get_labels to return iterable
+    repo.get_labels.return_value = mock_labels_response
+    
+    # Create CanonicalStore with mocked repo
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
+        
+        store = CanonicalStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
+        
+        # Mock common methods
+        store._extract_comment_metadata = Mock(side_effect=lambda comment, issue_number, object_id: {
+            "data": json.loads(comment.body) if hasattr(comment, 'body') else {},
+            "timestamp": getattr(comment, 'created_at', datetime.now(timezone.utc)),
+            "id": getattr(comment, 'id', 1),
+            "source_issue": issue_number,
+            "source_object_id": object_id
+        })
+        
+        # Setup for find_duplicates
+        store.repo.get_issues = Mock(return_value=[])
+        
+        # Mock methods to avoid real API calls
+        store._ensure_special_labels = Mock()
+        
+        return store
+
+@pytest.fixture
+def mock_issue_with_initial_state(mock_issue_factory, mock_comment_factory):
+    """Create a mock issue with initial state for canonicalization tests."""
+    # Create initial state comment
+    initial_comment = mock_comment_factory(
+        body={
+            "type": "initial_state",
+            "_data": {"name": "test", "value": 42},
+            "_meta": {
+                "client_version": "0.7.0",
+                "timestamp": "2025-01-01T00:00:00Z",
+                "update_mode": "append",
+                "issue_number": 123  # Add issue number
+            }
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    )
+    
+    # Create issue with initial state comment
+    return mock_issue_factory(
+        number=123,
+        body=json.dumps({"name": "test", "value": 42}),
+        labels=["stored-object", "UID:metrics"],
+        comments=[initial_comment]
+    )
+
+
+
+---
+File: tests/unit/fixtures/cli.py
+---
+# tests/unit/fixtures/cli.py
+"""CLI-specific fixtures for gh-store unit tests."""
+
+import os
+import sys
+import logging
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+import json
+import pytest
+from unittest.mock import Mock, patch
+from loguru import logger
+
+from gh_store.__main__ import CLI
+
+@pytest.fixture(autouse=True)
+def cli_env_vars(monkeypatch):
+    """Setup environment variables for CLI testing."""
+    monkeypatch.setenv('GITHUB_TOKEN', 'test-token')
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
+    yield
+
+@pytest.fixture
+def mock_config(tmp_path):
+    """Create a mock config file for testing."""
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "config.yml"
+    
+    # Create default config
+    default_config = """
+store:
+  base_label: "stored-object"
+  uid_prefix: "UID:"
+  reactions:
+    processed: "+1"
+    initial_state: "rocket"
+  retries:
+    max_attempts: 3
+    backoff_factor: 2
+  rate_limit:
+    max_requests_per_hour: 1000
+  log:
+    level: "INFO"
+    format: "{time} | {level} | {message}"
+"""
+    config_path.write_text(default_config)
+    return config_path
+
+@pytest.fixture
+def mock_gh_repo():
+    """Create a mocked GitHub repo for testing."""
+    mock_repo = Mock()
+    with patch('gh_store.core.store.Github') as MockGithub:
+        # Setup mock repo
+        mock_repo = Mock()
+        mock_repo.get_issue.return_value = Mock(state="closed")
+        mock_repo.get_issues.return_value = []
+        mock_repo.owner = Mock(login="owner", type="User")
+        
+        # Set up mock Github client
+        MockGithub.return_value.get_repo.return_value = mock_repo
+        yield mock_repo
+
+
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        # Try to find caller's module path
+        try:
+            frame = logging.currentframe()
+            depth = 6  # Adjust if needed to find the correct caller
+            while frame and depth > 0:
+                frame = frame.f_back
+                depth -= 1
+            module_path = frame.f_code.co_filename if frame else ""
+            function_name = frame.f_code.co_name if frame else ""
+        except (AttributeError, ValueError):
+            module_path = ""
+            function_name = ""
+
+        # Safely format the message
+        try:
+            msg = self.format(record)
+        except Exception:
+            msg = record.getMessage()
+
+        # Write directly to caplog's handler instead of going through loguru
+        logging.getLogger(record.name).handle(
+            logging.LogRecord(
+                name=record.name,
+                level=record.levelno,
+                pathname=module_path,
+                lineno=record.lineno,
+                msg=msg,
+                args=(),
+                exc_info=record.exc_info,
+                func=function_name
+            )
+        )
+
+# tests/unit/fixtures/cli.py - Update logging setup
+
+@pytest.fixture(autouse=True)
+def setup_loguru(caplog):
+    """Configure loguru for testing with pytest caplog."""
+    # Remove any existing handlers
+    logger.remove()
+    
+    # Set up caplog
+    caplog.set_level(logging.INFO)
+    
+    # Add a test handler that writes directly to caplog
+    def log_to_caplog(message):
+        logging.getLogger().info(message)
+    
+    handler_id = logger.add(log_to_caplog, format="{message}")
+    
+    yield
+    
+    # Cleanup
+    logger.remove(handler_id)
+
+@pytest.fixture
+def mock_cli(mock_config, mock_gh_repo):
+    """Create a CLI instance with mocked dependencies."""
+    with patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:  # Updated path
+        cli = CLI()
+        # Mock HOME to point to our test config
+        with patch.dict(os.environ, {'HOME': str(mock_config.parent.parent.parent)}):
+            yield cli
+
+@pytest.fixture
+def mock_store_response():
+    """Mock common GitHubStore responses."""
+    mock_obj = Mock()
+    mock_obj.meta = Mock(
+        object_id="test-123",
+        issue_number=42,  # Added issue_number field
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        version=1
+    )
+    mock_obj.data = {"name": "test", "value": 42}
+    return mock_obj
+
+@pytest.fixture
+def mock_stored_objects():
+    """Create mock stored objects for testing."""
+    objects = []
+    for i in range(1, 3):
+        mock_obj = Mock()
+        mock_obj.meta = Mock(
+            object_id=f"test-obj-{i}",
+            issue_number=100 + i,  # Added issue_number field
+            created_at=datetime(2025, 1, i, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, i+1, tzinfo=timezone.utc),
+            version=1
+        )
+        mock_obj.data = {
+            "name": f"test{i}",
+            "value": i * 42
+        }
+        objects.append(mock_obj)
+    return objects
+
+@pytest.fixture
+def mock_snapshot_file_factory(tmp_path, mock_stored_objects):
+    """Factory for creating snapshot files with configurable timestamps."""
+    def _create_snapshot(snapshot_time=None, include_objects=None):
+        """
+        Create a mock snapshot file with configurable timestamp and objects.
+        
+        Args:
+            snapshot_time: Custom snapshot timestamp (defaults to 1 day ago)
+            include_objects: List of indices from mock_stored_objects to include
+                            (defaults to all objects)
+        
+        Returns:
+            Path to the created snapshot file
+        """
+        # Default timestamp is 1 day ago
+        if snapshot_time is None:
+            snapshot_time = datetime.now(timezone.utc) - timedelta(days=1)
+        
+        snapshot_path = tmp_path / f"snapshot_{int(datetime.now().timestamp())}.json"
+        
+        # Convert objects to serializable format
+        snapshot_data = {
+            "snapshot_time": snapshot_time.isoformat(),
+            "repository": "owner/repo",
+            "objects": {}
+        }
+        
+        # Determine which objects to include
+        objects_to_include = mock_stored_objects
+        if include_objects is not None:
+            # sort of a weird way to go about this...
+            objects_to_include = [mock_stored_objects[i] for i in include_objects if i < len(mock_stored_objects)]
+        
+        # Add objects to snapshot
+        for obj in objects_to_include:
+            snapshot_data["objects"][obj.meta.object_id] = {
+                "data": obj.data,
+                "meta": {
+                    "object_id": obj.meta.object_id,
+                    "issue_number": obj.meta.issue_number,
+                    "created_at": obj.meta.created_at.isoformat(),
+                    "updated_at": obj.meta.updated_at.isoformat(),
+                    "version": obj.meta.version
+                }
+            }
+        
+        snapshot_path.write_text(json.dumps(snapshot_data, indent=2))
+        return snapshot_path
+    
+    return _create_snapshot
+
+@pytest.fixture
+def mock_snapshot_file(mock_snapshot_file_factory):
+    """Create a default mock snapshot file for testing."""
+    return mock_snapshot_file_factory()
+
+
+
+---
+File: tests/unit/fixtures/config.py
+---
+# tests/unit/fixtures/config.py
+"""Configuration fixtures for gh-store unit tests."""
+
+from datetime import datetime, timezone
+from pathlib import Path
+import pytest
+from unittest.mock import patch, mock_open
+from omegaconf import OmegaConf
+
+@pytest.fixture
+def default_config():
+    """Create a consistent default config for testing."""
+    return OmegaConf.create({
+        "store": {
+            "base_label": "stored-object",
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",
+                "initial_state": "rocket"
+            },
+            "retries": {
+                "max_attempts": 3,
+                "backoff_factor": 2
+            },
+            "rate_limit": {
+                "max_requests_per_hour": 1000
+            },
+            "log": {
+                "level": "INFO",
+                "format": "{time} | {level} | {message}"
+            }
+        }
+    })
+
+@pytest.fixture(autouse=True)
+def mock_config_file(default_config):
+    """Mock OmegaConf config loading."""
+    with patch('omegaconf.OmegaConf.load', return_value=default_config) as mock_load:
+        yield mock_load
+
+@pytest.fixture
+def test_config_dir(tmp_path: Path) -> Path:
+    """Provide a temporary directory for config files during testing."""
+    config_dir = tmp_path / ".config" / "gh-store"
+    config_dir.mkdir(parents=True)
+    return config_dir
+
+@pytest.fixture
+def test_config_file(test_config_dir: Path, default_config: OmegaConf) -> Path:
+    """Create a test config file with minimal valid content."""
+    config_path = test_config_dir / "config.yml"
+    config_path.write_text(OmegaConf.to_yaml(default_config))
+    return config_path
+
+
+
+---
+File: tests/unit/fixtures/github.py
+---
+# tests/unit/fixtures/github.py
+"""GitHub API mocks for gh-store unit tests."""
+
+from datetime import datetime, timezone
+import json
+from typing import Any, Callable, Literal, TypedDict
+import pytest
+from unittest.mock import Mock, patch
+from github import GithubException
+
+from gh_store.core.constants import LabelNames
+
+@pytest.fixture
+def mock_label_factory():
+    """
+    Create GitHub-style label objects.
+    
+    Example:
+        label = mock_label_factory("enhancement")
+        label = mock_label_factory("bug", "fc2929")
+        label = mock_label_factory("bug", "fc2929", "Bug description")
+    """
+    def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
+        """
+        Create a mock label with GitHub-like structure.
+        
+        Args:
+            name: Name of the label
+            color: Color hex code without #
+            description: Optional description for the label
+        """
+        label = Mock()
+        label.name = name
+        label.color = color
+        label.description = description
+        return label
+    
+    return create_label
+
+class CommentMetadata(TypedDict, total=False):
+    """Metadata for comment creation."""
+    client_version: str
+    timestamp: str
+    update_mode: Literal['append', 'replace']
+
+class CommentBody(TypedDict, total=False):
+    """Structure for comment body data."""
+    _data: dict[str, Any]
+    _meta: CommentMetadata
+    type: Literal['initial_state'] | None
+
+@pytest.fixture
+def mock_comment_factory():
+    """
+    Create GitHub comment mocks with standard structure.
+
+    This factory creates mock comment objects that mirror GitHub's API structure,
+    with proper typing and validation for reactions and metadata.
+
+    Args in create_comment:
+        body: Comment body (dict will be JSON serialized)
+        user_login: GitHub username of comment author
+        comment_id: Unique comment ID (auto-generated if None)
+        reactions: List of reaction types or mock reactions
+        created_at: Comment creation timestamp
+        **kwargs: Additional attributes to set on the comment
+
+    Examples:
+        # Basic comment with data
+        comment = mock_comment_factory(
+            body={"value": 42},
+            user_login="owner"
+        )
+
+        # Comment with metadata
+        comment = mock_comment_factory(
+            body={
+                "_data": {"value": 42},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Initial state comment
+        comment = mock_comment_factory(
+            body={
+                "type": "initial_state",
+                "_data": {"initial": "state"},
+                "_meta": {
+                    "client_version": "0.5.1",
+                    "timestamp": "2025-01-01T00:00:00Z",
+                    "update_mode": "append"
+                }
+            }
+        )
+
+        # Comment with reactions
+        comment = mock_comment_factory(
+            body={"value": 42},
+            reactions=["+1", "rocket"]
+        )
+    """
+    def create_comment(
+        body: dict[str, Any] | CommentBody,
+        user_login: str = "repo-owner",
+        comment_id: int | None = None,
+        reactions: list[str | Mock] | None = None,
+        created_at: datetime | None = None,
+        **kwargs
+    ) -> Mock:
+        """Create a mock comment with GitHub-like structure."""
+        # Validate body structure if it's meant to be a CommentBody
+        if isinstance(body, dict) and "_meta" in body:
+            if "update_mode" in body["_meta"] and body["_meta"]["update_mode"] not in ["append", "replace"]:
+                raise ValueError("update_mode must be 'append' or 'replace'")
+            if "type" in body and body["type"] not in [None, "initial_state"]:
+                raise ValueError("type must be None or 'initial_state'")
+
+        comment = Mock()
+        
+        # Set basic attributes
+        comment.id = comment_id or 1
+        comment.body = json.dumps(body)
+        comment.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        
+        # Set up user
+        user = Mock()
+        user.login = user_login
+        comment.user = user
+        
+        # Set up reactions with validation
+        mock_reactions = []
+        if reactions:
+            for reaction in reactions:
+                if isinstance(reaction, Mock):
+                    if not hasattr(reaction, 'content'):
+                        raise ValueError("Mock reaction must have 'content' attribute")
+                    mock_reactions.append(reaction)
+                else:
+                    mock_reaction = Mock()
+                    mock_reaction.content = str(reaction)
+                    mock_reactions.append(mock_reaction)
+        
+        comment.get_reactions = Mock(return_value=mock_reactions)
+        comment.create_reaction = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(comment, key, value)
+        
+        return comment
+    
+    return create_comment
+
+
+mock_comment = mock_comment_factory
+
+
+@pytest.fixture
+def mock_issue_factory(mock_comment_factory, mock_label_factory):
+    """
+    Create GitHub issue mocks with standard structure.
+
+    Examples:
+        # Basic issue
+        issue = mock_issue_factory(
+            body={"test": "data"}
+        )
+
+        # Issue with explicit number
+        issue = mock_issue_factory(
+            number=123,
+            labels=["stored-object", "UID:test-123"]
+        )
+
+        # Issue with comments
+        issue = mock_issue_factory(
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=1
+                )
+            ]
+        )
+    """
+    def create_issue(
+        number: int | None = None,
+        body: dict[str, Any] | str | None = None,
+        labels: list[str] | None = None,
+        comments: list[Mock] | None = None,
+        state: str = "closed",
+        user_login: str = "repo-owner",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock issue with GitHub-like structure.
+
+        Args:
+            number: Issue number (defaults to 1 if not provided)
+            body: Issue body content (dict will be JSON serialized)
+            labels: List of label names to add
+            comments: List of mock comments
+            state: Issue state (open/closed)
+            user_login: GitHub username of issue creator
+            created_at: Issue creation timestamp
+            updated_at: Issue last update timestamp
+            **kwargs: Additional attributes to set
+        """
+        issue = Mock()
+        
+        # Set basic attributes
+        issue.number = number or 1  # Default to 1 if not provided
+        issue.body = json.dumps(body) if isinstance(body, dict) else (body or "{}")
+        issue.state = state
+        issue.created_at = created_at or datetime(2025, 1, 1, tzinfo=timezone.utc)
+        issue.updated_at = updated_at or datetime(2025, 1, 2, tzinfo=timezone.utc)
+        
+        # Set up user
+        user = Mock()
+        user.login = user_login
+        issue.user = user
+        
+        # Set up labels
+        issue_labels = []
+        issue.labels = issue_labels
+        if labels:
+            for label_name in labels:
+                issue.labels.append(mock_label_factory(label_name))
+                #issue.labels.append(label_name)
+        
+        
+        # Set up comments
+        mock_comments = list(comments) if comments is not None else []
+        issue.get_comments = Mock(return_value=mock_comments)
+        issue.create_comment = Mock()
+
+        # Set up proper owner permissions
+        repo = Mock()
+        owner = Mock()
+        owner.login = user_login
+        owner.type = "User"
+        repo.owner = owner
+        issue.repository = repo  # Needed for access control checks
+        
+        # Set up issue editing
+        issue.edit = Mock()
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(issue, key, value)
+        
+        return issue
+    
+    return create_issue
+
+# Keep backward compatibility
+mock_issue = mock_issue_factory
+
+
+@pytest.fixture
+def mock_repo_factory(mock_label_factory):
+    """
+    Create GitHub repository mocks with standard structure.
+    
+    Note: Creates basic repository structure. Labels, issues, and permissions
+    should be explicitly set up in tests where they matter.
+    """
+    def create_repo(
+        name: str = "owner/repo",
+        owner_login: str = "repo-owner",
+        owner_type: str = "User",
+        labels: list[str] | None = None,
+        issues: list[Mock] | None = None,
+        **kwargs
+    ) -> Mock:
+        """
+        Create a mock repository with GitHub-like structure.
+        Args:
+            name: Repository name in owner/repo format
+            owner_login: Repository owner's login
+            owner_type: Owner type ("User" or "Organization")
+            labels: Initial repository labels
+            issues: Initial repository issues
+            **kwargs: Additional attributes to set
+        """
+        repo = Mock()
+        
+        # Set basic attributes
+        repo.full_name = name
+        
+        # Set up owner - making it more explicit
+        owner = Mock(spec=['login', 'type'])  # Specify expected attributes
+        owner.login = owner_login
+        owner.type = owner_type
+        repo.owner = owner
+        
+        # Set up labels - include gh-store by default unless specified otherwise
+        repo_labels = []
+        if labels:
+            default_labels = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value] \
+                                if LabelNames.GH_STORE.value not in labels and LabelNames.STORED_OBJECT.value not in labels else []
+            for name in default_labels + labels:
+                repo_labels.append(mock_label_factory(name))
+        repo.get_labels = Mock(return_value=repo_labels)
+        
+        # Set up label creation
+        def create_label(name: str, color: str = "0366d6", description: str = None) -> Mock:
+            label = mock_label_factory(name, color, description)
+            repo_labels.append(label)
+            return label
+        repo.create_label = Mock(side_effect=create_label)
+        
+        # Set up issues
+        repo_issues = issues or []
+        def get_issue(number):
+            matching = [i for i in repo_issues if i.number == number]
+            if matching:
+                return matching[0]
+            mock_issue = Mock()
+            mock_issue.state = "closed"
+            return mock_issue
+        repo.get_issue = Mock(side_effect=get_issue)
+        repo.get_issues = Mock(return_value=repo_issues)
+        
+        # Set up CODEOWNERS handling
+        def get_contents(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                content = Mock()
+                content.decoded_content = f"* @{owner_login}".encode()
+                return content
+            raise GithubException(404, "Not found")
+        repo.get_contents = Mock(side_effect=get_contents)
+        
+        # Add any additional attributes
+        for key, value in kwargs.items():
+            setattr(repo, key, value)
+        
+        return repo
+    
+    return create_repo
+
+@pytest.fixture
+def mock_github():
+    """Create a mock Github instance with proper repository structure."""
+    with patch('gh_store.core.store.Github') as mock_gh:
+        # Setup mock repo
+        mock_repo = Mock()
+        
+        # Setup owner
+        owner = Mock()
+        owner.login = "repo-owner"
+        owner.type = "User"
+        mock_repo.owner = owner
+        
+        # Setup labels
+        mock_labels = [Mock(name=LabelNames.STORED_OBJECT.value), Mock(name=LabelNames.GH_STORE.value)]
+        mock_repo.get_labels = Mock(return_value=mock_labels)
+        
+        def create_label(name: str, color: str = "0366d6") -> Mock:
+            new_label = Mock(name=name)
+            mock_labels.append(new_label)
+            return new_label
+        mock_repo.create_label = Mock(side_effect=create_label)
+        
+        # Mock CODEOWNERS access
+        mock_content = Mock()
+        mock_content.decoded_content = b"* @repo-owner"
+        def get_contents_side_effect(path: str) -> Mock:
+            if path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+                return mock_content
+            raise GithubException(404, "Not found")
+        mock_repo.get_contents = Mock(side_effect=get_contents_side_effect)
+        
+        mock_gh.return_value.get_repo.return_value = mock_repo
+        yield mock_gh, mock_repo
+
+
+
+---
+File: tests/unit/fixtures/store.py
+---
+# tests/unit/fixtures/store.py
+"""Store-related fixtures for gh-store unit tests."""
+
+from datetime import datetime, timezone
+from typing import Sequence
+from unittest.mock import Mock, patch
+
+import pytest
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.exceptions import ObjectNotFound
+from gh_store.core.store import GitHubStore
+from gh_store.core.version import CLIENT_VERSION
+
+
+def setup_mock_auth(store, authorized_users: Sequence[str] | None = None):
+    """Set up mocked authorization for testing.
+    
+    Args:
+        store: GitHubStore instance to configure
+        authorized_users: List of usernames to authorize (defaults to ['repo-owner'])
+    """
+    if authorized_users is None:
+        authorized_users = ['repo-owner']
+    
+    # Pre-populate owner info cache
+    store.access_control._owner_info = {
+        'login': 'repo-owner',
+        'type': 'User'
+    }
+    
+    # If we have additional authorized users via CODEOWNERS
+    if len(authorized_users) > 1:
+        # Mock CODEOWNERS content
+        codeowners_content = "* " + " ".join(f"@{user}" for user in authorized_users)
+        mock_content = Mock()
+        mock_content.decoded_content = codeowners_content.encode()
+        store.repo.get_contents = Mock(return_value=mock_content)
+        
+        # Clear codeowners cache to force reload
+        store.access_control._codeowners = None
+
+
+@pytest.fixture
+def store(mock_repo_factory, default_config):
+    """Create GitHubStore instance with mocked dependencies."""
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value]
+    )
+    
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
+        
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
+        
+        # Set up default authorization
+        setup_mock_auth(store)
+        
+        return store
+
+@pytest.fixture
+def authorized_store(store):
+    """Create store with additional authorized users for testing."""
+    def _authorized_store(authorized_users: Sequence[str]):
+        setup_mock_auth(store, authorized_users=authorized_users)
+        return store
+    return _authorized_store
+
+
+@pytest.fixture
+def history_mock_comments(mock_comment):
+    """Create series of comments representing object history."""
+    comments = []
+    
+    # Initial state
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "type": "initial_state",
+            "_data": {"name": "test", "value": 42},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-01T00:00:00Z",
+                "update_mode": "append",
+                "issue_number": 123,
+            }
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    ))
+    
+    # First update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 43},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-02T00:00:00Z",
+                "update_mode": "append",
+                "issue_number": 123,
+            }
+        },
+        comment_id=2,
+        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+    ))
+    
+    # Second update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 44},
+            "_meta": {
+                "client_version": CLIENT_VERSION,
+                "timestamp": "2025-01-03T00:00:00Z",
+                "update_mode": "append",
+                "issue_number": 123,
+            }
+        },
+        comment_id=3,
+        created_at=datetime(2025, 1, 3, tzinfo=timezone.utc)
+    ))
+    
+    return comments
+
+
+
+---
+File: tests/unit/test_canonicalization.py
+---
+# tests/unit/test_canonicalization.py
+"""Tests for the canonicalization and aliasing functionality."""
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch
+
+from gh_store.core.constants import LabelNames
+from gh_store.tools.canonicalize import CanonicalStore, DeprecationReason
+
+
+@pytest.fixture
+def canonical_store(store, mock_repo_factory, default_config):
+    """Create a CanonicalStore with mocked dependencies."""
+    repo = mock_repo_factory(
+        name="owner/repo",
+        owner_login="repo-owner",
+        owner_type="User",
+        labels=["stored-object"]
+    )
+    
+    with patch('gh_store.core.store.Github') as mock_gh:
+        mock_gh.return_value.get_repo.return_value = repo
+        
+        store = CanonicalStore(token="fake-token", repo="owner/repo")
+        store.repo = repo
+        store.access_control.repo = repo
+        store.config = default_config
+        
+        # Mock the _ensure_special_labels method to avoid API calls
+        store._ensure_special_labels = Mock()
+        
+        return store
+
+@pytest.fixture
+def mock_alias_issue(mock_issue_factory):
+    """Create a mock issue that is an alias to another object."""
+    return mock_issue_factory(
+        number=789,
+        labels=[
+            LabelNames.STORED_OBJECT,
+            f"{LabelNames.UID_PREFIX}daily-metrics",
+            f"{LabelNames.ALIAS_TO_PREFIX}metrics"
+        ],
+        body=json.dumps({"period": "daily"}),
+        created_at=datetime(2025, 1, 10, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 12, tzinfo=timezone.utc)
+    )
+
+@pytest.fixture
+def mock_canonical_issue(mock_issue_factory):
+    """Create a mock issue that is the canonical version of an object."""
+    return mock_issue_factory(
+        number=123,
+        labels=[
+            LabelNames.STORED_OBJECT,
+            f"{LabelNames.UID_PREFIX}metrics"
+        ],
+        body=json.dumps({"count": 42}),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 15, tzinfo=timezone.utc)
+    )
+
+@pytest.fixture
+def mock_duplicate_issue(mock_issue_factory, mock_label_factory):
+    """Create a mock issue that is a duplicate to be deprecated."""
+    return mock_issue_factory(
+        number=456,
+        labels=[
+            mock_label_factory(LabelNames.STORED_OBJECT),
+            mock_label_factory(f"{LabelNames.UID_PREFIX}metrics")
+        ],
+        body=json.dumps({"count": 15}),
+        created_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
+    )
+
+@pytest.fixture
+def mock_deprecated_issue(mock_issue_factory, mock_label_factory):
+    """Create a mock issue that has already been deprecated."""
+    return mock_issue_factory(
+        number=457,
+        labels=[
+            mock_label_factory(LabelNames.DEPRECATED),
+            mock_label_factory(f"{LabelNames.MERGED_INTO_PREFIX}metrics")
+        ],
+        body=json.dumps({"old": "data"}),
+        created_at=datetime(2025, 1, 6, tzinfo=timezone.utc),
+        updated_at=datetime(2025, 1, 6, tzinfo=timezone.utc)
+    )
+
+class TestCanonicalStoreObjectResolution:
+    """Test object resolution functionality."""
+    
+    def test_resolve_canonical_object_id_direct(self, canonical_store, mock_canonical_issue):
+        """Test resolving a canonical object ID (direct match)."""
+        # Set up repository to return our canonical issue
+        canonical_store.repo.get_issues.return_value = [mock_canonical_issue]
+        
+        # Should return the same ID since it's canonical
+        result = canonical_store.resolve_canonical_object_id("metrics")
+        assert result == "metrics"
+        
+        # Verify correct query was made - using string labels as the real implementation does
+        canonical_store.repo.get_issues.assert_called_with(
+            labels=[f"{LabelNames.UID_PREFIX}metrics", f"{LabelNames.ALIAS_TO_PREFIX}*"],
+            state="all"
+        )
+        
+    def test_resolve_canonical_object_id_alias(self, canonical_store, mock_alias_issue):
+        """Test resolving an alias to find its canonical object ID."""
+        # Set up repository to return our alias issue
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Should return the canonical ID that the alias points to
+        result = canonical_store.resolve_canonical_object_id("daily-metrics")
+        assert result == "metrics"
+
+    def test_resolve_canonical_object_id_nonexistent(self, canonical_store):
+        """Test resolving a non-existent object ID."""
+        # Set up repository to return no issues
+        canonical_store.repo.get_issues.return_value = []
+        
+        # Should return the same ID since no alias was found
+        result = canonical_store.resolve_canonical_object_id("nonexistent")
+        assert result == "nonexistent"
+
+    def test_resolve_canonical_object_id_circular_prevention(self, canonical_store, mock_label_factory):
+        """Test prevention of circular references in alias resolution."""
+        # Create a circular reference scenario
+        circular_alias_1 = Mock()
+        circular_alias_1.labels = [
+            mock_label_factory(f"{LabelNames.UID_PREFIX}object-a"),
+            mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}object-b")
+        ]
+        
+        circular_alias_2 = Mock()
+        circular_alias_2.labels = [
+            mock_label_factory(f"{LabelNames.UID_PREFIX}object-b"),
+            mock_label_factory(f"{LabelNames.ALIAS_TO_PREFIX}object-a")
+        ]
+        
+        # Set up repository to simulate circular references
+        def mock_get_issues_side_effect(**kwargs):
+            labels = kwargs.get('labels', [])
+            if f"{LabelNames.UID_PREFIX}object-a" in labels:
+                return [circular_alias_1]
+            elif f"{LabelNames.UID_PREFIX}object-b" in labels:
+                return [circular_alias_2]
+            return []
+            
+        canonical_store.repo.get_issues.side_effect = mock_get_issues_side_effect
+        
+        # Should detect circular reference and return original ID
+        result = canonical_store.resolve_canonical_object_id("object-a")
+        assert result == "object-b"  # It should follow at least one level
+
+class TestCanonicalStoreAliasing:
+    """Test alias creation and handling."""
+
+    def test_create_alias(self, canonical_store, mock_canonical_issue, mock_alias_issue, mock_label_factory, mock_issue_factory):
+        """Test creating an alias relationship."""
+        # Set up repository to find source and target objects
+        def mock_get_issues_side_effect(**kwargs):
+            labels = kwargs.get('labels', [])
+            if f"{LabelNames.UID_PREFIX}weekly-metrics" in labels:
+                # Source object
+                return [mock_issue_factory(
+                    number=101,
+                    labels=[
+                        LabelNames.STORED_OBJECT,
+                        f"{LabelNames.UID_PREFIX}weekly-metrics"
+                    ]
+                )]
+            elif f"{LabelNames.UID_PREFIX}metrics" in labels:
+                # Target object
+                return [mock_canonical_issue]
+            return []
+            
+        canonical_store.repo.get_issues.side_effect = mock_get_issues_side_effect
+        
+        # Mock the add_to_labels method
+        source_issue_mock = Mock()
+        canonical_store.repo.get_issues.return_value = [source_issue_mock]
+        
+        # Mock the create_comment method
+        source_issue_mock.create_comment = Mock()
+        mock_canonical_issue.create_comment = Mock()
+        
+        # Create label if needed
+        canonical_store.repo.create_label = Mock()
+        
+        # Execute create_alias
+        result = canonical_store.create_alias("weekly-metrics", "metrics")
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["source_id"] == "weekly-metrics"
+        assert result["target_id"] == "metrics"
+        
+        # Verify label was created
+        canonical_store.repo.create_label.assert_called_once()
+        
+        # Verify label was added to source issue
+        #source_issue_mock.add_to_labels.assert_called_with(f"{LabelNames.ALIAS_TO_PREFIX}metrics")
+        #assert f"{LabelNames.ALIAS_TO_PREFIX}metrics" in source_issue_mock.labels
+        #assert source_issue_mock.labels.append.assert_called_with(f"{LabelNames.ALIAS_TO_PREFIX}metrics")
+        
+        # Verify system comments were added
+        #source_issue_mock.create_comment.assert_called_once()
+        #mock_canonical_issue.create_comment.assert_called_once()
+
+    def test_create_alias_already_alias(self, canonical_store, mock_alias_issue):
+        """Test error when creating an alias for an object that is already an alias."""
+        # Set up repository to return an issue that's already an alias
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Object daily-metrics is already an alias"):
+            canonical_store.create_alias("daily-metrics", "metrics")
+
+    def test_create_alias_source_not_found(self, canonical_store):
+        """Test error when source object is not found."""
+        # Set up repository to return no issues
+        canonical_store.repo.get_issues.return_value = []
+        
+        # Should raise ObjectNotFound
+        with pytest.raises(Exception, match="Source object not found"):
+            canonical_store.create_alias("nonexistent", "metrics")
+
+    def test_create_alias_target_not_found(self, canonical_store, mock_duplicate_issue):
+        """Test error when target object is not found."""
+        # Set up repository to find source but not target
+        def mock_get_issues_side_effect(**kwargs):
+            labels = kwargs.get('labels', [])
+            if f"{LabelNames.UID_PREFIX}duplicate-metrics" in labels:
+                return [mock_duplicate_issue]
+            return []
+            
+        canonical_store.repo.get_issues.side_effect = mock_get_issues_side_effect
+        
+        # Should raise ObjectNotFound
+        with pytest.raises(Exception, match="Target object not found"):
+            canonical_store.create_alias("duplicate-metrics", "nonexistent")
+
+class TestCanonicalStoreDeprecation:
+    """Test object deprecation functionality."""
+    
+    # Update test for deprecate_object to use the new deprecate_issue method
+    def test_deprecate_object(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deprecating an object properly calls deprecate_issue."""
+        store = canonical_store_with_mocks
+        
+        # Create source and target issues
+        source_issue = mock_issue_factory(
+            number=123,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:old-metrics"],
+            created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
+        )
+        
+        target_issue = mock_issue_factory(
+            number=456,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        # Setup get_issues mock
+        def mock_get_issues(**kwargs):
+            labels = kwargs.get('labels', [])
+            if len(labels) > 0:
+                if "UID:old-metrics" in labels[0]:
+                    return [source_issue]
+                elif "UID:metrics" in labels[0]:
+                    return [target_issue]
+            return []
+        
+        store.repo.get_issues = Mock(side_effect=mock_get_issues)
+        
+        # Mock deprecate_issue
+        expected_result = {
+            "success": True,
+            "source_issue": 123,
+            "source_object_id": "old-metrics",
+            "target_issue": 456,
+            "target_object_id": "metrics",
+            "reason": DeprecationReason.REPLACED
+        }
+        store.deprecate_issue = Mock(return_value=expected_result)
+        
+        # Execute deprecate_object
+        result = store.deprecate_object("old-metrics", "metrics", DeprecationReason.REPLACED)
+        
+        # Verify result
+        assert result == expected_result
+        
+        # Verify deprecate_issue was called with correct params
+        store.deprecate_issue.assert_called_once_with(
+            issue_number=123,
+            target_issue_number=456,
+            reason=DeprecationReason.REPLACED
+        )
+
+    
+    # Test for attempting to deprecate an object as itself
+    def test_deprecate_object_self_reference(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test that deprecating an object as itself raises an error."""
+        store = canonical_store_with_mocks
+        
+        # Create a test issue
+        issue = mock_issue_factory(
+            number=123,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        # Setup mocks
+        store.repo.get_issues.return_value = [issue]
+        
+        # Verify that deprecate_object raises ValueError for self-reference
+        with pytest.raises(ValueError, match="Cannot deprecate an object as itself"):
+            store.deprecate_object("metrics", "metrics", DeprecationReason.REPLACED)
+        
+    
+    # Modified test for deduplicate_object
+    def test_deduplicate_object(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deduplication of an object with multiple issues."""
+        store = canonical_store_with_mocks
+        
+        # Create two issues with same UID and stored-object labels
+        canonical_issue = mock_issue_factory(
+            number=101,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        duplicate_issue = mock_issue_factory(
+            number=102,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+        )
+        
+        # Setup mock for get_issues to return our test issues
+        store.repo.get_issues.return_value = [canonical_issue, duplicate_issue]
+        
+        # Mock get_issue to return the correct issue by number
+        def mock_get_issue(issue_number):
+            if issue_number == 101:
+                return canonical_issue
+            elif issue_number == 102:
+                return duplicate_issue
+            return Mock()
+            
+        store.repo.get_issue = Mock(side_effect=mock_get_issue)
+        
+        # Mock _get_object_id to return the correct object ID
+        store._get_object_id = Mock(return_value="metrics")
+        
+        # Mock deprecate_issue to simulate the deprecation and return success
+        store.deprecate_issue = Mock(return_value={
+            "success": True,
+            "source_issue": 102,
+            "source_object_id": "metrics",
+            "target_issue": 101,
+            "target_object_id": "metrics",
+            "reason": DeprecationReason.DUPLICATE
+        })
+        
+        # Execute deduplicate_object
+        result = store.deduplicate_object("metrics")
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["canonical_object_id"] == "metrics"
+        assert result["canonical_issue"] == 101
+        assert result["duplicates_processed"] == 1
+        
+        # Verify deprecate_issue was called with correct params
+        store.deprecate_issue.assert_called_once_with(
+            issue_number=102,
+            target_issue_number=101,
+            reason=DeprecationReason.DUPLICATE
+        )
+    
+    # New test to verify deprecate_issue
+    def test_deprecate_issue(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test deprecating a specific issue."""
+        store = canonical_store_with_mocks
+        
+        # Create source and target issues
+        source_issue = mock_issue_factory(
+            number=123,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:old-metrics"],
+            created_at=datetime(2025, 1, 5, tzinfo=timezone.utc)
+        )
+        
+        target_issue = mock_issue_factory(
+            number=456,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"],
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+        )
+        
+        # Setup get_issue mock
+        def mock_get_issue(issue_number):
+            if issue_number == 123:
+                return source_issue
+            elif issue_number == 456:
+                return target_issue
+            raise ValueError(f"Unknown issue number: {issue_number}")
+        
+        store.repo.get_issue = Mock(side_effect=mock_get_issue)
+        
+        # Mock _get_object_id to return the correct IDs
+        def mock_get_object_id(issue):
+            if issue.number == 123:
+                return "old-metrics"
+            elif issue.number == 456:
+                return "metrics"
+            return None
+        
+        store._get_object_id = Mock(side_effect=mock_get_object_id)
+        
+        # Mock label creation
+        store.repo.create_label = Mock()
+        
+        # Mock adding/removing labels
+        source_issue.add_to_labels = Mock()
+        source_issue.remove_from_labels = Mock()
+        
+        # Execute deprecate_issue
+        result = store.deprecate_issue(
+            issue_number=123,
+            target_issue_number=456,
+            reason=DeprecationReason.MERGED
+        )
+        
+        # Verify result
+        assert result["success"] is True
+        assert result["source_issue"] == 123
+        assert result["source_object_id"] == "old-metrics"
+        assert result["target_issue"] == 456
+        assert result["target_object_id"] == "metrics"
+        assert result["reason"] == DeprecationReason.MERGED
+        
+        # Verify labels were removed/added
+        source_issue.remove_from_labels.assert_called_with(LabelNames.STORED_OBJECT)
+        source_issue.add_to_labels.assert_called_with(
+            LabelNames.DEPRECATED, 
+            f"{LabelNames.MERGED_INTO_PREFIX}metrics",
+            f"{LabelNames.DEPRECATED_BY_PREFIX}456"
+        )
+
+
+    def test_deduplicate_object_no_duplicates(self, canonical_store, mock_canonical_issue):
+        """Test deduplication when no duplicates exist."""
+        # Set up repository to find only one issue
+        canonical_store.repo.get_issues.return_value = [mock_canonical_issue]
+        
+        # Execute deduplicate_object
+        result = canonical_store.deduplicate_object("metrics")
+        
+        # Verify result
+        assert result["success"] is True
+        assert "message" in result
+        assert "No duplicates found" in result["message"]
+
+class TestCanonicalStoreVirtualMerge:
+    """Test virtual merge processing."""
+
+    def test_collect_all_comments(self, canonical_store, mock_canonical_issue, mock_alias_issue, mock_comment_factory):
+        """Test collecting comments from canonical and alias issues."""
+        # Create mock comments for each issue
+        canonical_comments = [
+            mock_comment_factory(
+                body={
+                    "type": "initial_state",
+                    "_data": {"count": 0},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 123  # Include issue number
+                    }
+                },
+                comment_id=1,
+                created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+            ),
+            mock_comment_factory(
+                body={
+                    "_data": {"count": 10},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-02T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 123  # Include issue number
+                    }
+                },
+                comment_id=2,
+                created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+            )
+        ]
+        
+        alias_comments = [
+            mock_comment_factory(
+                body={
+                    "_data": {"period": "daily"},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-10T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 789  # Different issue number
+                    }
+                },
+                comment_id=3,
+                created_at=datetime(2025, 1, 10, tzinfo=timezone.utc)
+            )
+        ]
+        
+        # Set up mock_comments method returns
+        mock_canonical_issue.get_comments.return_value = canonical_comments
+        mock_alias_issue.get_comments.return_value = alias_comments
+        
+        # Set up repository to find canonical and alias issues
+        def mock_get_issues_side_effect(**kwargs):
+            labels = kwargs.get('labels', [])
+            if f"{LabelNames.UID_PREFIX}metrics" in labels and f"{LabelNames.ALIAS_TO_PREFIX}*" not in labels:
+                # When searching for canonical
+                return [mock_canonical_issue]
+            elif f"{LabelNames.ALIAS_TO_PREFIX}metrics" in labels:
+                # When searching for aliases
+                return [mock_alias_issue]
+            return []
+            
+        canonical_store.repo.get_issues.side_effect = mock_get_issues_side_effect
+        
+        # Mock _extract_comment_metadata to return minimal test data
+        def mock_extract_metadata(comment, issue_number, object_id):
+            # Just return basic information directly from comment for testing
+            try:
+                data = json.loads(comment.body)
+                return {
+                    "data": data,
+                    "timestamp": comment.created_at,
+                    "id": comment.id,
+                    "issue_number":issue_number,
+                    "source_issue": issue_number,
+                    "source_object_id": object_id
+                }
+            except:
+                return None
+                
+        canonical_store._extract_comment_metadata = mock_extract_metadata
+        
+        # Execute collect_all_comments
+        comments = canonical_store.collect_all_comments("metrics")
+        
+        # Verify results
+        assert len(comments) == 3
+        
+        # Verify chronological order
+        timestamps = [c["timestamp"] for c in comments]
+        assert timestamps == sorted(timestamps)
+        
+        # Verify comment sources
+        assert comments[0]["source_issue"] == mock_canonical_issue.number
+        assert comments[1]["source_issue"] == mock_canonical_issue.number
+        assert comments[2]["source_issue"] == mock_alias_issue.number
+
+    def test_process_with_virtual_merge(self, canonical_store, mock_canonical_issue, mock_comment_factory):
+        """Test processing virtual merge to build object state."""
+        # Set mock_canonical_issue number
+        mock_canonical_issue.number = 123
+        
+        # Create mock comments with proper structure
+        comments = [
+            {
+                "data": {
+                    "type": "initial_state",
+                    "_data": {"count": 0, "name": "test"},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-01T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 123  # Include issue number
+                    }
+                },
+                "timestamp": datetime(2025, 1, 1, tzinfo=timezone.utc),
+                "id": 1,
+                "source_issue": 123,
+                "source_object_id": "metrics"
+            },
+            {
+                "data": {
+                    "_data": {"count": 10},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-02T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 123  # Include issue number
+                    }
+                },
+                "timestamp": datetime(2025, 1, 2, tzinfo=timezone.utc),
+                "id": 2,
+                "source_issue": 123,
+                "source_object_id": "metrics"
+            },
+            {
+                "data": {
+                    "_data": {"period": "daily"},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-10T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 789  # Different issue number
+                    }
+                },
+                "timestamp": datetime(2025, 1, 10, tzinfo=timezone.utc),
+                "id": 3,
+                "source_issue": 789,
+                "source_object_id": "daily-metrics"
+            },
+            {
+                "data": {
+                    "_data": {"count": 42},
+                    "_meta": {
+                        "client_version": "0.7.0",
+                        "timestamp": "2025-01-15T00:00:00Z",
+                        "update_mode": "append",
+                        "issue_number": 123  # Include issue number
+                    }
+                },
+                "timestamp": datetime(2025, 1, 15, tzinfo=timezone.utc),
+                "id": 4,
+                "source_issue": 123,
+                "source_object_id": "metrics"
+            }
+        ]
+        
+        # Mock collect_all_comments to return our preset comments
+        canonical_store.collect_all_comments = Mock(return_value=comments)
+        canonical_store.resolve_canonical_object_id = Mock(return_value="metrics")
+        
+        # Set up repository to find canonical issue
+        canonical_store.repo.get_issues.return_value = [mock_canonical_issue]
+        
+        # Mock issue edit method
+        mock_canonical_issue.edit = Mock()
+        
+        # Execute process_with_virtual_merge
+        result = canonical_store.process_with_virtual_merge("metrics")
+        
+        # Verify results
+        assert result.meta.object_id == "metrics"
+        assert result.meta.issue_number == 123  # Verify issue number in result metadata
+        
+        # Verify data was merged correctly
+        assert result.data["count"] == 42
+        assert result.data["name"] == "test"
+        assert result.data["period"] == "daily"
+        
+        # Verify canonical issue was updated
+        mock_canonical_issue.edit.assert_called_once()
+
+class TestCanonicalStoreGetUpdate:
+    """Test get and update object operations with virtual merging."""
+
+    def test_get_object_direct(self, canonical_store, mock_canonical_issue):
+        """Test getting an object directly."""
+        # Set mock_canonical_issue number
+        mock_canonical_issue.number = 123
+        
+        # Set up resolve_canonical_object_id to return same ID
+        canonical_store.resolve_canonical_object_id = Mock(return_value="metrics")
+        
+        # Set up process_with_virtual_merge to return a mock object
+        mock_obj = Mock()
+        mock_obj.meta.object_id = "metrics"
+        mock_obj.meta.issue_number = 123  # Set issue number in returned object
+        mock_obj.data = {"count": 42, "name": "test"}
+        canonical_store.process_with_virtual_merge = Mock(return_value=mock_obj)
+        
+        # Execute get_object
+        result = canonical_store.get_object("metrics")
+        
+        # Verify results
+        assert result.meta.object_id == "metrics"
+        assert result.meta.issue_number == 123  # Verify issue number
+        assert result.data["count"] == 42
+        
+        # Verify correct methods were called
+        canonical_store.resolve_canonical_object_id.assert_called_with("metrics")
+        canonical_store.process_with_virtual_merge.assert_called_with("metrics")
+
+    def test_get_object_via_alias(self, canonical_store):
+        """Test getting an object via its alias."""
+        # Set up resolve_canonical_object_id to return canonical ID
+        canonical_store.resolve_canonical_object_id = Mock(return_value="metrics")
+        
+        # Set up process_with_virtual_merge to return a mock object
+        mock_obj = Mock()
+        mock_obj.meta.object_id = "metrics"
+        mock_obj.meta.issue_number = 123  # Set issue number in returned object
+        mock_obj.data = {"count": 42, "name": "test"}
+        canonical_store.process_with_virtual_merge = Mock(return_value=mock_obj)
+        
+        # Execute get_object with alias ID
+        result = canonical_store.get_object("daily-metrics")
+        
+        # Verify results
+        assert result.meta.object_id == "metrics"
+        assert result.meta.issue_number == 123  # Verify issue number
+        assert result.data["count"] == 42
+        
+        # Verify correct methods were called
+        canonical_store.resolve_canonical_object_id.assert_called_with("daily-metrics")
+        canonical_store.process_with_virtual_merge.assert_called_with("metrics")
+
+    def test_update_object_alias(self, canonical_store, mock_alias_issue):
+        """Test updating an object via its alias."""
+        # Set mock_alias_issue number
+        mock_alias_issue.number = 789
+        
+        # Setup to find the alias issue
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Mock issue create_comment and edit methods
+        mock_alias_issue.create_comment = Mock()
+        mock_alias_issue.edit = Mock()
+        
+        # Mock get_object to return a result after update
+        mock_obj = Mock()
+        mock_obj.meta.object_id = "metrics"
+        mock_obj.meta.issue_number = 123  # Set issue number in result
+        mock_obj.data = {"count": 42, "name": "test", "period": "daily", "new_field": "value"}
+        canonical_store.get_object = Mock(return_value=mock_obj)
+        
+        # Execute update_object on the alias
+        changes = {"new_field": "value"}
+        result = canonical_store.update_object("daily-metrics", changes)
+        
+        # Verify results
+        assert result.meta.object_id == "metrics"
+        assert result.meta.issue_number == 123  # Verify issue number
+        assert result.data["new_field"] == "value"
+        
+        # Verify comment was added to alias issue
+        mock_alias_issue.create_comment.assert_called_once()
+        
+        # Verify issue was reopened
+        mock_alias_issue.edit.assert_called_with(state="open")
+        
+        # Verify comment payload included issue number
+        call_args = mock_alias_issue.create_comment.call_args[0]
+        comment_payload = json.loads(call_args[0])
+        assert "issue_number" in comment_payload["_meta"]
+        assert comment_payload["_meta"]["issue_number"] == 789  # Should use alias issue number
+
+    def test_update_object_deprecated(self, canonical_store, mock_deprecated_issue, mock_canonical_issue, mock_label_factory):
+        """Test updating a deprecated object."""
+        # Set mock issue numbers
+        mock_deprecated_issue.number = 457
+        mock_canonical_issue.number = 123
+        
+        # Setup to find a deprecated issue pointing to a canonical object
+        def mock_get_issues_side_effect(**kwargs):
+            labels = kwargs.get('labels', [])
+            if f"{LabelNames.MERGED_INTO_PREFIX}*" in labels and LabelNames.DEPRECATED in labels:
+                return [mock_deprecated_issue]
+            elif f"{LabelNames.UID_PREFIX}metrics" in labels:
+                return [mock_canonical_issue]
+            return []
+            
+        canonical_store.repo.get_issues.side_effect = mock_get_issues_side_effect
+        
+        # Setup mock_deprecated_issue to have proper labels
+        mock_deprecated_issue.labels = [
+            mock_label_factory(name=LabelNames.DEPRECATED),
+            mock_label_factory(name=f"{LabelNames.MERGED_INTO_PREFIX}metrics")
+        ]
+        
+        # Mock issue create_comment and edit methods
+        mock_canonical_issue.create_comment = Mock()
+        mock_canonical_issue.edit = Mock()
+        
+        # Mock get_object to return a result after update
+        mock_obj = Mock()
+        mock_obj.meta.object_id = "metrics"
+        mock_obj.meta.issue_number = 123  # Set issue number
+        mock_obj.data = {"count": 42, "name": "test", "new_field": "value"}
+        canonical_store.get_object = Mock(return_value=mock_obj)
+        canonical_store.resolve_canonical_object_id = Mock(return_value="metrics")
+        
+        # Execute update_object
+        changes = {"new_field": "value"}
+        result = canonical_store.update_object("old-metrics", changes)
+        
+        # Verify results
+        assert result.meta.object_id == "metrics"
+        assert result.meta.issue_number == 123  # Verify issue number
+        assert result.data["new_field"] == "value"
+    
+    def test_update_object_on_alias_preserves_identity(self, canonical_store, mock_alias_issue):
+        """
+        Test that an update on an alias returns the object without merging into the canonical record.
+        """
+        # Set mock_alias_issue number
+        mock_alias_issue.number = 789
+        
+        # Setup: mock_alias_issue should represent the alias "daily-metrics" pointing to "metrics".
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Mock update behavior
+        mock_alias_issue.create_comment = Mock()
+        mock_alias_issue.edit = Mock()
+        
+        # Mock get_object with canonicalize=False to return the alias object
+        alias_obj = Mock()
+        alias_obj.meta.object_id = "daily-metrics"
+        alias_obj.meta.issue_number = 789  # Set alias issue number
+        alias_obj.data = {"period": "daily", "additional": "info"}
+        
+        canonical_store.get_object = Mock(return_value=alias_obj)
+        
+        # Assume update_object is called with changes.
+        changes = {"additional": "info"}
+        updated_obj = canonical_store.update_object("daily-metrics", changes)
+        
+        # Since update_object now returns get_object(..., canonicalize=False),
+        # the alias identity should be preserved.
+        assert updated_obj.meta.object_id == "daily-metrics"
+        assert updated_obj.meta.issue_number == 789  # Verify issue number
+    
+
+class TestCanonicalStoreFinding:
+    """Test finding duplicates and aliases."""
+    
+    def test_find_duplicates(self, canonical_store_with_mocks, mock_issue_factory):
+        """Test finding duplicate objects."""
+        store = canonical_store_with_mocks
+        
+        # Create issues with same UID
+        issue1 = mock_issue_factory(
+            number=101,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"]
+        )
+        
+        issue2 = mock_issue_factory(
+            number=102,
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, "UID:metrics"]
+        )
+        
+        # Setup mock for get_issues
+        store.repo.get_issues.return_value = [issue1, issue2]
+        
+        # Execute find_duplicates
+        duplicates = store.find_duplicates()
+        
+        # Verify results - should find duplicates for "UID:metrics"
+        assert len(duplicates) == 1
+        assert "UID:metrics" in duplicates
+        assert len(duplicates["UID:metrics"]) == 2
+
+    def test_find_aliases(self, canonical_store, mock_alias_issue):
+        """Test finding aliases for objects."""
+        # Set mock_alias_issue number
+        mock_alias_issue.number = 789
+        
+        # Set up repository to return a list of alias issues
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Mock _get_object_id method
+        canonical_store._get_object_id = Mock(return_value="daily-metrics")
+        
+        # Execute find_aliases
+        aliases = canonical_store.find_aliases()
+        
+        # Verify results
+        assert len(aliases) == 1
+        assert aliases["daily-metrics"] == "metrics"
+
+    def test_find_aliases_for_specific_object(self, canonical_store, mock_alias_issue):
+        """Test finding aliases for a specific object."""
+        # Set mock_alias_issue number
+        mock_alias_issue.number = 789
+        
+        # Set up repository to return a list of alias issues
+        canonical_store.repo.get_issues.return_value = [mock_alias_issue]
+        
+        # Mock _get_object_id method
+        canonical_store._get_object_id = Mock(return_value="daily-metrics")
+        
+        # Execute find_aliases with specific object
+        aliases = canonical_store.find_aliases("metrics")
+        
+        # Verify results
+        assert len(aliases) == 1
+        assert aliases["daily-metrics"] == "metrics"
+        
+        # Verify correct query was made
+        canonical_store.repo.get_issues.assert_called_with(
+            labels=[f"{LabelNames.ALIAS_TO_PREFIX}metrics"],
+            state="all"
+        )
+    
+    # def test_get_object_canonicalize_modes(self, canonical_store_with_mocks, mock_issue_factory, mock_comment_factory):
+    #     """Test different canonicalization modes in get_object."""
+    #     store = canonical_store_with_mocks
+        
+    #     # Create a mock alias issue (daily-metrics -> metrics)
+    #     alias_issue = mock_issue_factory(
+    #         number=101,
+    #         labels=["stored-object", "UID:daily-metrics", "ALIAS-TO:metrics"],
+    #         body=json.dumps({"period": "daily"})
+    #     )
+        
+    #     # Create a mock canonical issue with initial state
+    #     initial_state_comment = mock_comment_factory(
+    #         body={
+    #             "type": "initial_state",
+    #             "_data": {"count": 42},
+    #             "_meta": {
+    #                 "client_version": "0.7.0", 
+    #                 "timestamp": "2025-01-01T00:00:00Z",
+    #                 "update_mode": "append",
+    #                 "issue_number": 102  # Include issue number
+    #             }
+    #         },
+    #         comment_id=1
+    #     )
+        
+    #     canonical_issue = mock_issue_factory(
+    #         number=102,
+    #         labels=["stored-object", "UID:metrics"],
+    #         body=json.dumps({"count": 42}),
+    #         comments=[initial_state_comment]
+    #     )
+        
+    #     # Setup mocks for get_issues
+    #     def mock_get_issues(**kwargs):
+    #         labels = kwargs.get('labels', [])
+    #         if isinstance(labels, list):
+    #             if any(label == "UID:daily-metrics" for label in labels):
+    #                 return [alias_issue]
+    #             elif any(label == "UID:metrics" for label in labels):
+    #                 return [canonical_issue]
+    #             elif any(label == "ALIAS-TO:metrics" for label in labels):
+    #                 return [alias_issue]
+    #         return []
+        
+    #     store.repo.get_issues = Mock(side_effect=mock_get_issues)
+        
+    #     # Setup resolve_canonical_object_id to correctly resolve the alias
+    #     store.resolve_canonical_object_id = Mock(side_effect=lambda obj_id: "metrics" if obj_id == "daily-metrics" else obj_id)
+        
+    #     # Setup get_object_by_number
+    #     def get_object_by_number(number):
+    #         if number == 101:  # alias
+    #             meta = Mock(
+    #                 object_id="daily-metrics",
+    #                 label="daily-metrics",
+    #                 issue_number=101,  # Include issue number
+    #                 created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    #                 updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    #                 version=1
+    #             )
+    #             return Mock(meta=meta, data={"period": "daily"})
+    #         else:  # canonical
+    #             meta = Mock(
+    #                 object_id="metrics",
+    #                 label="metrics",
+    #                 issue_number=102,  # Include issue number
+    #                 created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    #                 updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+    #                 version=1
+    #             )
+    #             return Mock(meta=meta, data={"count": 42})
+        
+    #     store.issue_handler.get_object_by_number = Mock(side_effect=get_object_by_number)
+        
+    #     # Mock collect_all_comments to include the initial state
+    #     store.collect_all_comments = Mock(return_value=[
+    #         {
+    #             "data": {
+    #                 "type": "initial_state",
+    #                 "_data": {"count": 42},
+    #                 "_meta": {
+    #                     "client_version": "0.7.0",
+    #                     "timestamp": "2025-01-01T00:00:00Z",
+    #                     "update_mode": "append",
+    #                     "issue_number": 102  # Include issue number
+    #                 }
+    #             },
+    #             "timestamp": datetime(2025, 1, 1, tzinfo=timezone.utc),
+    #             "id": 1,
+    #             "source_issue": 102,
+    #             "source_object_id": "metrics"
+    #         }
+    #     ])
+        
+    #     # Mock process_with_virtual_merge
+    #     store.process_with_virtual_merge = Mock(return_value=Mock(
+    #         meta=Mock(
+    #             object_id="metrics",
+    #             issue_number=102  # Include issue number
+    #         ),
+    #         data={"count": 42}
+    #     ))
+        
+    #     # Test canonicalize=True (default) - should return canonical object
+    #     obj_canonical = store.get_object("daily-metrics", canonicalize=True)
+    #     assert obj_canonical.meta.object_id == "metrics"
+    #     assert obj_canonical.meta.issue_number == 102  # Verify issue number
+        
+    #     # Test canonicalize=False - should return alias object directly
+    #     obj_direct = store.get_object("daily-metrics", canonicalize=False)
+    #     assert obj_direct.meta.object_id == "daily-metrics"
+    #     assert obj_direct.meta.issue_number == 101  # Verify issue number
+
+
+
+---
+File: tests/unit/test_cli.py
+---
+# tests/unit/test_cli.py (Updated for Iterator Support)
+
+import json
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+import pytest
+from unittest.mock import Mock, patch
+
+from gh_store.__main__ import CLI
+from gh_store.cli import commands
+from gh_store.core.exceptions import GitHubStoreError
+
+class TestCLIBasicOperations:
+    """Test basic CLI operations like create, get, update, delete"""
+    
+    def test_create_object(self, mock_cli, mock_store_response, tmp_path, caplog):
+        """Test creating a new object via CLI"""
+        data = json.dumps({"name": "test", "value": 42})
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            mock_store.create.return_value = mock_store_response
+            
+            # Execute command
+            mock_cli.create("test-123", data)
+            
+            # Verify store interactions
+            mock_store.create.assert_called_once_with(
+                "test-123",
+                {"name": "test", "value": 42}
+            )
+            assert "Created object test-123" in caplog.text
+    
+    def test_get_object(self, mock_cli, mock_store_response, tmp_path):
+        """Test retrieving an object via CLI"""
+        output_file = tmp_path / "output.json"
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            mock_store.get.return_value = mock_store_response
+            
+            # Execute command
+            mock_cli.get("test-123", output=str(output_file))
+            
+            # Verify output file
+            assert output_file.exists()
+            content = json.loads(output_file.read_text())
+            assert content["object_id"] == "test-123"
+            assert content["data"] == {"name": "test", "value": 42}
+    
+    def test_delete_object(self, mock_cli, mock_store_response, caplog):
+        """Test deleting an object via CLI"""
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            
+            # Execute command
+            mock_cli.delete("test-123")
+            
+            # Verify store interactions
+            mock_store.delete.assert_called_once_with("test-123")
+            assert "Deleted object test-123" in caplog.text
+
+class TestCLIUpdateOperations:
+    """Test update-related CLI operations"""
+    
+    def test_update_object(self, mock_cli, mock_store_response, caplog):
+        """Test updating an object via CLI"""
+        changes = json.dumps({"value": 43})
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            mock_store.update.return_value = mock_store_response
+            
+            # Execute command
+            mock_cli.update("test-123", changes)
+            
+            # Verify store interactions
+            mock_store.update.assert_called_once_with(
+                "test-123",
+                {"value": 43}
+            )
+            assert "Updated object" in caplog.text
+    
+    def test_process_updates(self, mock_cli, mock_store_response, caplog):
+        """Test processing pending updates via CLI"""
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            mock_store.process_updates.return_value = mock_store_response
+            
+            # Execute command
+            mock_cli.process_updates(123)
+            
+            # Verify store interactions
+            mock_store.process_updates.assert_called_once_with(123)
+
+# Add to tests/unit/test_cli.py - Enhanced snapshot tests
+
+class TestCLISnapshotOperations:
+    """Test snapshot-related CLI operations"""
+    
+    def test_create_snapshot(self, mock_cli, mock_stored_objects, tmp_path, caplog):
+        """Test creating a snapshot via CLI"""
+        output_path = tmp_path / "snapshot.json"
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            
+            # Create iterator from mock_stored_objects
+            mock_store.list_all.return_value = mock_stored_objects
+            
+            # Execute command
+            mock_cli.snapshot(output=str(output_path))
+            
+            # Verify output
+            assert output_path.exists()
+            snapshot = json.loads(output_path.read_text())
+            assert "snapshot_time" in snapshot
+            assert len(snapshot["objects"]) == len(mock_stored_objects)
+            assert "Snapshot written to" in caplog.text
+    
+    def test_update_snapshot_with_changes(self, mock_cli, mock_stored_objects, mock_snapshot_file_factory, caplog):
+        """Test updating snapshot when objects have actually changed."""
+        # Create a snapshot with a known timestamp
+        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+        snapshot_path = mock_snapshot_file_factory(snapshot_time=one_day_ago, include_objects=[0])
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            
+            # Configure a mock object that's newer than the snapshot
+            updated_obj = mock_stored_objects[1]
+            updated_obj.meta.updated_at = one_day_ago + timedelta(hours=2)
+            
+            # Only return the "updated" object
+            mock_store.list_updated_since.return_value = [updated_obj]
+            
+            # Store original snapshot data for comparison
+            original_snapshot = json.loads(snapshot_path.read_text())
+            
+            # Execute command
+            mock_cli.update_snapshot(str(snapshot_path))
+            
+            # Verify correct arguments
+            mock_store.list_updated_since.assert_called_once()
+            assert mock_store.list_updated_since.call_args[0][0] == one_day_ago
+            
+            # Read updated snapshot
+            updated_snapshot = json.loads(snapshot_path.read_text())
+            
+            # Verify timestamp was updated
+            assert updated_snapshot["snapshot_time"] != original_snapshot["snapshot_time"]
+            
+            # Verify updated object was added
+            assert updated_obj.meta.object_id in updated_snapshot["objects"]
+            
+            # Verify log message
+            assert "Updated 1 objects in snapshot" in caplog.text
+    
+    def test_update_snapshot_no_changes(self, mock_cli, mock_stored_objects, mock_snapshot_file_factory, caplog):
+        """Test not updating snapshot when no objects have changed."""
+        # Create a snapshot with a known timestamp
+        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+        snapshot_path = mock_snapshot_file_factory(snapshot_time=one_day_ago)
+        
+        with patch('gh_store.cli.commands.get_store') as mock_get_store:
+            mock_store = Mock()
+            mock_get_store.return_value = mock_store
+            
+            # Return empty iterator - no objects were updated
+            mock_store.list_updated_since.return_value = []
+            
+            # Store original snapshot data for comparison
+            original_snapshot = json.loads(snapshot_path.read_text())
+            
+            # Execute command
+            mock_cli.update_snapshot(str(snapshot_path))
+            
+            # Read updated snapshot
+            updated_snapshot = json.loads(snapshot_path.read_text())
+            
+            # Verify timestamp was NOT updated
+            assert updated_snapshot["snapshot_time"] == original_snapshot["snapshot_time"]
+            
+            # Verify objects are unchanged
+            assert updated_snapshot["objects"] == original_snapshot["objects"]
+            
+            # Verify log message
+            assert "No updates found since last snapshot" in caplog.text
+    
+    def test_update_snapshot_empty_file(self, mock_cli, mock_stored_objects, tmp_path, caplog):
+        """Test error handling when updating a snapshot with invalid content."""
+        empty_file = tmp_path / "empty.json"
+        empty_file.write_text("{}")
+        
+        with pytest.raises(Exception) as exc_info:
+            mock_cli.update_snapshot(str(empty_file))
+            
+
+class TestCLIErrorHandling:
+    """Test CLI error handling scenarios"""
+    
+    def test_invalid_json_data(self, mock_cli):
+        """Test handling of invalid JSON input"""
+        with pytest.raises(json.decoder.JSONDecodeError) as exc_info:
+            mock_cli.create("test-123", "invalid json")
+    
+    def test_file_not_found(self, mock_cli, caplog):
+        """Test handling of missing snapshot file"""
+        with pytest.raises(FileNotFoundError) as exc_info:
+            mock_cli.update_snapshot("/nonexistent/path")
+            
+        assert "Snapshot file not found" in caplog.text
+
+# should probably just deprecate all the config stuff.
+# class TestCLIConfigHandling:
+#     """Test CLI configuration handling"""
+    
+#     def test_init_creates_config(self, mock_cli, tmp_path, caplog):
+#         """Test initialization of new config file."""
+#         config_path = tmp_path / "new_config.yml"
+        
+#         with patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:
+#             # Run command
+#             mock_cli.init(config=str(config_path))
+            
+#             # Verify config creation was attempted
+#             mock_ensure.assert_called_once_with(config_path)
+    
+#     def test_custom_config_path(self, mock_cli, mock_config, mock_store_response):
+#         """Test using custom config path"""
+#         with patch('gh_store.cli.commands.get_store') as mock_get_store, \
+#              patch('gh_store.cli.commands.ensure_config_exists') as mock_ensure:
+#             mock_store = Mock()
+#             mock_get_store.return_value = mock_store
+#             mock_store.get.return_value = mock_store_response
+            
+#             # Execute command with custom config
+#             mock_cli.get("test-123", config=str(mock_config))
+            
+#             # Verify store creation
+#             mock_get_store.assert_called_with(
+#                 token=None,
+#                 repo=None,
+#                 config=str(mock_config)
+#             )
+
+
+
+---
+File: tests/unit/test_comment_handler.py
+---
+# tests/unit/test_comment_handler.py
+
+import json
+from datetime import datetime, timezone
+from unittest.mock import Mock, patch
+
+import pytest
+from gh_store.handlers.comment import CommentHandler
+from gh_store.core.version import CLIENT_VERSION
+
+@pytest.fixture
+def mock_repo():
+    return Mock()
+
+@pytest.fixture
+def mock_config():
+    return Mock(
+        store=Mock(
+            reactions=Mock(
+                processed="+1",
+                initial_state="rocket"
+            )
+        )
+    )
+
+@pytest.fixture
+def comment_handler(mock_repo, mock_config):
+    return CommentHandler(mock_repo, mock_config)
+
+def test_get_unprocessed_updates_mixed_comments(comment_handler, mock_repo):
+    """Test processing a mix of valid and invalid comments"""
+    
+    # Setup mock issue with various types of comments
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    
+    # Create a variety of comments to test filtering
+    comments = [
+        # Valid update with metadata from authorized user
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'valid'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])  # No reactions = unprocessed
+        ),
+        
+        # Already processed update (should be skipped)
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'update': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        ),
+        
+        # Legacy format comment (should be handled with generated metadata)
+        Mock(
+            id=3,
+            body='{"legacy": "update"}',
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Initial state comment (should be skipped)
+        Mock(
+            id=4,
+            body=json.dumps({
+                'type': 'initial_state',
+                '_data': {'initial': 'state'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Invalid JSON comment (should be skipped)
+        Mock(
+            id=5,
+            body='not json',
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Valid JSON but unauthorized user (should be skipped)
+        Mock(
+            id=6,
+            body=json.dumps({
+                '_data': {'update': 'unauthorized'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-02T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        ),
+        
+        # Regular discussion comment (should be skipped)
+        Mock(
+            id=7,
+            body='Just a regular comment',
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    # Mock the access control to only authorize "owner"
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    # Get unprocessed updates
+    updates = comment_handler.get_unprocessed_updates(123)
+    
+    # Should get two valid updates (new format and legacy format)
+    assert len(updates) == 2
+    assert updates[0].comment_id == 1
+    assert updates[0].changes == {'update': 'valid'}
+    assert updates[1].comment_id == 3
+    assert updates[1].changes == {'legacy': 'update'}
+
+def test_get_unprocessed_updates_unauthorized_json(comment_handler, mock_repo):
+    """Test that valid JSON updates from unauthorized users are skipped"""
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    
+    # Create an unauthorized but valid JSON update
+    comment = Mock(
+        id=1,
+        body=json.dumps({
+            '_data': {'malicious': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append',
+                'issue_number': 123  # Add issue number
+            }
+        }),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        user=Mock(login="attacker"),
+        get_reactions=Mock(return_value=[])
+    )
+    
+    issue.get_comments.return_value = [comment]
+    
+    # Mock access control to reject the user
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_get_unprocessed_updates_with_codeowners(comment_handler, mock_repo):
+    """Test processing updates with CODEOWNERS authorization"""
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    
+    # Create comments from different users
+    comments = [
+        # From CODEOWNERS team member
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'from-team'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            user=Mock(login="team-member"),
+            get_reactions=Mock(return_value=[])
+        ),
+        # From unauthorized user
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'update': 'unauthorized'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-02T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            created_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            user=Mock(login="random-user"),
+            get_reactions=Mock(return_value=[])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    # Mock CODEOWNERS to include team-member
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    # Set up CODEOWNERS content
+    codeowners_content = "* @team-member"
+    comment_handler.access_control._find_codeowners_file = Mock(
+        return_value=codeowners_content
+    )
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    
+    # Should only get update from team member
+    assert len(updates) == 1
+    assert updates[0].comment_id == 1
+    assert updates[0].changes == {'update': 'from-team'}
+
+def test_get_unprocessed_updates_empty(comment_handler, mock_repo):
+    """Test behavior with no comments"""
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    issue.get_comments.return_value = []
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_get_unprocessed_updates_all_processed(comment_handler, mock_repo):
+    """Test behavior when all comments are already processed"""
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    
+    # Create some processed comments
+    comments = [
+        Mock(
+            id=1,
+            body=json.dumps({
+                '_data': {'update': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        ),
+        Mock(
+            id=2,
+            body=json.dumps({
+                '_data': {'another': 'processed'},
+                '_meta': {
+                    'client_version': CLIENT_VERSION,
+                    'timestamp': '2025-01-01T00:00:00Z',
+                    'update_mode': 'append',
+                    'issue_number': 123  # Add issue number
+                }
+            }),
+            user=Mock(login="owner"),
+            get_reactions=Mock(return_value=[Mock(content="+1")])
+        )
+    ]
+    
+    issue.get_comments.return_value = comments
+    
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_create_comment_payload(comment_handler):
+    """Test creation of properly structured comment payloads"""
+    data = {'test': 'data'}
+    issue_number = 123  # Add issue number parameter
+    
+    # Test regular update payload
+    update_payload = comment_handler.create_comment_payload(data, issue_number)
+    assert update_payload._data == data
+    assert update_payload._meta.client_version == CLIENT_VERSION
+    assert update_payload._meta.update_mode == 'append'
+    assert update_payload._meta.issue_number == issue_number  # Verify issue_number
+    assert update_payload.type is None
+    
+    # Test initial state payload
+    initial_payload = comment_handler.create_comment_payload(data, issue_number, 'initial_state')
+    assert initial_payload._data == data
+    assert initial_payload._meta.client_version == CLIENT_VERSION
+    assert initial_payload._meta.update_mode == 'append'
+    assert initial_payload._meta.issue_number == issue_number  # Verify issue_number
+    assert initial_payload.type == 'initial_state'
+
+def test_get_unprocessed_updates_malformed_metadata(comment_handler, mock_repo):
+    """Test handling of malformed metadata in comments"""
+    issue = Mock()
+    issue.number = 123  # Add issue number
+    mock_repo.get_issue.return_value = issue
+    
+    # Create comment with malformed metadata
+    malformed_comment = Mock(
+        id=1,
+        body=json.dumps({
+            '_data': {'test': 'data'},
+            '_meta': {
+                # Missing required fields
+                'client_version': CLIENT_VERSION,
+                # missing issue_number
+            }
+        }),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        user=Mock(login="owner"),
+        get_reactions=Mock(return_value=[])
+    )
+    
+    issue.get_comments.return_value = [malformed_comment]
+    
+    # Mock access control
+    comment_handler.access_control._get_owner_info = Mock(
+        return_value={"login": "owner", "type": "User"}
+    )
+    comment_handler.access_control._find_codeowners_file = Mock(return_value=None)
+    
+    # Should skip malformed comment
+    updates = comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_apply_update_preserves_metadata(comment_handler):
+    """Test that applying updates preserves any existing metadata"""
+    # Create mock object with existing metadata
+    obj = Mock()
+    obj.meta = Mock(object_id='test-123', issue_number=123)  # Add issue_number
+    obj.data = {
+        'value': 1,
+        '_meta': {
+            'some': 'metadata'
+        }
+    }
+    
+    # Create update that includes metadata
+    update = Mock(
+        comment_id=1,
+        timestamp=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        changes={
+            'value': 2,
+            '_meta': {
+                'new': 'metadata'
+            }
+        }
+    )
+    
+    # Apply update
+    result = comment_handler.apply_update(obj, update)
+    
+    # Verify metadata was updated correctly
+    assert result.data['value'] == 2
+    assert result.data['_meta']['some'] == 'metadata'
+    assert result.data['_meta']['new'] == 'metadata'
+
+
+
+---
+File: tests/unit/test_config.py
+---
+# tests/unit/test_config.py
+
+from pathlib import Path
+import pytest
+from unittest.mock import patch, mock_open
+import yaml
+
+from gh_store.core.store import GitHubStore, DEFAULT_CONFIG_PATH
+
+def test_store_uses_default_config_when_no_path_provided(mock_github, mock_config_file):
+    """Test that store uses packaged default config when no config exists"""
+    _, mock_repo = mock_github
+    
+    # Mock the default config path to not exist
+    with patch('pathlib.Path.exists', return_value=False):
+        store = GitHubStore(token="fake-token", repo="owner/repo")
+        
+        # Updated assertions to match fixture config
+        assert store.config.store.base_label == "stored-object"
+        assert store.config.store.reactions.processed == "+1"
+
+def test_store_uses_provided_config_path(mock_github, tmp_path):
+    """Test that store uses provided config path when it exists"""
+    _, mock_repo = mock_github
+    
+    # Create a test config file
+    config_path = tmp_path / "test_config.yml"
+    test_config = {
+        "store": {
+            "base_label": "stored-object",  # Matches fixture
+            "uid_prefix": "UID:",
+            "reactions": {
+                "processed": "+1",  # Matches fixture
+                "initial_state": "rocket"  # Matches fixture
+            }
+        }
+    }
+    config_path.write_text(yaml.dump(test_config))
+    
+    store = GitHubStore(token="fake-token", repo="owner/repo", config_path=config_path)
+    
+    assert store.config.store.base_label == "stored-object"
+    assert store.config.store.reactions.processed == "+1"
+
+def test_store_raises_error_for_nonexistent_custom_config(mock_github):
+    """Test that store raises error when custom config path doesn't exist"""
+    _, mock_repo = mock_github
+    
+    with pytest.raises(FileNotFoundError):
+        GitHubStore(
+            token="fake-token",
+            repo="owner/repo",
+            config_path=Path("/nonexistent/config.yml")
+        )
+
+def test_default_config_path_is_in_user_config_dir():
+    """Test that default config path is in user's config directory"""
+    expected_path = Path.home() / ".config" / "gh-store" / "config.yml"
+    assert DEFAULT_CONFIG_PATH == expected_path
+
+
+
+---
+File: tests/unit/test_object_history.py
+---
+# tests/unit/test_object_history.py
+
+from datetime import datetime, timezone
+import json
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.exceptions import ObjectNotFound
+
+@pytest.fixture
+def history_mock_comments(mock_comment):
+    """Create series of comments representing object history"""
+    comments = []
+    
+    # Initial state
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "type": "initial_state",
+            "data": {"name": "test", "value": 42},
+            "timestamp": "2025-01-01T00:00:00Z"
+        },
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    ))
+    
+    # First update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 43},
+            "_meta": {
+                "client_version": "0.5.1",
+                "timestamp": "2025-01-02T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=2,
+        created_at=datetime(2025, 1, 2, tzinfo=timezone.utc)
+    ))
+    
+    # Second update
+    comments.append(mock_comment(
+        user_login="repo-owner",
+        body={
+            "_data": {"value": 44},
+            "_meta": {
+                "client_version": "0.5.1",
+                "timestamp": "2025-01-03T00:00:00Z",
+                "update_mode": "append"
+            }
+        },
+        comment_id=3,
+        created_at=datetime(2025, 1, 3, tzinfo=timezone.utc)
+    ))
+    
+    return comments
+
+def test_get_object_history_initial_state(store, mock_issue, history_mock_comments):
+    """Test that initial state is correctly extracted from history"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    initial_state = history[0]
+    assert initial_state["type"] == "initial_state"
+    assert initial_state["data"] == {"name": "test", "value": 42}
+    assert initial_state["comment_id"] == 1
+
+def test_get_object_history_updates_sequence(store, mock_issue, history_mock_comments):
+    """Test that updates are returned in correct chronological order"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Verify updates sequence
+    assert len(history) == 3
+    assert [entry["data"].get("value") for entry in history if "value" in entry["data"]] == [42, 43, 44]
+    assert [entry["comment_id"] for entry in history] == [1, 2, 3]
+
+def test_get_object_history_metadata_handling(store, mock_issue, history_mock_comments):
+    """Test that metadata is correctly preserved in history"""
+    issue = mock_issue(
+        number=1,
+        comments=history_mock_comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Check metadata for updates
+    update = history[1]
+    assert "metadata" in update
+    assert update["metadata"]["client_version"] == "0.5.1"
+    assert update["metadata"]["update_mode"] == "append"
+
+def test_get_object_history_legacy_format(store, mock_issue, mock_comment):
+    """Test handling of legacy format comments in history"""
+    legacy_comment = mock_comment(
+        user_login="repo-owner",
+        body={"value": 43},  # Legacy format without metadata
+        comment_id=1,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc)
+    )
+    
+    issue = mock_issue(
+        number=1,
+        comments=[legacy_comment]
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    assert len(history) == 1
+    assert history[0]["type"] == "update"
+    assert history[0]["data"] == {"value": 43}
+    assert history[0]["metadata"]["client_version"] == "legacy"
+
+def test_comment_history_json_handling(store, mock_issue, mock_comment):
+    """Test processing of valid JSON comments in history"""
+    comments = [
+        # First comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 42},
+            comment_id=1
+        ),
+        # Second comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 43},
+            comment_id=2
+        ),
+        # Third comment
+        mock_comment(
+            user_login="repo-owner",
+            body={"value": 44},
+            comment_id=3
+        )
+    ]
+    
+    issue = mock_issue(
+        number=1,
+        comments=comments
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    history = store.issue_handler.get_object_history("test-123")
+    
+    # Verify all valid comments are processed
+    assert len(history) == 3
+    assert [entry["data"]["value"] for entry in history] == [42, 43, 44]
+    assert [entry["comment_id"] for entry in history] == [1, 2, 3]
+
+def test_get_object_history_nonexistent(store):
+    """Test retrieving history for nonexistent object"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.issue_handler.get_object_history("nonexistent")
+
+
+
+---
+File: tests/unit/test_security.py
+---
+# tests/unit/test_security.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock, patch
+from github import GithubException
+
+from gh_store.core.access import AccessControl
+from gh_store.core.exceptions import AccessDeniedError
+from gh_store.core.version import CLIENT_VERSION
+
+# Authorization Tests
+
+def test_owner_always_authorized(mock_github):
+    """Test that repository owner is always authorized regardless of CODEOWNERS"""
+    _, mock_repo = mock_github
+    
+    # Override get_contents to return no CODEOWNERS
+    mock_repo.get_contents = Mock(side_effect=GithubException(404, "Not found"))
+    
+    ac = AccessControl(mock_repo)
+    assert ac._is_authorized("repo-owner") is True
+
+def test_codeowners_authorization(mock_github):
+    """Test authorization via CODEOWNERS file"""
+    _, mock_repo = mock_github
+    
+    # Override CODEOWNERS content
+    mock_content = Mock()
+    mock_content.decoded_content = b"* @maintainer @contributor"
+    mock_repo.get_contents = Mock(return_value=mock_content)
+    
+    ac = AccessControl(mock_repo)
+    assert ac._is_authorized("maintainer") is True
+    assert ac._is_authorized("contributor") is True
+    assert ac._is_authorized("random-user") is False
+
+def test_organization_ownership(mock_github):
+    """Test authorization with organization ownership"""
+    _, mock_repo = mock_github
+    
+    # Override owner type
+    owner = Mock()
+    owner.login = "org-name"
+    owner.type = "Organization"
+    mock_repo.owner = owner
+    
+    ac = AccessControl(mock_repo)
+    owner_info = ac._get_owner_info()
+    
+    assert owner_info["login"] == "org-name"
+    assert owner_info["type"] == "Organization"
+    assert ac._is_authorized("org-name") is True
+
+def test_codeowners_file_locations(mock_github):
+    """Test CODEOWNERS file location precedence"""
+    _, mock_repo = mock_github
+    
+    for test_path in ['.github/CODEOWNERS', 'docs/CODEOWNERS', 'CODEOWNERS']:
+        mock_content = Mock()
+        mock_content.decoded_content = b"* @authorized-user"
+        
+        def get_contents_side_effect(path):
+            if path == test_path:
+                return mock_content
+            raise GithubException(404, "Not found")
+        
+        mock_repo.get_contents = Mock(side_effect=get_contents_side_effect)
+        ac = AccessControl(mock_repo)
+        
+        assert ac._is_authorized("authorized-user") is True
+
+def test_unauthorized_update_rejection(store, mock_comment):
+    """Test that updates from unauthorized users are rejected"""
+    # Create unauthorized and authorized updates
+    unauthorized_update = mock_comment(
+        user_login="attacker",
+        body={
+            '_data': {'malicious': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    authorized_update = mock_comment(
+        user_login="repo-owner",
+        body={
+            '_data': {'valid': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[unauthorized_update, authorized_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 1
+    assert updates[0].changes == {'valid': 'update'}
+
+def test_unauthorized_issue_creator_denied(store, mock_issue):
+    """Test that updates are blocked for issues created by unauthorized users"""
+    issue = mock_issue(
+        user_login="infiltrator"
+    )
+    store.repo.get_issue.return_value = issue
+    
+    with pytest.raises(AccessDeniedError):
+        store.process_updates(456)
+
+def test_authorized_codeowners_updates(authorized_store, mock_comment):
+    """Test that CODEOWNERS team members can make updates"""
+    store = authorized_store(['repo-owner', 'team-member'])
+    
+    # Create update from team member
+    team_update = mock_comment(
+        user_login="team-member",
+        body={
+            '_data': {'team': 'update'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[team_update])
+    issue.user = Mock(login="repo-owner")  # Authorized creator
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 1
+    assert updates[0].changes == {'team': 'update'}
+
+def test_metadata_tampering_protection(store, mock_comment):
+    """Test protection against metadata tampering in updates"""
+    # Create update with invalid metadata
+    tampered_update = mock_comment(
+        user_login="repo-owner",  # Even authorized users can't use invalid metadata
+        body={
+            '_data': {'update': 'data'},
+            '_meta': {
+                'client_version': CLIENT_VERSION
+                # Missing required fields
+            }
+        }
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[tampered_update])
+    issue.user = Mock(login="repo-owner")
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty due to invalid metadata
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+def test_reaction_based_processing_protection(store, mock_comment):
+    """Test that processed updates cannot be reprocessed"""
+    # Create a processed update with the processed reaction
+    processed_update = mock_comment(
+        user_login="repo-owner",
+        body={
+            '_data': {'already': 'processed'},
+            '_meta': {
+                'client_version': CLIENT_VERSION,
+                'timestamp': '2025-01-01T00:00:00Z',
+                'update_mode': 'append'
+            }
+        },
+        reactions=[Mock(content="+1")]  # Add processed reaction
+    )
+    
+    # Setup mock issue
+    issue = Mock()
+    issue.get_comments = Mock(return_value=[processed_update])
+    issue.user = Mock(login="repo-owner")
+    
+    # Setup repo mock to return list of issues
+    store.repo.get_issues = Mock(return_value=[issue])
+    store.repo.get_issue = Mock(return_value=issue)
+    
+    # Get updates - should be empty since update is already processed
+    updates = store.comment_handler.get_unprocessed_updates(123)
+    assert len(updates) == 0
+
+
+
+---
+File: tests/unit/test_store_basic_ops.py
+---
+# tests/unit/test_store_basic_ops.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.exceptions import ObjectNotFound
+
+
+def test_create_object_with_initial_state(store, mock_label_factory, mock_comment_factory, mock_issue_factory):
+    """Test that creating an object stores the initial state in a comment"""
+    object_id = "test-123"
+    test_data = {"name": "test", "value": 42}
+    issue_number = 456  # Define issue number
+    labels=[
+        mock_label_factory(name=LabelNames.GH_STORE),
+        mock_label_factory(name=LabelNames.STORED_OBJECT),
+    ]
+    
+    # Mock existing labels
+    store.repo.get_labels.return_value = labels
+
+    # .... I think this test might be mocked to the point of being useless.
+    # Create a properly configured mock issue
+    mock_issue = mock_issue_factory(
+        number=issue_number,
+        body=json.dumps(test_data),
+        labels=labels+[f"{LabelNames.UID_PREFIX}{object_id}"],
+    )
+    
+    # Set up the repo mock to return our issue when create_issue is called
+    store.repo.create_issue.return_value = mock_issue
+    
+    # Make the create_comment method return a properly configured comment
+    initial_comment = mock_comment_factory(
+        comment_id=1,
+        body={
+            "type": "initial_state",
+            "_data": test_data,
+            "_meta": {
+                "client_version": "1.2.3",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "update_mode": "append",
+                "issue_number": issue_number
+            }
+        }
+    )
+    mock_issue.create_comment.return_value = initial_comment
+    
+    # Execute the method under test
+    obj = store.create(object_id, test_data)
+    
+    # Verify issue creation
+    store.repo.create_issue.assert_called_once()
+    
+    # Verify create_issue was called with the right arguments
+    create_issue_args = store.repo.create_issue.call_args[1]
+    assert create_issue_args["title"] == f"Stored Object: {object_id}"
+    assert json.loads(create_issue_args["body"]) == test_data
+    assert LabelNames.GH_STORE in create_issue_args["labels"]
+    assert LabelNames.STORED_OBJECT in create_issue_args["labels"]
+    assert f"{LabelNames.UID_PREFIX}{object_id}" in create_issue_args["labels"]
+    
+    # Verify initial state comment was created
+    mock_issue.create_comment.assert_called_once()
+    
+    # Verify object metadata
+    assert obj.meta.object_id == object_id
+    assert obj.meta.issue_number == issue_number
+    assert obj.data == test_data
+
+
+def test_get_object(store):
+    """Test retrieving an object"""
+    test_data = {"name": "test", "value": 42}
+    issue_number = 42  # Define issue number
+    
+    # Mock labels - should include both stored-object and gh-store
+    stored_label = Mock()
+    stored_label.name = "stored-object"
+    gh_store_label = Mock()
+    gh_store_label.name = LabelNames.GH_STORE
+    uid_label = Mock()
+    uid_label.name = "UID:test-obj"
+    
+    store.repo.get_labels.return_value = [stored_label, gh_store_label, uid_label]
+    
+    mock_issue = Mock()
+    mock_issue.number = issue_number  # Set issue number
+    mock_issue.body = json.dumps(test_data)
+    mock_issue.get_comments = Mock(return_value=[])
+    mock_issue.created_at = datetime.now(timezone.utc)
+    mock_issue.updated_at = datetime.now(timezone.utc)
+    mock_issue.labels = [stored_label, gh_store_label, uid_label]
+    store.repo.get_issues.return_value = [mock_issue]
+    
+    obj = store.get("test-obj")
+    assert obj.data == test_data
+    assert obj.meta.issue_number == issue_number  # Verify issue_number in metadata
+    
+    # Verify correct query was made (now checking for all three labels)
+    store.repo.get_issues.assert_called_with(
+        labels=[LabelNames.GH_STORE, "stored-object", "UID:test-obj"],
+        state="closed"
+    )
+
+def test_get_nonexistent_object(store):
+    """Test getting an object that doesn't exist"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.get("nonexistent")
+
+def test_create_object_ensures_labels_exist(store, mock_issue_factory, mock_label_factory):
+    pass
+
+
+
+---
+File: tests/unit/test_store_list_ops.py
+---
+# tests/unit/test_store_list_ops.py
+
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.constants import LabelNames
+
+
+def test_list_updated_since(store, mock_issue_factory):
+    """Test fetching objects updated since timestamp"""
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    object_id = "test-123"
+    
+    # Create mock issue updated after timestamp - include gh-store label
+    issue = mock_issue_factory(
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}{object_id}"],
+        updated_at = timestamp + timedelta(minutes=30),
+        created_at = timestamp - timedelta(minutes=30),
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    # Mock object retrieval
+    # mock_obj = Mock()
+    # mock_obj.meta.updated_at = timestamp + timedelta(minutes=30)
+    # store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test listing
+    updated = list(store.list_updated_since(timestamp))
+    
+    # Verify
+    store.repo.get_issues.assert_called_once()
+    call_kwargs = store.repo.get_issues.call_args[1]
+    assert call_kwargs["since"] == timestamp
+    assert call_kwargs["labels"] == [LabelNames.GH_STORE, LabelNames.STORED_OBJECT]  # Query by stored-object for active objects
+    assert len(updated) == 1
+    assert updated[0].meta.object_id == object_id
+
+def test_list_updated_since_no_updates(store, mock_issue):
+    """Test when no updates since timestamp"""
+    timestamp = datetime.now(ZoneInfo("UTC")) - timedelta(hours=1)
+    
+    # Create mock issue updated before timestamp
+    issue = mock_issue(
+        created_at=timestamp - timedelta(minutes=30),
+        updated_at=timestamp - timedelta(minutes=30),
+        labels=[str(LabelNames.GH_STORE), "stored-object", f"UID:foo"],
+    )
+    store.repo.get_issues.return_value = [issue]
+    
+    # Mock object retrieval
+    mock_obj = Mock()
+    mock_obj.meta.updated_at = timestamp - timedelta(minutes=30)
+    store.issue_handler.get_object_by_number = Mock(return_value=mock_obj)
+    
+    # Test listing
+    updated = list(store.list_updated_since(timestamp))
+    
+    # Verify no updates found
+    assert len(updated) == 0
+# Updates needed for test_store_list_ops.py
+
+def test_list_all_objects(store, mock_issue, mock_label_factory):
+    """Test listing all objects in store"""
+    # Create mock issues with proper labels - include gh-store label
+    issues = [
+        mock_issue(
+            number=1,
+            labels=["gh-store", "stored-object", f"UID:test-1"],
+        ),
+        mock_issue(
+            number=2,
+            labels=["gh-store", "stored-object", f"UID:test-2"],
+        )
+    ]
+    store.repo.get_issues.return_value = issues
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing all
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
+    
+    # Verify
+    assert len(objects) == 2
+    assert "test-1" in objects
+    assert "test-2" in objects
+    
+    # Verify the query was made with stored-object label
+    store.repo.get_issues.assert_called_with(
+        state="closed",
+        labels=["gh-store", "stored-object"]
+    )
+
+def test_list_all_skips_archived(store, mock_issue, mock_label_factory):
+    """Test that archived objects are skipped in listing"""
+    # Create archived and active issues - include gh-store label
+    archived_issue = mock_issue(
+        number=1,
+        labels=[
+            "gh-store",
+            "stored-object",
+            "UID:test-1",
+            "archived",
+        ]
+    )
+    active_issue = mock_issue(
+        number=2,
+        labels=["gh-store", "stored-object", "UID:test-2"]
+    )
+    
+    store.repo.get_issues.return_value = [archived_issue, active_issue]
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
+    
+    # Verify only active object listed
+    # 
+    assert len(objects) == 1
+    assert "test-2" in objects
+    assert "test-1" not in objects
+
+def test_list_all_handles_invalid_labels(store, mock_issue, mock_label_factory):
+    """Test handling of issues with invalid label structure"""
+    # Create issue missing UID label
+    invalid_issue = mock_issue(
+        number=1,
+        labels=["gh-store", "stored-object"]  # Missing UID label
+    )
+    
+    # Create valid issue with explicit labels including UID
+    valid_issue = mock_issue(
+        number=2,
+        labels=["gh-store", "stored-object","UID:test-2"]  # Explicitly set UID label
+    )
+    
+    store.repo.get_issues.return_value = [invalid_issue, valid_issue]
+    
+    # Mock object retrieval
+    def get_object_by_number(number):
+        mock_obj = Mock()
+        mock_obj.meta.object_id = f"test-{number}"
+        mock_obj.meta.label = f"UID:test-{number}"
+        return mock_obj
+    
+    store.issue_handler.get_object_by_number = Mock(
+        side_effect=get_object_by_number
+    )
+    
+    # Test listing
+    objects = [obj.meta.object_id for obj in list(store.list_all())]
+    
+    # Verify only valid object listed
+    assert len(objects) == 1
+    assert "test-2" in objects
+
+
+
+---
+File: tests/unit/test_store_update_ops.py
+---
+# tests/unit/test_store_update_ops.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.exceptions import ConcurrentUpdateError, ObjectNotFound
+from gh_store.core.version import CLIENT_VERSION
+
+def test_process_update(store, mock_issue_factory):
+    """Test processing an update"""
+    test_data = {"name": "test", "value": 42}
+    mock_issue = mock_issue_factory(body=test_data, number=123, labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}:test-obj"])
+    
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No issues being processed
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
+    
+    # Test update
+    update_data = {"value": 43}
+    store.update("test-obj", update_data)
+    
+    # Verify update comment
+    mock_issue.create_comment.assert_called_once()
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    assert comment_data["_data"] == update_data
+    assert "_meta" in comment_data
+    assert all(key in comment_data["_meta"] for key in ["client_version", "timestamp", "update_mode"])
+    
+    # Verify issue reopened
+    mock_issue.edit.assert_called_with(state="open")
+
+def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_factory):
+    """Test that concurrent updates are prevented"""
+    def open_issue_with_n_comments(n):
+        return mock_issue_factory(
+            state="open",
+            comments=[
+                mock_comment_factory(
+                    body={"value": 42},
+                    comment_id=i
+                ) for i in range(n)]
+        )
+
+    def set_store_with_issue_n_comments(n):
+        mock_issue = open_issue_with_n_comments(n)
+        def get_issues_side_effect(**kwargs):
+            if kwargs.get("state") == "open":
+                return [mock_issue]  # Return open issue to simulate processing
+            return []
+        
+        store.repo.get_issues.side_effect = get_issues_side_effect
+
+    set_store_with_issue_n_comments(1)
+    store.update("test-obj", {"value": 43})
+    set_store_with_issue_n_comments(2)
+    store.update("test-obj", {"value": 43})
+    set_store_with_issue_n_comments(3)
+    with pytest.raises(ConcurrentUpdateError):
+        store.update("test-obj", {"value": 43})
+
+def test_update_metadata_structure(store, mock_issue_factory):
+    """Test that updates include properly structured metadata"""
+    # mock_issue = Mock()
+    # mock_issue.body = json.dumps({"initial": "data"})
+    # mock_issue.get_comments = Mock(return_value=[])
+    # mock_issue.number = 123
+    # mock_issue.user = Mock()
+    # mock_issue.user.login = "repo-owner"  # Set authorized user
+    mock_issue = mock_issue_factory(
+        number = 123,
+        body={"initial": "data"}, 
+        labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT, f"{LabelNames.UID_PREFIX}test-obj"]
+    )
+    
+    def get_issues_side_effect(**kwargs):
+        if kwargs.get("state") == "open":
+            return []  # No concurrent processing
+        return [mock_issue]
+    
+    store.repo.get_issues.side_effect = get_issues_side_effect
+    store.repo.get_issue.return_value = mock_issue
+    
+    update_data = {"new": "value"}
+    store.update("test-obj", update_data)
+    
+    # Verify comment structure
+    mock_issue.create_comment.assert_called_once()
+    comment_data = json.loads(mock_issue.create_comment.call_args[0][0])
+    
+    assert "_data" in comment_data
+    assert "_meta" in comment_data
+    assert comment_data["_meta"]["client_version"] == CLIENT_VERSION
+    assert comment_data["_meta"]["update_mode"] == "append"
+    assert "timestamp" in comment_data["_meta"]
+
+
+def test_update_nonexistent_object(store):
+    """Test updating an object that doesn't exist"""
+    store.repo.get_issues.return_value = []
+    
+    with pytest.raises(ObjectNotFound):
+        store.update("nonexistent", {"value": 43})
+
+
+
+---
+File: tests/unit/test_types.py
+---
+# tests/unit/test_types.py
+
+import json
+from datetime import datetime, timezone
+import pytest
+from unittest.mock import Mock
+
+from gh_store.core.constants import LabelNames
+from gh_store.core.types import StoredObject, get_object_id_from_labels
+
+class TestStoredObject:
+    """Tests for StoredObject class."""
+    
+    def test_from_issue(self, mock_issue_factory, mock_label_factory):
+        """Test correctly creating a StoredObject from an issue."""
+        # Create test data
+        object_id = "test-123"
+        issue_number = 42
+        created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        updated_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        data = {"name": "test", "value": 42}
+        
+        # Create a properly labeled mock issue
+        issue = mock_issue_factory(
+            number=issue_number,
+            body=json.dumps(data),
+            labels=[
+                "gh-store",
+                "stored-object",
+                f"{LabelNames.UID_PREFIX}{object_id}"
+            ],
+            created_at=created_at,
+            updated_at=updated_at
+        )
+        
+        # Create StoredObject from the issue
+        obj = StoredObject.from_issue(issue)
+        
+        # Verify metadata
+        assert obj.meta.object_id == object_id
+        assert obj.meta.label == object_id
+        assert obj.meta.issue_number == issue_number
+        assert obj.meta.created_at == created_at
+        assert obj.meta.updated_at == updated_at
+        assert obj.meta.version == 1
+        
+        # Verify data
+        assert obj.data == data
+        
+    def test_from_issue_with_explicit_version(self, mock_issue_factory):
+        """Test creating a StoredObject with explicit version number."""
+        # Create test data
+        object_id = "test-123"
+        data = {"name": "test", "value": 42}
+        version = 5
+        
+        # Create a properly labeled mock issue
+        issue = mock_issue_factory(
+            body=json.dumps(data),
+            labels=[
+                "gh-store",
+                "stored-object",
+                f"{LabelNames.UID_PREFIX}{object_id}"
+            ]
+        )
+        
+        # Create StoredObject with explicit version
+        obj = StoredObject.from_issue(issue, version=version)
+        
+        # Verify version
+        assert obj.meta.version == version
+    
+    def test_from_issue_missing_uid_label(self, mock_issue_factory):
+        """Test that creating a StoredObject fails when UID label is missing."""
+        # Create an issue missing the UID label
+        issue = mock_issue_factory(
+            body=json.dumps({"name": "test"}),
+            labels=["gh-store", "stored-object"]  # No UID label
+        )
+        
+        # Should raise ValueError when UID label is missing
+        with pytest.raises(ValueError, match="No UID label found"):
+            StoredObject.from_issue(issue)
+    
+    def test_from_issue_invalid_body(self, mock_issue_factory):
+        """Test that creating a StoredObject fails with invalid JSON body."""
+        # Create an issue with invalid JSON in body
+        issue = mock_issue_factory(
+            body="not valid json",
+            labels=[
+                "gh-store",
+                "stored-object",
+                f"{LabelNames.UID_PREFIX}test-123"
+            ]
+        )
+        
+        # Should raise JSON decode error
+        with pytest.raises(json.JSONDecodeError):
+            StoredObject.from_issue(issue)
+
+class TestObjectIDFromLabels:
+    """Tests for get_object_id_from_labels function."""
+    
+    def test_get_object_id_from_labels(self, mock_label_factory):
+        """Test extracting object ID from issue labels."""
+        # Create an issue with mock labels
+        object_id = "test-123"
+        issue = Mock()
+        issue.labels = [
+            mock_label_factory(name="stored-object"),
+            mock_label_factory(name=f"{LabelNames.UID_PREFIX}{object_id}"),
+            mock_label_factory(name="other-label")
+        ]
+        
+        # Extract object ID
+        extracted_id = get_object_id_from_labels(issue)
+        
+        # Verify extracted ID
+        assert extracted_id == object_id
+    
+    def test_get_object_id_from_labels_no_match(self, mock_label_factory):
+        """Test that ValueError is raised when no UID label exists."""
+        # Create an issue with no UID label
+        issue = Mock()
+        issue.labels = [
+            mock_label_factory(name="stored-object"),
+            mock_label_factory(name="other-label")
+        ]
+        
+        # Should raise ValueError
+        with pytest.raises(ValueError):
+            get_object_id_from_labels(issue)
+
+
