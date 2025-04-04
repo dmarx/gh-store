@@ -7,3 +7,4 @@ from tests.unit.fixtures.github import *
 from tests.unit.fixtures.cli import *
 from tests.unit.fixtures.store import *
 from tests.unit.fixtures.canonical import * 
+from tests.unit.fixtures.comment_handler import * 
