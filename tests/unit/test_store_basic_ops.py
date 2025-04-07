@@ -102,7 +102,7 @@ def test_get_object(store):
     
     # Verify correct query was made (now checking for all three labels)
     store.repo.get_issues.assert_called_with(
-        labels=[LabelNames.GH_STORE, "stored-object", "UID:test-obj"],
+        labels=[LabelNames.GH_STORE.value, "stored-object", "UID:test-obj"],
         state="closed"
     )
 
