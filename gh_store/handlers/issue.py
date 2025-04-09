@@ -23,7 +23,6 @@ class IssueHandler:
     def __init__(self, repo: Repository.Repository, config: DictConfig):
         self.repo = repo
         self.config = config
-        self.base_label = LabelNames.STORED_OBJECT # could this be an OR?
             
     def create_object(self, object_id: str, data: Json) -> StoredObject:
         """Create a new issue to store an object"""
@@ -34,7 +33,7 @@ class IssueHandler:
         
         # Get labels to apply - includes LabelNames.GH_STORE for system boundary
         # Note: The str() conversion is handled automatically due to our __str__ method
-        labels_to_apply = [LabelNames.GH_STORE, self.base_label, uid_label]
+        labels_to_apply = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, uid_label]
         
         # Ensure required labels exist
         self._ensure_labels_exist(labels_to_apply)
@@ -112,7 +111,7 @@ class IssueHandler:
         # Query for issue with matching labels - must have stored-object (active)
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, uid_label],
             #state="closed"
         ))
         
@@ -136,7 +135,7 @@ class IssueHandler:
         # Query for issue with matching labels
         issues = list(self._with_retry(
             self.repo.get_issues,
-            labels=[LabelNames.GH_STORE, self.base_label, uid_label],
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, uid_label],
             state="all"
         ))
         
@@ -211,7 +210,7 @@ class IssueHandler:
         
         # Get the object's issue
         issues = list(self.repo.get_issues(
-            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, f"{LabelNames.UID_PREFIX}{object_id}"],
             state="closed"
         ))
         
@@ -246,7 +245,7 @@ class IssueHandler:
         logger.info(f"Deleting object: {object_id}")
         
         issues = list(self.repo.get_issues(
-            labels=[LabelNames.GH_STORE, self.base_label, f"{LabelNames.UID_PREFIX}{object_id}"],
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, f"{LabelNames.UID_PREFIX}{object_id}"],
             state="all"
         ))
         
@@ -256,11 +255,11 @@ class IssueHandler:
         issue = issues[0]
         issue.edit(
             state="closed",
-            labels=[LabelNames.DELETED, LabelNames.GH_STORE, f"{LabelNames.UID_PREFIX}{object_id}"]
+            labels=[LabelNames.DELETED.value, LabelNames.GH_STORE.value, f"{LabelNames.UID_PREFIX}{object_id}"]
         )
         
         # Remove stored-object label to mark as inactive
-        issue.remove_from_labels(self.base_label)
+        issue.remove_from_labels(LabelNames.STORED_OBJECT.value)
 
     def _get_version(self, issue) -> int:
         """Extract version number from issue"""
