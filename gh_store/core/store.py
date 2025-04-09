@@ -51,9 +51,9 @@ class GitHubStore:
         
         logger.info(f"Initialized GitHub store for repository: {repo}")
 
-    def create(self, object_id: str, data: Json) -> StoredObject:
+    def create(self, object_id: str, data: Json, extra_labels: str|None = None) -> StoredObject:
         """Create a new object in the store"""
-        return self.issue_handler.create_object(object_id, data)
+        return self.issue_handler.create_object(object_id=object_id, data=data, extra_labels=extra_labels)
 
     def get(self, object_id: str) -> StoredObject:
         """Retrieve an object from the store"""
