@@ -56,7 +56,7 @@ def test_concurrent_update_prevention(store, mock_issue_factory, mock_comment_fa
 
     # check if I've gone crazy
     for comment in mock_issue.get_comments():
-        assert comment == comment1
+        assert comment == comment_1
     
     
     # Configure both get_issues and get_issue to use our mock issue
