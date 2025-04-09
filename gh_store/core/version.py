@@ -20,5 +20,5 @@ def get_version() -> str:
         
         return "0.5.1"  # Fallback version
 
-__version__ = "0.10.4.dev0" #get_version()
+__version__ = get_version()
 CLIENT_VERSION = __version__
