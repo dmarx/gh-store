@@ -24,7 +24,7 @@ class IssueHandler:
         self.repo = repo
         self.config = config
             
-    def create_object(self, object_id: str, data: Json) -> StoredObject:
+    def create_object(self, object_id: str, data: Json, extra_labels: list|None = None) -> StoredObject:
         """Create a new issue to store an object"""
         logger.info(f"Creating new object: {object_id}")
         
@@ -34,6 +34,8 @@ class IssueHandler:
         # Get labels to apply - includes LabelNames.GH_STORE for system boundary
         # Note: The str() conversion is handled automatically due to our __str__ method
         labels_to_apply = [LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, uid_label]
+        if extra_labels:
+            labels_to_apply.extend(extra_labels)
         
         # Ensure required labels exist
         self._ensure_labels_exist(labels_to_apply)

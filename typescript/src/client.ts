@@ -182,12 +182,15 @@ export class GitHubStoreClient {
     return { meta, data };
   }
 
-  async createObject(objectId: string, data: Json): Promise<StoredObject> {
+  async createObject(objectId: string, data: Json, extraLabels: string[] = []): Promise<StoredObject> {
     if (!this.token) {
       throw new Error('Authentication required for creating objects');
     }
 
     const uidLabel = `${this.config.uidPrefix}${objectId}`;
+    
+    // Combine required labels with any custom labels
+    const labels = [LabelNames.GH_STORE, this.config.baseLabel, uidLabel, ...extraLabels];
     
     const issue = await this.fetchFromGitHub<{
       number: number;
@@ -199,7 +202,7 @@ export class GitHubStoreClient {
       body: JSON.stringify({
         title: `Stored Object: ${objectId}`,
         body: JSON.stringify(data, null, 2),
-        labels: [LabelNames.GH_STORE, this.config.baseLabel, uidLabel]
+        labels: labels
       })
     });
 
