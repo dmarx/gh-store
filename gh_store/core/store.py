@@ -64,7 +64,7 @@ class GitHubStore:
         # Check if object is already being processed
         open_issue = None
         for open_issue in self.repo.get_issues(
-            labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, f"{LabelNames.UID_PREFIX.value}{object_id}"],
             state="open"): # TODO: use canonicalization machinery?
             break
         
@@ -115,7 +115,7 @@ class GitHubStore:
         # Get all closed issues with base label (active objects)
         issues_generator = self.repo.get_issues(
             state="closed",
-            labels=[LabelNames.GH_STORE, self.config.store.base_label]
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT]
         )
         
         for idx, issue in enumerate(issues_generator):
@@ -147,7 +147,7 @@ class GitHubStore:
         # https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
         issues_generator = self.repo.get_issues(
             state="closed",
-            labels=[LabelNames.GH_STORE, self.config.store.base_label],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT],
             since=timestamp 
         )
     
