@@ -22,11 +22,18 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "gh-store" / "config.yml"
 class GitHubStore:
     """Interface for storing and retrieving objects using GitHub Issues"""
     
-    def __init__(self, repo: str, token: str|None = None,  config_path: Path | None = None):
+    def __init__(
+        self, 
+        repo: str, 
+        token: str|None = None,
+        config_path: Path | None = None,
+        max_concurrent_updates: int = 2, # upper limit number of comments to be processed on an issue before we stop adding updates
+    ):
         """Initialize the store with GitHub credentials and optional config"""
         self.gh = Github(token)
         self.repo = self.gh.get_repo(repo)
         self.access_control = AccessControl(self.repo)
+        self.max_concurrent_updates = max_concurrent_updates
         
         config_path = config_path or DEFAULT_CONFIG_PATH
         if not config_path.exists():
@@ -55,13 +62,20 @@ class GitHubStore:
     def update(self, object_id: str, changes: Json) -> StoredObject:
         """Update an existing object"""
         # Check if object is already being processed
-        issues = list(self.repo.get_issues(
-            labels=[LabelNames.GH_STORE, self.config.store.base_label, f"UID:{object_id}"],
-            state="open"
-        ))
+        open_issue = None
+        for open_issue in self.repo.get_issues(
+            labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, f"{LabelNames.UID_PREFIX.value}{object_id}"],
+            state="open"): # TODO: use canonicalization machinery?
+            break
         
-        if issues:
-            raise ConcurrentUpdateError(f"Object {object_id} is currently being processed")
+        if open_issue: # count open comments, check against self.max_concurrent_updates
+            #issue_number = open_issue.meta.issue_number # lol... meta is for StoredObjects, not issues.
+            issue_number = open_issue.number
+            n_concurrent_updates = len(self.comment_handler.get_unprocessed_updates(issue_number))
+            if n_concurrent_updates > self.max_concurrent_updates:
+                raise ConcurrentUpdateError(
+                    f"Object {object_id} already has {n_concurrent_updates} updates queued to be processed"
+                )
         
         return self.issue_handler.update_object(object_id, changes)
 
@@ -101,7 +115,7 @@ class GitHubStore:
         # Get all closed issues with base label (active objects)
         issues_generator = self.repo.get_issues(
             state="closed",
-            labels=[LabelNames.GH_STORE, self.config.store.base_label]
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT]
         )
         
         for idx, issue in enumerate(issues_generator):
@@ -133,7 +147,7 @@ class GitHubStore:
         # https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues
         issues_generator = self.repo.get_issues(
             state="closed",
-            labels=[LabelNames.GH_STORE, self.config.store.base_label],
+            labels=[LabelNames.GH_STORE, LabelNames.STORED_OBJECT],
             since=timestamp 
         )
     
