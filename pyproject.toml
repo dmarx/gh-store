@@ -1,6 +1,6 @@
 [project]
 name = "gh-store"
-version = "0.11.0"
+version = "0.11.1"
 description = "A lightweight data store using GitHub Issues as a backend"
 authors = [
     {name = "David Marx", email = "david.marx84@gmail.com"},
