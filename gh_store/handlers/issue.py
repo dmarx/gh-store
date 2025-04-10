@@ -213,7 +213,7 @@ class IssueHandler:
         # Get the object's issue
         issues = list(self.repo.get_issues(
             labels=[LabelNames.GH_STORE.value, LabelNames.STORED_OBJECT.value, f"{LabelNames.UID_PREFIX}{object_id}"],
-            state="closed"
+            #state="closed"
         ))
         
         if not issues:
