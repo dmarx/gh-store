@@ -63,7 +63,7 @@ export class GitHubStoreClient {
    * @param options - Request options including optional params
    * @returns The JSON response from the API
    */
-  protected async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
+  public async fetchFromGitHub<T>(path: string, options: RequestInit & { params?: Record<string, string> } = {}): Promise<T> {
     const url = new URL(`https://api.github.com/repos/${this.repo}${path}`);
     
     if (options.params) {
