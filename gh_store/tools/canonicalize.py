@@ -32,7 +32,7 @@ class CanonicalStore(GitHubStore):
     
     def __init__(self, token: str, repo: str, config_path: Path | None = None):
         """Initialize with GitHub credentials."""
-        super().__init__(token, repo, config_path)
+        super().__init__(token=token, repo=repo, config_path=config_path)
         self._ensure_special_labels()
     
     def _ensure_special_labels(self) -> None:
